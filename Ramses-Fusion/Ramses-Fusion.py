@@ -248,34 +248,80 @@ def SettingsWindow(ev):
         {
             "WindowTitle": "Ramses Settings",
             "ID": "SettingsWin",
-            "Geometry": [200, 200, 550, 200],
+            "Geometry": [200, 200, 550, 100],
         },
         [
             ui.VGroup(
                 {
-                    "Spacing": 0,
+                    "Spacing": 5,
                 },
-                ui.HGroup(
-                    {
-                        "Spacing": 0,
-                    },
-                    [
-                        ui.Label({"Text": "Ramses executable path:"}),
-                        ui.LineEdit(
-                            {
-                                "ID": "RamsesPathTxt",
-                                "Weight": 2,
-                                "Text": SETTINGS.ramsesClientPath,
-                                "PlaceholderText": "Path to Ramses.exe",
-                            }
-                        ),
-                    ],
-                ),
+                [
+                    ui.HGroup(
+                        {
+                            "Spacing": 5,
+                        },
+                        [
+                            ui.Label({"Text": "Ramses executable path:"}),
+                            ui.LineEdit(
+                                {
+                                    "ID": "RamsesPathTxt",
+                                    "Weight": 2,
+                                    "Text": SETTINGS.ramsesClientPath,
+                                    "PlaceholderText": "Path to Ramses.exe",
+                                }
+                            ),
+                        ],
+                    ),
+                    ui.HGroup(
+                        {
+                            "Spacing": 0,
+                        },
+                        [
+                            ui.Label({"Text": "Ramses client port:"}),
+                            ui.LineEdit(
+                                {
+                                    "ID": "RamsesPortTxt",
+                                    "Weight": 2,
+                                    "Text": str(SETTINGS.ramsesClientPort),
+                                    "PlaceholderText": "Port number",
+                                }
+                            ),
+                        ],
+                    ),
+                    ui.HGroup(
+                        {
+                            "Spacing": 5,
+                        },
+                        [
+                            ui.Button(
+                                {
+                                    "ID": "btnSaveSettings",
+                                    "Text": "Save",
+                                }
+                            ),
+                            ui.Button(
+                                {
+                                    "ID": "btnCloseSettings",
+                                    "Text": "Close",
+                                }
+                            ),
+                        ],
+                    ),
+                ],
             )
         ],
     )
 
+    itm = dlg.GetItems()
+
+    def SaveSettings(ev):
+        SETTINGS.ramsesClientPort = int(itm["RamsesPortTxt"].Text)
+        SETTINGS.ramsesClientPath = str(itm["RamsesPathTxt"].Text)
+        SETTINGS.save()
+
     dlg.On.SettingsWin.Close = _func
+    dlg.On.btnCloseSettings.Clicked = _func
+    dlg.On.btnSaveSettings.Clicked = SaveSettings
 
     dlg.Show()
     disp.RunLoop()
@@ -343,6 +389,7 @@ def _func(ev):
 
 
 print(SETTINGS.ramsesClientPort)
+print(SETTINGS.ramsesClientPath)
 for project in RAMSES.projects():
     print(project.framerate())
 
