@@ -296,13 +296,13 @@ def SettingsWindow(ev):
                         [
                             ui.Button(
                                 {
-                                    "ID": "btnSaveSettings",
+                                    "ID": "SaveSettingsButton",
                                     "Text": "Save",
                                 }
                             ),
                             ui.Button(
                                 {
-                                    "ID": "btnCloseSettings",
+                                    "ID": "CloseSettingsButton",
                                     "Text": "Close",
                                 }
                             ),
@@ -321,8 +321,8 @@ def SettingsWindow(ev):
         SETTINGS.save()
 
     dlg.On.SettingsWin.Close = _func
-    dlg.On.btnCloseSettings.Clicked = _func
-    dlg.On.btnSaveSettings.Clicked = SaveSettings
+    dlg.On.CloseSettingsButton.Clicked = _func
+    dlg.On.SaveSettingsButton.Clicked = SaveSettings
 
     dlg.Show()
     disp.RunLoop()
