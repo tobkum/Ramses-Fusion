@@ -1,5 +1,8 @@
 import ramses as ram
 
+RAMSES = ram.Ramses.instance()
+SETTINGS = ram.RamSettings.instance()
+
 ui = fu.UIManager
 disp = bmd.UIDispatcher(ui)
 
@@ -9,7 +12,7 @@ def MainWindow():
         {
             "WindowTitle": "Ramses-Fusion",
             "ID": "MainWin",
-            "Geometry": [200, 200, 250, 350],
+            "Geometry": [200, 200, 250, 450],
         },
         [
             ui.VGroup(
@@ -52,7 +55,9 @@ def MainWindow():
                             "MinimumSize": [16, 16],
                             "Margin": 1,
                             "Icon": ui.Icon(
-                                {"File": "Scripts:/Comp/Ramses-Fusion/icons/comment.png"}
+                                {
+                                    "File": "Scripts:/Comp/Ramses-Fusion/icons/comment.png"
+                                }
                             ),
                         }
                     ),
@@ -95,7 +100,9 @@ def MainWindow():
                             "MinimumSize": [16, 16],
                             "Margin": 1,
                             "Icon": ui.Icon(
-                                {"File": "Scripts:/Comp/Ramses-Fusion/icons/preview.png"}
+                                {
+                                    "File": "Scripts:/Comp/Ramses-Fusion/icons/preview.png"
+                                }
                             ),
                         }
                     ),
@@ -187,7 +194,6 @@ def MainWindow():
                             ),
                         }
                     ),
-
                     ui.Button(
                         {
                             "ID": "AboutButton",
@@ -201,6 +207,12 @@ def MainWindow():
                                     "File": "Scripts:/Comp/Ramses-Fusion/icons/Settings.png"
                                 }
                             ),
+                        }
+                    ),
+                    ui.Label(
+                        {
+                            "ID": "RamsesVersion",
+                            "Text": "Ramses API version: " + SETTINGS.version,
                         }
                     ),
                 ],
@@ -221,10 +233,49 @@ def MainWindow():
     dlg.On.OpenButton.Clicked = _func
     dlg.On.RetrieveButton.Clicked = _func
     dlg.On.PubSettingsButton.Clicked = _func
-    dlg.On.SettingsButton.Clicked = _func
+    dlg.On.SettingsButton.Clicked = SettingsWindow
     dlg.On.AboutButton.Clicked = AboutWindow
 
     dlg.On.MainWin.Close = _func
+
+    dlg.Show()
+    disp.RunLoop()
+    dlg.Hide()
+
+
+def SettingsWindow(ev):
+    dlg = disp.AddWindow(
+        {
+            "WindowTitle": "Ramses Settings",
+            "ID": "SettingsWin",
+            "Geometry": [200, 200, 550, 200],
+        },
+        [
+            ui.VGroup(
+                {
+                    "Spacing": 0,
+                },
+                ui.HGroup(
+                    {
+                        "Spacing": 0,
+                    },
+                    [
+                        ui.Label({"Text": "Ramses executable path:"}),
+                        ui.LineEdit(
+                            {
+                                "ID": "RamsesPathTxt",
+                                "Weight": 2,
+                                "Text": SETTINGS.ramsesClientPath,
+                                "PlaceholderText": "Path to Ramses.exe",
+                            }
+                        ),
+                    ],
+                ),
+            )
+        ],
+    )
+
+    dlg.On.SettingsWin.Close = _func
 
     dlg.Show()
     disp.RunLoop()
@@ -247,31 +298,34 @@ def AboutWindow(ev):
                     ui.Label(
                         {
                             "ID": "Info",
-                            "Text": 'Ramses-Fusion was coded by Tobias Kummer for Overmind Studios. <p>Copyright &copy; 2024 Overmind Studios - Kummer & Gerhardt GbR.</p>',
-                            "Alignment": [{
-                                "AlignHCenter": True,
-                                "AlignTop": True,
-                            }],
+                            "Text": "Ramses-Fusion was coded by Tobias Kummer for Overmind Studios. <p>Copyright &copy; 2024 Overmind Studios - Kummer & Gerhardt GbR.</p>",
+                            "Alignment": [
+                                {
+                                    "AlignHCenter": True,
+                                    "AlignTop": True,
+                                }
+                            ],
                             "WordWrap": True,
                             "OpenExternalLinks": True,
                         }
                     ),
-
                     ui.Label(
                         {
                             "ID": "URL",
                             "Text": 'Web: <a href="https://www.overmind-studios.de">Overmind Studios</a>',
-                            "Alignment": [{
-                                "AlignHCenter": True,
-                                "AlignTop": True,
-                            }],
+                            "Alignment": [
+                                {
+                                    "AlignHCenter": True,
+                                    "AlignTop": True,
+                                }
+                            ],
                             "WordWrap": True,
                             "OpenExternalLinks": True,
                         }
                     ),
-                ]
+                ],
             )
-        ]
+        ],
     )
     itm = dlg.GetItems()
 
@@ -288,4 +342,12 @@ def _func(ev):
     disp.ExitLoop()
 
 
+print(SETTINGS.ramsesClientPort)
+for project in RAMSES.projects():
+    print(project.framerate())
+
+print(
+    "Comp dependency: "
+    + str(ram.RamProject.fromPath(comp.GetAttrs()["COMPS_FileName"]))
+)
 MainWindow()
