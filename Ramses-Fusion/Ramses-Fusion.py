@@ -1,4 +1,5 @@
 import ramses as ram
+from os import system
 
 RAMSES = ram.Ramses.instance()
 SETTINGS = ram.RamSettings.instance()
@@ -222,7 +223,7 @@ def MainWindow():
 
     itm = dlg.GetItems()
 
-    dlg.On.RamsesButton.Clicked = _func
+    dlg.On.RamsesButton.Clicked = RunRamses
     dlg.On.SaveButton.Clicked = _func
     dlg.On.CommentButton.Clicked = _func
     dlg.On.IncrementalSaveButton.Clicked = _func
@@ -383,6 +384,9 @@ def AboutWindow(ev):
     disp.RunLoop()
     dlg.Hide()
 
+
+def RunRamses(ev):
+    system('"' + SETTINGS.ramsesClientPath + '"')
 
 def _func(ev):
     disp.ExitLoop()
