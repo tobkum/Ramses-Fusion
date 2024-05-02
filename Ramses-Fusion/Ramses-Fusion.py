@@ -333,7 +333,7 @@ def AboutWindow(ev):
         {
             "WindowTitle": "About Ramses-Fusion",
             "ID": "AboutWin",
-            "Geometry": [200, 200, 450, 200],
+            "Geometry": [200, 200, 450, 150],
         },
         [
             ui.VGroup(
@@ -369,13 +369,20 @@ def AboutWindow(ev):
                             "OpenExternalLinks": True,
                         }
                     ),
+                    ui.VGap(),
+                    ui.Button(
+                        {
+                            "ID": "AboutCloseButton",
+                            "Text": "Close"
+                        }
+                    )
                 ],
             )
         ],
     )
     itm = dlg.GetItems()
 
-    dlg.On.AboutButton2.Clicked = _func
+    dlg.On.AboutCloseButton.Clicked = _func
 
     dlg.On.AboutWin.Close = _func
 
