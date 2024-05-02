@@ -1,5 +1,4 @@
 import ramses as ram
-from os import system
 
 RAMSES = ram.Ramses.instance()
 SETTINGS = ram.RamSettings.instance()
@@ -386,14 +385,13 @@ def AboutWindow(ev):
 
 
 def RunRamses(ev):
-    system('"' + SETTINGS.ramsesClientPath + '"')
+    RAMSES.showClient()
+
 
 def _func(ev):
     disp.ExitLoop()
 
 
-print(SETTINGS.ramsesClientPort)
-print(SETTINGS.ramsesClientPath)
 for project in RAMSES.projects():
     print(project.framerate())
 
