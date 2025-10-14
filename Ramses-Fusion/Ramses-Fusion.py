@@ -1,3 +1,18 @@
+import sys
+import os
+
+# Add the 'lib' directory to Python's search path to find the ramses package.
+# This makes the script self-contained and avoids cluttering Fusion's script menu.
+try:
+    script_dir = os.path.dirname(os.path.realpath(__file__))
+except NameError:
+    # Fallback for environments where __file__ is not defined, like in some Fusion contexts
+    script_dir = os.path.dirname(os.path.realpath(fu.MapPath('Scripts:/Comp/Ramses-Fusion/Ramses-Fusion.py')))
+
+lib_path = os.path.join(script_dir, 'lib')
+if lib_path not in sys.path:
+    sys.path.append(lib_path)
+
 import ramses as ram
 
 RAMSES = ram.Ramses.instance()
@@ -344,7 +359,7 @@ def AboutWindow(ev):
                     ui.Label(
                         {
                             "ID": "Info",
-                            "Text": "Ramses-Fusion was coded by Tobias Kummer for Overmind Studios. <p>Copyright &copy; 2024 Overmind Studios - Kummer & Gerhardt GbR.</p>",
+                            "Text": "Ramses-Fusion was coded by Tobias Kummer for Overmind Studios. <p>Copyright &copy; 2025 Overmind Studios - Kummer, Gerhardt & Kraus GbR.</p>",
                             "Alignment": [
                                 {
                                     "AlignHCenter": True,
@@ -406,4 +421,5 @@ print(
     "Comp dependency: "
     + str(ram.RamProject.fromPath(comp.GetAttrs()["COMPS_FileName"]))
 )
+
 MainWindow()

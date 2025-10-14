@@ -5,7 +5,7 @@
             "type": "node",
             "request": "launch",
             "cwd": "${workspaceRoot}",
-            "runtimeExecutable": "C:\\Program Files\\Blackmagic Design\\Fusion 18\\fuscript.exe",
+            "runtimeExecutable": "C:\\Program Files\\Blackmagic Design\\Fusion 19\\fuscript.exe",
             "runtimeArgs": [
                 "-l",
                 "Python3",
