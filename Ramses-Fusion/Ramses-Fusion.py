@@ -89,16 +89,18 @@ class RamsesFusionApp:
                             self.ui.Label({"Text": "PUBLISH / STATUS", "Weight": 0, "Font": self.ui.Font({"PixelSize": 11, "Bold": True})}),
                             self.create_button("UpdateStatusButton", "Update Status/Publish", "updateStatus.png"),
                             self.create_button("PreviewButton", "Create Preview", "preview.png"),
+                            self.ui.VGap(8),
+
+                            # Section: Settings
+                            self.ui.Label({"Text": "SETTINGS & INFO", "Weight": 0, "Font": self.ui.Font({"PixelSize": 11, "Bold": True})}),
+                            self.create_button("PubSettingsButton", "Publish Settings", "publishSettings.png"),
+                            self.create_button("SettingsButton", "Plugin Settings", "Settings.png"),
+                            self.create_button("AboutButton", "About", "Settings.png"),
                             
                             # Spacer to push everything up
                             self.ui.VGap(0, 1),
 
                             # Footer
-                            self.ui.HGroup({"Weight": 0}, [
-                                self.create_button("PubSettingsButton", "", "publishSettings.png", weight=1),
-                                self.create_button("SettingsButton", "", "Settings.png", weight=1),
-                                self.create_button("AboutButton", "", "Settings.png", weight=1),
-                            ]),
                             self.ui.Label(
                                 {
                                     "ID": "RamsesVersion",
