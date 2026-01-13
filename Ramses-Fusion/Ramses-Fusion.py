@@ -118,6 +118,44 @@ class RamsesFusionApp:
     def _get_footer_text(self):
         return f"<font color='#555'>User: {self._get_user_name()} | Ramses API {self.settings.version}</font>"
 
+    def _validate_publish(self):
+        """Validates comp settings against Ramses database before publishing."""
+        item = self.current_item
+        project = self._get_project()
+        if not item or not project:
+            return True, ""
+
+        errors = []
+        
+        # 1. Check Frame Range
+        if item.itemType() == ram.ItemType.SHOT:
+            db_duration = float(item.duration())
+            db_fps = float(project.framerate())
+            # For sequences, we should check sequence overrides if we wanted to be 100% thorough, 
+            # but usually master duration is at item level.
+            expected_frames = int(round(db_duration * db_fps))
+            
+            comp = self.ramses.host.comp
+            comp_start = comp.GetAttrs("COMPN_GlobalStart")
+            comp_end = comp.GetAttrs("COMPN_GlobalEnd")
+            actual_frames = int(comp_end - comp_start + 1)
+            
+            if actual_frames != expected_frames:
+                errors.append(f"• Frame Range Mismatch: DB expects {expected_frames} frames, Comp has {actual_frames}.")
+
+        # 2. Check Resolution (Project Master)
+        db_w = int(project.width())
+        db_h = int(project.height())
+        comp_w = int(self.ramses.host.comp.GetAttrs("COMPN_Width"))
+        comp_h = int(self.ramses.host.comp.GetAttrs("COMPN_Height"))
+        
+        if db_w != comp_w or db_h != comp_h:
+            errors.append(f"• Resolution Mismatch: DB expects {db_w}x{db_h}, Comp is {comp_w}x{comp_h}.")
+
+        if errors:
+            return False, "\n".join(errors)
+        return True, ""
+
     def _resolve_shot_path(self, shot, step):
         """Standardizes how we predict a shot's composition path."""
         project = self._get_project()
@@ -785,6 +823,20 @@ class RamsesFusionApp:
 
     def on_update_status(self, ev):
         if not self._check_connection(): return
+        
+        # Pre-publish Validation
+        is_valid, msg = self._validate_publish()
+        if not is_valid:
+            res = self.ramses.host._request_input("Validation Warning", [
+                {'id': 'W', 'label': 'Technical Mismatches found:', 'type': 'text', 'default': msg, 'lines': 4},
+                {'id': 'Mode', 'label': 'Action:', 'type': 'combo', 'options': {
+                    '0': 'Continue anyway (Force)',
+                    '1': 'Abort and fix settings'
+                }}
+            ])
+            if not res or res['Mode'] == 1:
+                return
+
         if self.ramses.host.updateStatus():
             self.refresh_header()
 

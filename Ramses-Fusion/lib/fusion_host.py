@@ -31,7 +31,8 @@ class FusionHost(RamHost):
 
     def currentFilePath(self) -> str:
         if not self.comp: return ""
-        return self.comp.GetAttrs().get('COMPS_FileName', '')
+        path = self.comp.GetAttrs().get('COMPS_FileName', '')
+        return path.replace("\\", "/") if path else ""
 
     def _isDirty(self) -> bool:
         if not self.comp: return False
@@ -43,6 +44,8 @@ class FusionHost(RamHost):
 
     def _saveAs(self, filePath:str, item:RamItem, step:RamStep, version:int, comment:str, incremented:bool) -> bool:
         if not self.comp: return False
+        # Normalize path for Fusion
+        filePath = filePath.replace("\\", "/")
         try:
             self.comp.Save(filePath)
             return True
@@ -52,13 +55,14 @@ class FusionHost(RamHost):
 
     def _open(self, filePath:str, item:RamItem, step:RamStep) -> bool:
         if os.path.exists(filePath):
-            self.fusion.LoadComp(filePath)
+            # Normalize path for Fusion
+            self.fusion.LoadComp(filePath.replace("\\", "/"))
             return True
         return False
     
     def _setFileName(self, fileName:str ) -> bool:
         if not self.comp: return False
-        return self.comp.SetAttrs({'COMPS_FileName': fileName})
+        return self.comp.SetAttrs({'COMPS_FileName': fileName.replace("\\", "/")})
 
     # -------------------------------------------------------------------------
     # UI Implementation helpers using UIManager
@@ -239,6 +243,7 @@ class FusionHost(RamHost):
     def _publish(self, publishInfo:RamFileInfo, publishOptions:dict) -> list:
         if not self.comp: return []
         
+        # Re-fetch path at the exact moment of publish to ensure we have the latest version
         src = self.currentFilePath()
         if not src:
             self.log("Cannot publish: current composition has no saved path.", LogLevel.Critical)
@@ -248,7 +253,7 @@ class FusionHost(RamHost):
         ext = os.path.splitext(src)[1].lstrip('.')
         
         # Use the official API to get the correct publish path
-        dst = self.publishFilePath(ext, "", publishInfo)
+        dst = self.publishFilePath(ext, "", publishInfo).replace("\\", "/")
         
         # Log at INFO level to ensure it appears in console
         self.log(f"Publishing SRC: {src}", LogLevel.Info)
