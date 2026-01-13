@@ -36,14 +36,27 @@ class RamsesFusionApp:
         self._last_path = ""  # Track path for auto-refresh
         self._project_cache = None
         self._user_name_cache = None
+        
+        # Context Caching
+        self._item_cache = None
+        self._step_cache = None
+        self._ctx_path = ""
 
     @property
     def current_item(self):
-        return self.ramses.host.currentItem()
+        path = self.ramses.host.currentFilePath()
+        if path != self._ctx_path or not self._item_cache:
+            self._ctx_path = path
+            self._item_cache = self.ramses.host.currentItem()
+        return self._item_cache
 
     @property
     def current_step(self):
-        return self.ramses.host.currentStep()
+        path = self.ramses.host.currentFilePath()
+        if path != self._ctx_path or not self._step_cache:
+            self._ctx_path = path
+            self._step_cache = self.ramses.host.currentStep()
+        return self._step_cache
 
     def _get_project(self):
         """Cached access to the current project."""
@@ -112,12 +125,24 @@ class RamsesFusionApp:
             return
             
         if self.dlg:
-            self._project_cache = None # Invalidate caches
-            self._user_name_cache = None
-            self._last_path = self.ramses.host.currentFilePath()
-            items = self.dlg.GetItems()
-            items["ContextLabel"].Text = self._get_context_text()
-            items["RamsesVersion"].Text = self._get_footer_text()
+            try:
+                # Full cache invalidation
+                self._project_cache = None
+                self._user_name_cache = None
+                self._item_cache = None
+                self._step_cache = None
+                self._ctx_path = ""
+                
+                self._last_path = self.ramses.host.currentFilePath()
+                items = self.dlg.GetItems()
+                if "ContextLabel" in items:
+                    items["ContextLabel"].Text = self._get_context_text()
+                if "RamsesVersion" in items:
+                    items["RamsesVersion"].Text = self._get_footer_text()
+            except:
+                # Window might be closing or invalid
+                pass
+
     def show_main_window(self):
         # Initial path capture
         self._last_path = self.ramses.host.currentFilePath()
@@ -129,85 +154,61 @@ class RamsesFusionApp:
                 "Geometry": [200, 200, 380, 800],
             },
             [
-                self.ui.VGroup(
-                    {"Spacing": 0, "Weight": 1},
-                    [
-                        self.ui.VGap(15),
-                        self.ui.HGroup(
-                            {"Weight": 1},
-                            [
-                                self.ui.HGap(15),
-                                self.ui.VGroup(
-                                    {"Spacing": 4, "Weight": 1},
-                                    [
-                                        # Context Header
-                                        self.ui.HGroup(
-                                            {"Weight": 0},
-                                            [
-                                                self.ui.Label(
-                                                    {
-                                                        "ID": "ContextLabel",
-                                                        "Text": self._get_context_text(),
-                                                        "Alignment": {
-                                                            "AlignHCenter": True,
-                                                            "AlignTop": True,
-                                                        },
-                                                        "WordWrap": True,
-                                                        "Weight": 1,
-                                                    }
-                                                ),
-                                                self.ui.Button(
-                                                    {
-                                                        "ID": "RefreshButton",
-                                                        "Text": "",
-                                                        "Weight": 0,
-                                                        "MinimumSize": [48, 48],
-                                                        "MaximumSize": [48, 48],
-                                                        "IconSize": [32, 32],
-                                                        "Flat": True,
-                                                        "ToolTip": "Manually refresh the context header.",
-                                                        "Icon": self.ui.Icon(
-                                                            {
-                                                                "File": os.path.join(
-                                                                    self.script_dir,
-                                                                    "icons",
-                                                                    "ramupdate.png",
-                                                                )
-                                                            }
-                                                        ),
-                                                    }
-                                                ),
-                                            ],
-                                        ),
-                                        self.ui.VGap(10),
-                                        # Groups
-                                        self._build_project_group(),
-                                        self.ui.VGap(8),
-                                        self._build_pipeline_group(),
-                                        self.ui.VGap(8),
-                                        self._build_working_group(),
-                                        self.ui.VGap(8),
-                                        self._build_publish_group(),
-                                        self.ui.VGap(8),
-                                        self._build_settings_group(),
-                                        # Spacer to push everything up
-                                        self.ui.VGap(0, 1),
-                                                                    # Footer Version
-                                                                    self.ui.Label({
-                                                                        "ID": "RamsesVersion",
-                                                                        "Text": self._get_footer_text(),
-                                                                        "Alignment": {"AlignHCenter": True},
-                                                                        "Weight": 0,
-                                                                    }),
-                                    ],
-                                ),
-                                self.ui.HGap(15),
-                            ],
-                        ),
-                        self.ui.VGap(15),
-                    ],
-                )
-            ],
+                self.ui.VGroup({"Spacing": 0, "Weight": 1}, [
+                    self.ui.VGap(15),
+                    self.ui.HGroup({"Weight": 1}, [
+                        self.ui.HGap(15),
+                        self.ui.VGroup({"Spacing": 4, "Weight": 1}, [
+                            # Context Header
+                            self.ui.HGroup({"Weight": 0}, [
+                                self.ui.Label({
+                                    "ID": "ContextLabel",
+                                    "Text": self._get_context_text(),
+                                    "Alignment": {"AlignHCenter": True, "AlignTop": True},
+                                    "WordWrap": True,
+                                    "Weight": 1,
+                                }),
+                                self.ui.Button({
+                                    "ID": "RefreshButton",
+                                    "Text": "",
+                                    "Weight": 0,
+                                    "MinimumSize": [48, 48],
+                                    "MaximumSize": [48, 48],
+                                    "IconSize": [32, 32],
+                                    "Flat": True,
+                                    "ToolTip": "Manually refresh the context header.",
+                                    "Icon": self.ui.Icon({"File": os.path.join(self.script_dir, "icons", "ramupdate.png")}),
+                                })
+                            ]),
+                            self.ui.VGap(10),
+
+                            # Groups
+                            self._build_project_group(),
+                            self.ui.VGap(8),
+                            self._build_pipeline_group(),
+                            self.ui.VGap(8),
+                            self._build_working_group(),
+                            self.ui.VGap(8),
+                            self._build_publish_group(),
+                            self.ui.VGap(8),
+                            self._build_settings_group(),
+                            
+                            # Spacer to push everything up
+                            self.ui.VGap(0, 1),
+
+                            # Footer Version
+                            self.ui.Label({
+                                "ID": "RamsesVersion",
+                                "Text": self._get_footer_text(),
+                                "Alignment": {"AlignHCenter": True},
+                                "Weight": 0,
+                            }),
+                        ]),
+                        self.ui.HGap(15),
+                    ]),
+                    self.ui.VGap(15),
+                ])
+            ]
         )
 
         # Bind Events
@@ -843,14 +844,42 @@ class RamsesFusionApp:
             )
 
     def on_setup_scene(self, ev):
-        if self.ramses.project():
-            self.ramses.host.setupCurrentFile()
-            self.refresh_header()
-        else:
-            self.ramses.host.log(
-                "No active Ramses project found. Cannot setup scene parameters.",
-                ram.LogLevel.Warning,
-            )
+        if not self._check_connection(): return
+        
+        project = self._get_project()
+        if not project:
+            self.ramses.host.log("No active Ramses project found.", ram.LogLevel.Warning)
+            return
+
+        item = self.current_item
+        step = self.current_step
+        
+        # 1. Determine the provider for technical specs (Sequence or Project)
+        # Shots inherit specs from their Sequence.
+        spec_provider = project
+        duration = 5.0
+        
+        if item and item.itemType() == ram.ItemType.SHOT:
+            duration = item.duration()
+            # Get the Sequence object to check for overrides
+            if hasattr(item, "sequence") and item.sequence():
+                spec_provider = item.sequence()
+        
+        # 2. Use official API methods on the provider (Sequence or Project)
+        # These methods handle the internal override logic correctly.
+        settings = {
+            "width": int(spec_provider.width()),
+            "height": int(spec_provider.height()),
+            "framerate": float(spec_provider.framerate()),
+            "duration": float(duration),
+            "pixelAspectRatio": float(spec_provider.pixelAspectRatio())
+        }
+            
+        # 3. Apply and update UI
+        if self.ramses.host._setupCurrentFile(item, step, settings):
+            if self.dlg:
+                self._last_path = self.ramses.host.currentFilePath()
+                self.dlg.GetItems()["ContextLabel"].Text = self._get_context_text()
 
     def on_open(self, ev):
         if self.ramses.host.open():
