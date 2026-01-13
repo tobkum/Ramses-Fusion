@@ -153,35 +153,35 @@ class RamsesFusionApp:
 
     def _build_project_group(self):
         return self.ui.VGroup([
-            self.ui.Label({"Text": "PROJECT & FILES", "Weight": 0, "Font": self.ui.Font({"PixelSize": 11, "Bold": True})}),
-            self.create_button("RamsesButton", "Open Ramses Client", "ramses.png"),
+            self.ui.Label({"Text": "PROJECT & SCENE", "Weight": 0, "Font": self.ui.Font({"PixelSize": 11, "Bold": True})}),
             self.create_button("OpenButton", "Open Composition", "open.png"),
             self.create_button("SwitchShotButton", "Switch Shot", "open.png"),
-            self.create_button("RetrieveButton", "Retrieve Version", "retrieveVersion.png"),
+            self.create_button("SetupSceneButton", "Setup Scene", "setupScene.png"),
+            self.create_button("RamsesButton", "Open Ramses Client", "ramses.png"),
         ])
 
     def _build_pipeline_group(self):
         return self.ui.VGroup([
-            self.ui.Label({"Text": "PIPELINE", "Weight": 0, "Font": self.ui.Font({"PixelSize": 11, "Bold": True})}),
+            self.ui.Label({"Text": "ASSETS & TOOLS", "Weight": 0, "Font": self.ui.Font({"PixelSize": 11, "Bold": True})}),
             self.create_button("ImportButton", "Import Asset", "open.png"),
             self.create_button("ReplaceButton", "Replace Loader", "retrieveVersion.png"),
-            self.create_button("SetupSceneButton", "Setup Scene", "setupScene.png"),
             self.create_button("TemplateButton", "Save as Template", "template.png"),
         ])
 
     def _build_working_group(self):
         return self.ui.VGroup([
-            self.ui.Label({"Text": "WORKING", "Weight": 0, "Font": self.ui.Font({"PixelSize": 11, "Bold": True})}),
-            self.create_button("SaveButton", "Save", "save.png"),
+            self.ui.Label({"Text": "SAVING & ITERATION", "Weight": 0, "Font": self.ui.Font({"PixelSize": 11, "Bold": True})}),
             self.create_button("IncrementalSaveButton", "Incremental Save", "incrementalSave.png"),
+            self.create_button("SaveButton", "Save", "save.png"),
+            self.create_button("RetrieveButton", "Retrieve Version", "retrieveVersion.png"),
             self.create_button("CommentButton", "Add Comment", "comment.png"),
         ])
 
     def _build_publish_group(self):
         return self.ui.VGroup([
-            self.ui.Label({"Text": "PUBLISH / STATUS", "Weight": 0, "Font": self.ui.Font({"PixelSize": 11, "Bold": True})}),
-            self.create_button("UpdateStatusButton", "Update Status/Publish", "updateStatus.png"),
+            self.ui.Label({"Text": "REVIEW & PUBLISH", "Weight": 0, "Font": self.ui.Font({"PixelSize": 11, "Bold": True})}),
             self.create_button("PreviewButton", "Create Preview", "preview.png"),
+            self.create_button("UpdateStatusButton", "Update Status / Publish", "updateStatus.png"),
         ])
 
     def _build_settings_group(self):
