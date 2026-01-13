@@ -54,15 +54,7 @@ class RamAssetGroup( RamObject ):
         """
         super(RamAssetGroup, self).__init__( uuid, data, create, "RamAssetGroup" )
 
-    def project(self):
-        """The project containing this group"""
-        from .ram_project import RamProject
-        uuid = self.get("project", "")
-        if uuid != "":
-            return RamProject(uuid)
-        return None
-    
     def assets(self):
         """Gets the list of assets contained in this group"""
 
-        return DAEMON.getAssets("", self.uuid())
+        return DAEMON.getAssets(self.uuid())

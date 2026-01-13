@@ -17,10 +17,12 @@
 #
 #======================= END GPL LICENSE BLOCK ========================
 
-import socket, json
-
-from .logger import log
-from .constants import ItemType, LogLevel, Log, StepType
+import socket
+import json
+import time
+import os
+from .logger import log, printException
+from .constants import LogLevel, Log, StepType
 
 class RamDaemonInterface( object ):
     """The Class used to communicate with the Ramses Daemon
@@ -31,11 +33,13 @@ class RamDaemonInterface( object ):
         online: bool (read-only).
             True if the Daemon is available
     """
-    
+
     _instance = None
 
     @staticmethod
     def checkReply( obj ):
+        if not obj:
+            return {}
         if obj['accepted'] and obj['success'] and obj['content'] is not None:
             return obj['content']
         return {}
@@ -43,11 +47,12 @@ class RamDaemonInterface( object ):
     @classmethod
     def instance( cls ):
         from .ram_settings import RamSettings
-        
+
         if cls._instance is None:
             cls._instance = cls.__new__(cls)
             cls._port = RamSettings.instance().ramsesClientPort
             cls._address = 'localhost'
+            cls._dataCache = {}
 
         return cls._instance
 
@@ -108,10 +113,6 @@ class RamDaemonInterface( object ):
         from .ram_step import RamStep
         from .ram_user import RamUser
 
-        if not self.__checkUser():
-            self.__noUserReply('getProjects')
-            return []
-
         reply = self.__post(
             (
                 "getObjects",
@@ -124,6 +125,7 @@ class RamDaemonInterface( object ):
         for obj in objs:
             uuid = obj.get("uuid", "")
             data = obj.get("data", {})
+            o = None
             if objectType == "RamObject":
                 o = RamObject( uuid, data=data)
             elif objectType == "RamAsset":
@@ -156,49 +158,16 @@ class RamDaemonInterface( object ):
                 objects.append(o)
         return objects
 
-    def getProjects(self):
-        """Gets the list of the projects
-
-        Read the Ramses Daemon reference at http://ramses.rxlab.guide/dev/daemon-reference/ for more information.
-        
-        Returns: list of RamProject.
-        """
-
-        from .ram_project import RamProject
-
-        if not self.__checkUser():
-            self.__noUserReply('getProjects')
-            return ()
-
-        reply = self.__post( "getProjects", 262144 )
-        content = self.checkReply(reply)
-        projectList = content.get("projects", ())
-        projects = []
-        for p in projectList:
-            pid = p.get("uuid", "")
-            pdata = p.get("data", {})
-            projects.append( RamProject(
-                uuid = pid,
-                data = pdata
-            ))
-
-        return projects
-
-    def getShots(self, projectUuid, sequenceUuid=""):
+    def getShots(self, sequenceUuid=""):
         """Gets the list of shots for this project"""
 
         from .ram_shot import RamShot
-
-        if not self.__checkUser():
-            self.__noUserReply('getAssets')
-            return ()
         
         shots = []
 
         reply =  self.__post(
             (
                 "getShots",
-                ('projectUuid', projectUuid),
                 ('sequenceUuid', sequenceUuid)
             ),
             65536 )
@@ -210,21 +179,16 @@ class RamDaemonInterface( object ):
             shots.append( shot )
         return shots
 
-    def getAssetGroups(self, projectUuid):
+    def getAssetGroups(self):
         """Gets the list of asset groups for this project"""
 
         from .ram_assetgroup import RamAssetGroup
 
-        if not self.__checkUser():
-            self.__noUserReply('getAssets')
-            return ()
-        
         assetGroups = []
 
         reply =  self.__post(
             (
                 "getAssetGroups",
-                ('projectUuid', projectUuid)
             ),
             65536 )
 
@@ -235,21 +199,16 @@ class RamDaemonInterface( object ):
             assetGroups.append( ag )
         return assetGroups
 
-    def getSequences(self, projectUuid):
+    def getSequences(self):
         """Gets the list of sequences for this project"""
 
         from .ram_sequence import RamSequence
 
-        if not self.__checkUser():
-            self.__noUserReply('getAssets')
-            return ()
-        
         sequences = []
 
         reply =  self.__post(
             (
                 "getSequences",
-                ('projectUuid', projectUuid)
             ),
             65536 )
 
@@ -260,21 +219,16 @@ class RamDaemonInterface( object ):
             sequences.append( seq )
         return sequences
 
-    def getAssets(self, projectUuid, groupUuid=""):
+    def getAssets(self, groupUuid=""):
         """Gets the list of assets for this project"""
 
         from .ram_asset import RamAsset
 
-        if not self.__checkUser():
-            self.__noUserReply('getAssets')
-            return ()
-        
         assets = []
 
         reply =  self.__post(
             (
                 "getAssets",
-                ('projectUuid', projectUuid),
                 ('groupUuid', groupUuid)
             ),
             65536 )
@@ -286,21 +240,16 @@ class RamDaemonInterface( object ):
             assets.append( asset )
         return assets
 
-    def getPipes(self, projectUuid):
+    def getPipes(self):
         """Gets the list of pipes for this project"""
 
         from .ram_pipe import RamPipe
 
-        if not self.__checkUser():
-            self.__noUserReply('getAssets')
-            return ()
-        
         pipes = []
 
         reply =  self.__post(
             (
                 "getPipes",
-                ('projectUuid', projectUuid)
             ),
             65536 )
 
@@ -311,21 +260,16 @@ class RamDaemonInterface( object ):
             pipes.append( pipe )
         return pipes
 
-    def getSteps(self, projectUuid, stepType=StepType.ALL):
+    def getSteps(self, stepType=StepType.ALL):
         """Gets the list of steps for this project"""
 
         from .ram_step import RamStep
 
-        if not self.__checkUser():
-            self.__noUserReply('getAssets')
-            return ()
-        
         steps = []
 
         reply =  self.__post(
             (
                 "getSteps",
-                ('projectUuid', projectUuid),
                 ('type', stepType)
             ),
             65536 )
@@ -337,7 +281,7 @@ class RamDaemonInterface( object ):
             steps.append( step )
         return steps
 
-    def getCurrentProject(self):
+    def getProject(self):
         """Gets the current project
 
         Read the Ramses Daemon reference at http://ramses.rxlab.guide/dev/daemon-reference/ for more information.
@@ -347,11 +291,7 @@ class RamDaemonInterface( object ):
 
         from .ram_project import RamProject
 
-        if not self.__checkUser():
-            self.__noUserReply('getCurrentProject')
-            return None
-
-        reply = self.__post( "getCurrentProject", 65536 )
+        reply = self.__post( "getProject", 65536 )
         content = self.checkReply(reply)
         uuid = content.get("uuid", "")
         if uuid == "":
@@ -359,7 +299,7 @@ class RamDaemonInterface( object ):
         data = content.get("data", {})
         return RamProject(uuid, data)
 
-    def getCurrentUser(self):
+    def getUser(self):
         """Gets the current user"""
         from .ram_user import RamUser
         content = self.checkReply( self.ping() )
@@ -368,42 +308,35 @@ class RamDaemonInterface( object ):
             return None
         return RamUser( uuid )
 
-    def setCurrentProject(self, projectUuid):
-        """Sets the current project.
-
-        Read the Ramses Daemon reference at http://ramses.rxlab.guide/dev/daemon-reference/ for more information.
-
-        Returns: dict.
-        """
-
-        if not self.__checkUser(): return self.__noUserReply('setCurrentProject')
-        return self.__post( (
-            "setCurrentProject",
-            ('uuid', projectUuid)
-            ), 65536 )
-
-    def getData(self, uuid):
+    def getData(self, uuid:str, objectType:str, cacheTimeout=2 ):
         """Gets the data for a specific RamObject.
+        This is a cached method, the default cache duration is 2S
 
         Read the Ramses Daemon reference at http://ramses.rxlab.guide/dev/daemon-reference/ for more information.
         
         Returns: dict.
         """
 
-        if not self.__checkUser():
-            self.__noUserReply('getData')
-            return {}
+        # Check if it is available in the cache
+        cacheData = self._dataCache.get(uuid, {})
+        if cacheData:
+            cacheElapsed = time.time() - cacheData.get('_daemonCacheTime', 0)
+            if cacheElapsed < cacheTimeout:
+                return cacheData
 
         reply =  self.__post(
             (
                 "getData",
-                ('uuid', uuid)
+                ('uuid', uuid),
+                ('objectType', objectType),
             ),
             65536 )
         content = self.checkReply(reply)
-        return content.get("data", {})
+        self._dataCache[uuid] = content.get("data", {})
+        self._dataCache[uuid]['_daemonCacheTime'] = time.time()
+        return self._dataCache[uuid]
 
-    def setData(self, uuid, data):
+    def setData(self, uuid:str, data:str, objectType:str):
         """Sets the data of a specific RamObject.
 
         Read the Ramses Daemon reference at http://ramses.rxlab.guide/dev/daemon-reference/ for more information.
@@ -414,55 +347,51 @@ class RamDaemonInterface( object ):
         if not isinstance(data, str):
             data = json.dumps(data)
 
-        if not self.__checkUser(): return self.__noUserReply('setData')
         return self.__post( (
             "setData",
             ('uuid', uuid),
-            ('data', data)
+            ('data', data),
+            ('objectType', objectType),
             ), 65536 )
 
-    def getPath(self, uuid):
+    def getPath(self, uuid:str, objectType:str):
         """Gets the path for a specific RamObject.
 
         Read the Ramses Daemon reference at http://ramses.rxlab.guide/dev/daemon-reference/ for more information.
         
         Returns: dict.
         """
-        
-        if not self.__checkUser():
-            self.__noUserReply('getPath')
-            return ""
 
         reply =  self.__post( (
             "getPath",
-            ('uuid', uuid)
+            ('uuid', uuid),
+            ('objectType', objectType),
             ), 65536 )
         content = self.checkReply(reply)
+
         return content.get("path", "")
 
-    def uuidFromPath(self, path, type ):
+    def uuidFromPath(self, path, ramType ):
         """Gets the uuid of an Object using its path.
 
         Read the Ramses Daemon reference at http://ramses.rxlab.guide/dev/daemon-reference/ for more information.
         
         Returns: dict.
         """
-        
-        if not self.__checkUser():
-            self.__noUserReply('uuidFromPath')
+
+        if path == "":
             return ""
 
         reply = self.__post( (
             "uuidFromPath",
             ('path', path),
-            ('type', type),
+            ('objectType', ramType),
             ), 65536 )
         content = self.checkReply(reply)
         return content.get("uuid", "")
 
     def create(self, uuid, data, objectType):
-        if not self.__checkUser():
-            return self.__noUserReply('uuidFromPath')
+        """Creates a new object in the database"""
 
         if not isinstance(data, str):
             data = json.dumps(data)
@@ -479,10 +408,6 @@ class RamDaemonInterface( object ):
 
         from .ram_status import RamStatus
 
-        if not self.__checkUser():
-            self.__noUserReply('getStatus')
-            return {}
-
         reply =  self.__post(
             (
                 "getStatus",
@@ -492,7 +417,7 @@ class RamDaemonInterface( object ):
             65536 )
         content = self.checkReply(reply)
         uuid = content.get("uuid", "")
-        if (uuid == ""):
+        if uuid == "":
             return None
         return RamStatus(uuid, content.get("data", {}))
 
@@ -501,9 +426,6 @@ class RamDaemonInterface( object ):
         
         If userUuid is 'current', it will be the current user in the Ramses Client
         """
-        if not self.__checkUser():
-            self.__noUserReply('getStatus')
-            return {}
 
         return self.__post(
             (
@@ -512,6 +434,21 @@ class RamDaemonInterface( object ):
                 ('userUuid', userUuid)
             ),
             65536 )
+
+    def uiShowConsole(self, tab:str="main"):
+        """Shows the console tab in the app"""
+
+        return self.__post(
+            (
+                "uiShowConsole",
+                ('tab', tab)
+            )
+            )
+
+    def uiShowScriptEditor(self):
+        """Shows the script editor tab in the app"""
+
+        return self.__post('uiShowScriptEditor')
 
     def __buildQuery(self, query):
         """Builds a query from a list of args
@@ -556,6 +493,7 @@ class RamDaemonInterface( object ):
         from .ramses import Ramses
 
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(2)
 
         query = self.__buildQuery( query )
 
@@ -581,8 +519,9 @@ class RamDaemonInterface( object ):
 
         try:
             obj = json.loads(data)
-        except:
+        except: # pylint: disable=bare-except
             log("Invalid reply data from the Ramses Daemon.", LogLevel.Critical)
+            printException()
             obj = {
                 'accepted': False,
                 'success': False
@@ -592,7 +531,7 @@ class RamDaemonInterface( object ):
         log (str(data), LogLevel.DataReceived )
 
         if not obj['accepted']: log("Unknown Ramses Daemon query: " + obj['query'], LogLevel.Critical)
-        if not obj['success']: log("Warning: the Ramses Daemon could not reply to the query: " + obj['query'], LogLevel.Critical)       
+        if not obj['success']: log("Warning: the Ramses Daemon could not reply to the query: " + obj['query'], LogLevel.Debug)       
         if obj['message']: log(obj['message'], LogLevel.Debug)
 
         return obj
@@ -605,7 +544,7 @@ class RamDaemonInterface( object ):
         if data is None:
             log("Daemon unavailable", LogLevel.Debug)
             return False
-  
+
         content = data['content']
         if content is None:
             log("Daemon did not reply correctly")

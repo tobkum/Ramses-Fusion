@@ -52,7 +52,8 @@ class ItemType():
     SHOT='S'
 
 class Log():
-    MalformedName = "Cannot work on this file as it does not respect the Ramses' naming scheme, sorry."
+    MalformedName = "I can't work with this file as it does not respect the Ramses' naming scheme, sorry."
+    CannotSave = "I can't save this file, sorry."
     NoUser = "There's no current user. You may need to log in."
     PathNotFound = "The file or folder path could not be found."
     NoProject = "There's no current project. Select a project first."
@@ -64,8 +65,9 @@ class LogLevel():
     DataSent = -1
     Debug = 0
     Info = 1
-    Critical = 2
-    Fatal = 3
+    Warning = 2
+    Critical = 3
+    Fatal = 4
 
 class StepType():
     PRE_PRODUCTION = 'PRE_PRODUCTION'

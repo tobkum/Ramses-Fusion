@@ -23,7 +23,7 @@ import json
 from .constants import FolderNames, LogLevel
 from .logger import log
 
-theVersion = "0.10.0-Beta"
+theVersion = "1.0.0-RC8"
 
 class RamSettings( object ):
     """Gets and saves settings used by Ramses.
@@ -34,8 +34,8 @@ class RamSettings( object ):
 
     By default, settings are saved in a ramses_addons_settings.json file, in the user’s OS specific settings folder:
 
-        Linux: ~/.config/RxLaboratory/Ramses/Config
-        Windows: %appdata%/RxLaboratory/Ramses/Config
+        Linux: ~/.config/Ramses/Config
+        Windows: %appdata%/Ramses/Config
         MacOS: ?
 
     There is only one instance of RamSettings, available with the Ramses.instance().settings() method
@@ -64,6 +64,8 @@ class RamSettings( object ):
             cls.autoIncrementTimeout = cls.defaultAutoIncrementTimeout = 120
             # A Debug mode to throw errors
             cls.debugMode = cls.defaultDebugMode = False
+            # Last time we checked for an update
+            cls.lastUpdateCheck = 0
             # User Scripts
             cls.userScripts = []
             # Recent files
@@ -78,20 +80,23 @@ class RamSettings( object ):
 
             # API Settings
             cls.version = theVersion
-            cls.apiReferenceUrl = "https://ramses.rxlab.guide/dev/"
+            cls.aboutRamsesURL = "https://rxlaboratorio.org/rx-tool/ramses"
+            cls.apiReferenceUrl = "https://ramses.rxlab.guide/dev/add-ons-reference/"
             cls.addonsHelpUrl = "https://ramses.rxlab.guide/components/addons/"
             cls.generalHelpUrl = "https://ramses.rxlab.guide"
+            cls.donateURL = "http://donate.rxlab.info"
 
             # Set the path to the settings file and temporary folder (os-specific)
             system = platform.system()
             if system == 'Windows':
-                cls._folderPath = os.path.expandvars('${APPDATA}/RxLaboratory/Ramses/Config')
-                if not os.path.isdir( cls._folderPath ): 
-                    os.makedirs( cls._folderPath )
-                cls._filePath = cls._folderPath + '/ramses_addons_settings.json'
-            else:
-                cls._folderPath = ''
-                cls._filePath = ''
+                cls._folderPath = os.path.expandvars('${APPDATA}/Ramses/Config')
+            elif system == 'Linux':
+                cls._folderPath = os.path.expanduser('~/.config/Ramses/Config')
+            else: #TODO Darwin
+                pass
+
+            os.makedirs( cls._folderPath, exist_ok=True )
+            cls._filePath = cls._folderPath + '/ramses_addons_settings.json'
 
             # Get settings from file
             if os.path.isfile( cls._filePath ):
@@ -114,6 +119,8 @@ class RamSettings( object ):
                         cls.userScripts = settingsDict['userScripts']
                     if 'recentFiles' in settingsDict:
                         cls.recentFiles = settingsDict['recentFiles']
+                    if 'lastUpdateCheck' in settingsDict:
+                        cls.lastUpdateCheck = settingsDict['lastUpdateCheck']
 
         return cls._instance
 
@@ -137,11 +144,12 @@ class RamSettings( object ):
             'userSettings': self.userSettings,
             'debugMode': self.debugMode,
             'userScripts': self.userScripts,
-            'recentFiles': self.recentFiles
+            'recentFiles': self.recentFiles,
+            'lastUpdateCheck': self.lastUpdateCheck
         }
 
         if self._filePath == '':
-            raise ("Invalid path for the settings, I can't save them, sorry.")
+            raise (RuntimeError("Invalid path for the settings, I can't save them, sorry."))
 
         with open(self._filePath, 'w', encoding="utf8") as settingsFile:
             settingsFile.write( json.dumps( settingsDict, indent=4 ) )

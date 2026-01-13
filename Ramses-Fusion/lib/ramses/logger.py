@@ -22,33 +22,56 @@ import linecache
 import sys
 from .constants import LogLevel
 
-def log( message, level = LogLevel.Info ):
+def formatMessage(message, level = LogLevel.Info):
     from .ram_settings import RamSettings
+    SETTINGS = RamSettings.instance()
 
     message = str(message)
 
-    minLevel = RamSettings.instance().logLevel
-    if (level < minLevel ): return
-    
+    minLevel = SETTINGS.logLevel
+    if level < minLevel:
+        return ""
+
     if level == LogLevel.DataReceived:
-        message = "Ramses has just recieved some data: " + message
+        message = "Ramses data received: " + message
     elif level == LogLevel.DataSent:
-        message = "Ramses has just sent some data: " + message
+        message = "Ramses data sent: " + message
     elif level == LogLevel.Debug:
         message = "Debug Info from Ramses: " + message
     elif level == LogLevel.Info:
         message = "Ramses says: " + message
     elif level == LogLevel.Critical:
-        message = "/!\\ Critical error, Ramses is shouting: " + message
+        message = "/!\\ Ramses error: " + message
     elif level == LogLevel.Fatal:
-        message = "/!\\ Fatal error, Ramses last words are: " + message
+        message = "/!\\ Ramses Fatal error, its last words are: " + message
 
-    now = datetime.now()
+    return message
 
-    #print( "[" + now.strftime("%Y/%m/%d - %H:%M:%s") + "] " + message )
-    print( message )
+def log( message, level = LogLevel.Info ):
+    """!
+    @brief Logs a message
+
+    Parameters : 
+        @param message => The message
+        @param level = LogLevel.Info => The importance of the message
+    """
+    from .ramses import Ramses
+    RAMSES = Ramses.instance()
+
+    if RAMSES.host:
+        try:
+            RAMSES.host.log(message, level)
+            return
+        except NotImplementedError:
+            pass
+    print(formatMessage(message, level))
 
 def printException():
+    """Prints the current exception.
+    Return True in debug mode, in this case the exception should raise"""
+    from .ramses import Ramses
+    RAMSES = Ramses.instance()
+
     exc_type, exc_obj, tb = sys.exc_info()
     f = tb.tb_frame
     lineno = tb.tb_lineno
@@ -60,3 +83,5 @@ def printException():
         'an EXCEPTION was thrown:\n\tfrom `{}`\n\tat line {}: "{}"\n\t\t{}'.format(filename, lineno, line.strip(), exc_obj),
         LogLevel.Critical
         )
+
+    return RAMSES.settings().debugMode

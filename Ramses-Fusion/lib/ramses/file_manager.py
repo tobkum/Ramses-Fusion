@@ -57,6 +57,9 @@ class RamFileManager():
     def getRamsesFiles( folderPath, resource = None ):
         """Gets all files respecting the Ramses naming scheme in the given folder
         Returns a list of file paths"""
+        if folderPath is None:
+            return []
+
         if not os.path.isdir(folderPath):
             return []
 
@@ -186,6 +189,8 @@ class RamFileManager():
             path = os.path.dirname(path)
             name = os.path.basename(path)
 
+        nm.isBackup = False
+        nm.isRestoredVersion = False
         saveFileName = nm.fileName()
 
         return RamFileManager.buildPath(( saveFolder, saveFileName ))
@@ -207,7 +212,9 @@ class RamFileManager():
             return
 
         # Set the resource, remove state and version
-        nm.resource = nm.resource +  "+restored-v" + str(nm.version) + "+"
+        nm.resource = nm.resource
+        nm.isRestoredVersion = True
+        nm.restoredVersion = nm.version
         nm.state = ""
         nm.version = -1
         restoredFileName = nm.fileName()
@@ -236,7 +243,7 @@ class RamFileManager():
         return publishFilePath
 
     @staticmethod
-    def getPublishInfo( filePath ):
+    def getPublishInfo( filePath ) -> RamFileInfo:
         """Gets the publish info of the given file (including the version subfolder)"""  
 
         if not os.path.isfile( filePath ):
@@ -259,8 +266,10 @@ class RamFileManager():
         if versionInfo.resource != "":
             versionFolder = versionInfo.resource + "_"
         # version number
-        if (versionInfo.version <= 0): versionFolder = versionFolder + intToStr( 1 )
-        else: versionFolder = versionFolder + intToStr( versionInfo.version )
+        if versionInfo.version <= 0:
+            versionFolder = versionFolder + intToStr( 1 )
+        else:
+            versionFolder = versionFolder + intToStr( versionInfo.version )
         # State
         if versionInfo.state != "" and versionInfo.state.lower() != "v":
             versionFolder = versionFolder + "_" + versionInfo.state
@@ -426,7 +435,7 @@ class RamFileManager():
             foundFilePath = versionsFolder + '/' + foundFile
             if not os.path.isfile( foundFilePath ): # This is in case the user has created folders in _versions
                 continue
-            
+
             foundNM = RamFileInfo()
             if not foundNM.setFileName( foundFile ):
                 continue

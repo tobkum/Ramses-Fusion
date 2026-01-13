@@ -55,6 +55,7 @@ class RamFileInfo():
         self.extension = ""
         self.isRestoredVersion = False
         self.restoredVersion = -1
+        self.isBackup = False
         self.date = datetime.now()
 
     def __getRamsesNameRegEx( self ):
@@ -120,8 +121,16 @@ class RamFileInfo():
         if self.ramType == ItemType.GENERAL and self.shortName != "" and self.shortName != self.step:
             nameList.append( self.shortName )
 
-        if self.resource != '':
-            nameList.append( self.resource.replace('_', ' ') )
+        if self.resource != '' or self.isRestoredVersion or self.isBackup:
+            resource = self.resource.replace('_', ' ')
+            if self.isRestoredVersion:
+                resource  = resource + "+restored"
+                if self.restoredVersion > 0:
+                    resource = resource + "-v" + str(self.restoredVersion)
+                resource = resource + "+"
+            elif self.isBackup:
+                resource = resource + "+backup+"
+            nameList.append( resource )
 
         if self.version != -1:
             v = self.state + intToStr(self.version)
@@ -179,6 +188,10 @@ class RamFileInfo():
                 self.isRestoredVersion = True
                 self.restoredVersion = int( restoredInfo.group(1) )
                 self.resource = re.sub( '\\+restored-v\\d+\\+', "", self.resource)
+            backup = re.match('\\+backup\\+', self.resource)
+            if backup:
+                self.isBackup = True
+                self.resource = re.sub( '\\+backup\\+', "", self.resource)
 
         if splitRamsesName.group(6) is not None:
             self.state = splitRamsesName.group(6)

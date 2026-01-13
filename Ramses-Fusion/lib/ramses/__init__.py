@@ -17,9 +17,20 @@
 #
 #======================= END GPL LICENSE BLOCK ========================
 
+import sys
+import os
+
+# Make sure yaml is available
+yaml_path = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    'yaml'
+    )
+if os.path.isdir( yaml_path ):
+    sys.path.append( yaml_path )
+
 from .logger import log, printException
 from .ram_settings import RamSettings
-from .constants import ItemType, Log, LogLevel, StepType, UserRole
+from .constants import ItemType, Log, LogLevel, StepType, UserRole, FileNames
 from .ram_object import RamObject
 from .ram_state import RamState
 from .ram_filetype import RamFileType
@@ -37,3 +48,8 @@ from .file_manager import RamFileManager
 from .metadata_manager import RamMetaDataManager
 from .file_info import RamFileInfo
 from .daemon_interface import RamDaemonInterface
+from .ram_host import RamHost
+from . import utils as RamUtils
+
+RAMSES = Ramses.instance()
+RAM_SETTINGS = RAMSES.settings()

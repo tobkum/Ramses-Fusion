@@ -31,7 +31,6 @@ DAEMON = RamDaemonInterface.instance()
 class RamStep( RamObject ):
     """A step in the production of the shots or assets of the project."""
 
-    # project is undocumented and used to improve performance, when called from a RamProject
     @staticmethod
     def fromPath( path ):
         """Creates a step from any path, if possible
@@ -50,19 +49,39 @@ class RamStep( RamObject ):
         status = RamStatus.fromPath( path )
         if status:
             return status.step()
-        
+
         # Let's use the file name
         nm = RamFileInfo()
         nm.setFilePath(path)
-        # Get the project
-        project = None
-        if nm.project != '' and nm.step !="":
-            project = RAMSES.project(nm.project)
-        if project is not None:
-            return project.step( nm.step )
+        # Get the corresponding step
+        step = RamStep.fromName(nm.step)
+        if step:
+            return step
 
         log( "The given path does not belong to a step", LogLevel.Debug )
         return None
+
+    @staticmethod
+    def fromName( shortName:str, name='', stepType=StepType.ALL):
+        """Returns a step using its shortname and name"""
+        steps = DAEMON.getSteps(stepType)
+        for step in steps:
+            if step.shortName() != shortName:
+                continue
+            if name == '':
+                return step
+            if step.name() == name:
+                return step
+        return None
+
+    @staticmethod
+    def fromString( stepStr:str ):
+        """Returns a step from its string as returned by str(RamStep)"""
+        stepList = stepStr.split(' | ')
+        if len(stepList) < 2:
+            return RamStep.fromName( stepList[0] )
+
+        return RamStep.fromName(stepList[0], stepList[1])
 
     def __init__( self, uuid="", data = None, create=False ):
         """
@@ -174,29 +193,36 @@ class RamStep( RamObject ):
             return StepType.POST_PRODUCTION
         return StepType.ALL
 
-    def project(self): # Immutable
-        """Returns the project this step belongs to"""
-        from .ram_project import RamProject
-        return RamProject( self.get("project", ""))
-
-    def projectShortName(self):
-        """Returns the short name of the step this item belongs to"""
-        p = self.project()
-        if p:
-            return p.shortName()
-        return ""
-
-    def publishSettings(self):
+    def publishSettings(self, fmt="str"):
         """Returns the publish settings, as a string,
         which should be a yaml document, according to the Ramses guidelines.
         But this string is user-defined and can be anything set in the Ramses Client."""
-        return self.get("publishSettings", "")
 
-    def generalSettings(self):
-        """Returns the step custom settings, as a string,
-        which should be a yaml document, according to the Ramses guidelines.
-        But this string is user-defined and can be anything set in the Ramses Client."""
-        return self.get("customSettings", "")
+        as_str = self.get("publishSettings", "")
+        return self.parseSettings(
+            as_str,
+            fmt,
+            self.shortName() + " step general settings"
+            )
+
+    def generalSettings(self, fmt="str"):
+        """Returns the step custom settings.
+
+        The return format can be:
+        - 'str': which should be a yaml document, according to the Ramses guidelines.
+        But this string is user-defined and can be anything set in the Ramses Client.
+        - 'yaml' or 'json': returns a python dict after parsing the string. Use in conjunction with
+        print error (instead of raising) for a non blocking parse just automatically printing a nice 
+        explanation to the user. In case of error, returns None
+
+        return str or dict or None
+        """
+        as_str = self.get("customSettings", "")
+        return self.parseSettings(
+            as_str,
+            fmt,
+            self.shortName() + " step general settings"
+            )
 
     def setPublishSettings(self, settings):
         """Sets new publish settings for this step"""
@@ -205,3 +231,19 @@ class RamStep( RamObject ):
     def setGeneralSettings(self, settings):
         """Sets new general settings for this step"""
         self.set("customSettings", settings)
+
+    def importSettings(self, fmt="str"):
+        """Returns the import settings, as a string,
+        which should be a yaml document, according to the Ramses guidelines.
+        But this string is user-defined and can be anything set in the Ramses Client."""
+
+        as_str = self.get("importSettings", "")
+        return self.parseSettings(
+            as_str,
+            fmt,
+            self.shortName() + " step import settings"
+            )
+    
+    def setImportSettings(self, settings):
+        """Sets new import settings for this step"""
+        self.set("importSettings", settings)

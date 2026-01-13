@@ -20,7 +20,15 @@
 
 import importlib.util
 import sys
+from urllib.error import URLError
+from urllib.parse import quote
+from urllib.request import urlopen
+from json import loads, dumps
+from socket import timeout
+import platform
+import ssl
 from uuid import uuid4
+from .logger import log, LogLevel
 
 def getDate( e ):
     """Used in RamItem.getStepHistory to sort the list"""
@@ -61,3 +69,79 @@ def load_module_from_path( py_path ):
     sys.modules[user_module_name] = user_module
     user_module_spec.loader.exec_module(user_module)
     return user_module
+
+def checkUpdate(url, toolName, version, host, hostVersion, preRelease = False, language = "en"):
+    """Checks if an update is available"""
+
+    from .ramses import Ramses
+
+    # Check os
+    os  = platform.system()
+    if os == "Windows":
+        os = "win"
+    elif os == "Darwin":
+        os = "mac"
+    elif os == "Linux":
+        os = "linux"
+
+    args = {
+        "name": toolName,
+        "version": version,
+        "os": os,
+        "osVersion": platform.version(),
+        "host": host,
+        "hostVersion": hostVersion,
+        "languageCode": language,
+    }
+
+    if preRelease:
+        args["preRelease"] = ""
+
+    log("Checking for update...")
+    log("Here's the data sent to the server:\n"+dumps(args), LogLevel.DataSent)
+
+    response = request(url, args, False)
+    try:
+        return loads(response)
+    except:
+        return {}
+
+def request(url, args=None, secured=True, timeout=4):
+    """Builds a GET request with the args"""
+
+    response = ""
+
+    if args:
+        first = True
+        for arg in args:
+            if first:
+                url = url + '?'
+                first = False
+            else:
+                url = url + '&'
+            url = url + arg
+            val = args[arg]
+            if val != "":
+                url = url + '=' + quote(val, safe='')
+
+    log("GET request: " + url, LogLevel.Debug)
+
+    try:
+        response = urlopen(url, timeout=timeout)
+    except URLError as error:
+        if not secured and not isinstance(error.reason, timeout):
+            sslContext = ssl._create_unverified_context()
+            try:
+                response = urlopen(url, context=sslContext, timeout=timeout)
+            except URLError:
+                pass
+
+    response_data = ""
+    try:
+        response_data = response.read()
+        log("Server response:\n" + str(response_data), LogLevel.DataReceived)
+    except Exception as error:
+        response_data = "invalid_data"
+        log("Server response can't be read.\n"+str(error), LogLevel.Debug)
+
+    return response_data

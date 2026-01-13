@@ -77,6 +77,25 @@ class RamProject( RamObject ):
 
         return self.get("height", 1080)
 
+    def pixelAspectRatio( self ):
+        """
+        Returns:
+            float
+        """
+
+        return self.get("pixelAspectRatio", 1.0)
+
+    def aspectRatio(self):
+        """
+        Returns:
+            float
+        """
+
+        par = float(self.pixelAspectRatio())
+        w = float(self.width())
+        h = float(self.height())
+        return w / h * par
+
     def framerate( self ):
         """
         Returns:
@@ -252,7 +271,7 @@ class RamProject( RamObject ):
         """
 
         groupUuid = RamObject.getUuid(assetGroup)
-        return DAEMON.getAssets(self.uuid(), groupUuid)
+        return DAEMON.getAssets(groupUuid)
 
     def assetGroups( self ):
         """Available asset groups in this project
@@ -261,7 +280,7 @@ class RamProject( RamObject ):
             list of RamAssetGroup
         """
         
-        return DAEMON.getAssetGroups(self.uuid())
+        return DAEMON.getAssetGroups()
 
     def shots( self, nameFilter = "*", sequence = None ):
         """Available shots in this project
@@ -274,7 +293,7 @@ class RamProject( RamObject ):
         """
 
         groupUuid = RamObject.getUuid(sequence)
-        shots = DAEMON.getShots(self.uuid(), groupUuid)
+        shots = DAEMON.getShots(groupUuid)
 
         if nameFilter == "*" or nameFilter == "":
             return shots
@@ -293,7 +312,7 @@ class RamProject( RamObject ):
     def sequences( self ):
         """The sequences of this project"""
         
-        return DAEMON.getSequences(self.uuid())
+        return DAEMON.getSequences()
 
     def step(self, shortName):
         """
@@ -319,8 +338,8 @@ class RamProject( RamObject ):
         Returns:
             list of RamStep
         """
-        
-        return DAEMON.getSteps(self.uuid(), stepType)
+
+        return DAEMON.getSteps(stepType)
 
     def pipes( self ):
         """Available pipes in this project
@@ -329,7 +348,7 @@ class RamProject( RamObject ):
             list of RamPipe
         """
         
-        return DAEMON.getPipes(self.uuid())
+        return DAEMON.getPipes()
 
     def _getAssetsInFolder(self, folderPath, assetGroup=None ):
         """lists and returns all assets in the given folder"""

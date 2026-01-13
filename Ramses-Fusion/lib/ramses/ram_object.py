@@ -19,11 +19,15 @@
 
 import time
 import json
+import yaml
 import re
 import os
 import uuid as UUID
 from .daemon_interface import RamDaemonInterface
-from .logger import log, LogLevel
+from .logger import log
+from .file_info import RamFileInfo
+from .logger import log
+from .constants import LogLevel
 
 DAEMON = RamDaemonInterface.instance()
 RE_UUID = re.compile("^[a-zA-Z0-9]+-[a-zA-Z0-9]+-[a-zA-Z0-9]+-[a-zA-Z0-9]+-[a-zA-Z0-9]+$")
@@ -33,6 +37,8 @@ class RamObject(object):
 
     @staticmethod
     def isUuid( string ):
+        if string is None:
+            return False
         if not isinstance(string, str):
             return False
         if RE_UUID.match(string):
@@ -56,16 +62,58 @@ class RamObject(object):
     def getShortName( obj ):
         if RamObject.isUuid( obj ):
             obj = RamObject(obj)
+        if obj is None:
+            return ""
         if isinstance(obj, RamObject):
             return obj.shortName()
         # Must already be a short name
         return obj
+
+    @staticmethod
+    def parseSettings( as_str, fmt='yaml', settingsName="settings" ):
+        """
+
+        """
+        if fmt == 'str':
+            return as_str
+
+        if fmt == 'yaml':
+            try:
+                as_yaml = yaml.safe_load( as_str )
+            except yaml.scanner.ScannerError as err:
+                log("Sorry, there is a syntax error in the " + settingsName + ".\nSee the console for more details.",
+                    LogLevel.Critical)
+                print(err)
+                return {}
+            if not as_yaml or (
+                    not isinstance(as_yaml, dict) and
+                    not isinstance(as_yaml, list) and
+                    not isinstance(as_yaml, tuple)
+                ):
+                log("It seems the "+ settingsName + " are empty or can't be read correctly",
+                    LogLevel.Info)
+                return {}
+            return as_yaml
+
+        if fmt == 'json':
+            try:
+                as_json = json.loads(as_str)
+            except json.decoder.JSONDecodeError as err:
+                log("Sorry, there is a syntax error in the " + settingsName + ".\nSee the console for more details.",
+                    LogLevel.Critical)
+                print(err)
+                return {}
+            return as_json
+
+        return None
 
     def __init__( self, uuid="", data = None, create=False, objectType="RamObject" ):
         """
         Args:
             uuid (str): The object's uuid
         """
+
+        self.__objectType = objectType
 
         if uuid == "" and not create:
             self.__virtual = True
@@ -77,7 +125,7 @@ class RamObject(object):
         self.__uuid = uuid
 
         if isinstance(data, str):
-            data = json.loads(data)   
+            data = json.loads(data)
         if data:
             self.__data = data
             self.__cacheTime = time.time()
@@ -89,6 +137,8 @@ class RamObject(object):
             reply = DAEMON.create( self.__uuid, self.__data, objectType )
             if not DAEMON.checkReply(reply):
                 log("I can't create this object.")
+
+        self.__project = None
 
     def uuid( self ):
         """Returns the uuid of the object"""
@@ -102,16 +152,20 @@ class RamObject(object):
         # Check if the cached data is recent enough
         # there's a 2-second timeout to not post too many queries
         # and improve performance
-        cacheElapsed = time.time() - self.__cacheTime
-        if self.__data and cacheElapsed < 2:
-            return self.__data
+        # ==== DISABLED: The cache system has been moved
+        # ==== in the the data interface class
+        # cacheElapsed = time.time() - self.__cacheTime
+        # if self.__data and cacheElapsed < 2:
+        #     return self.__data
 
         # Get the data from the daemon
-        data = DAEMON.getData( self.__uuid )
+        self.__data = DAEMON.getData( self.__uuid, self.__objectType )
 
-        if data:
-            self.__data = data
-            self.__cacheTime = time.time()
+        # ==== DISABLED: The cache system has been moved
+        # ==== in the the data interface class
+        # if data:
+        #     self.__data = data
+        #     self.__cacheTime = time.time()
 
         return self.__data
 
@@ -124,7 +178,7 @@ class RamObject(object):
         self.__cacheTime = time.time()
 
         if not self.__virtual:
-            DAEMON.setData( self.__uuid, data )
+            DAEMON.setData( self.__uuid, data, self.__objectType )
 
     def get(self, key, default = None):
         """Get a specific value in the data"""
@@ -136,6 +190,19 @@ class RamObject(object):
         data = self.data()
         data[key] = value
         self.setData(data)
+
+    def project(self):
+        """The current project"""
+        if self.__project == None:
+            self.__project = DAEMON.getProject()
+        return self.__project
+
+    def projectShortName(self):
+        """The current project ID"""
+        p = self.project()
+        if p is None:
+            return "Unkown"
+        return p.shortName()
 
     def name( self ):
         """
@@ -171,21 +238,29 @@ class RamObject(object):
         """Returns the color as #000000"""
         return self.get('color', '#e3e3e3')
 
-    def settings( self ):
+    def settings( self, fmt="str" ):
         """Returns the settings of this object"""
-        return self.get('settings', {})
+
+        as_str = self.get("settings", "")
+        return self.parseSettings(
+            as_str,
+            fmt,
+            self.shortName() + " step general settings"
+            )
 
     def folderPath( self ):
         """Returns the folder corresponding to this object"""
         if self.__virtual:
             return self.get("folderPath", "")
-        p = DAEMON.getPath( self.__uuid )
+
+        p = DAEMON.getPath( self.__uuid, self.__objectType )
+
         if p != "" and not os.path.isdir( p ):
             try:
                 os.makedirs( p )
             except:
                 return ""
-        return p
+        return p       
 
     def virtual( self ):
         """Checks if this object is virtual"""
@@ -199,7 +274,14 @@ class RamObject(object):
         return n
 
     def __eq__(self, other):
-        try:
-            return self.__uuid == other.uuid()
-        except:
-            return False
+        if isinstance(other, RamObject):
+            try:
+                return self.__uuid == other.uuid()
+            except:
+                return False
+        # Test UUID or shortname
+        if other == self.__uuid:
+            return True
+        if other == self.shortName():
+            return True
+        return False

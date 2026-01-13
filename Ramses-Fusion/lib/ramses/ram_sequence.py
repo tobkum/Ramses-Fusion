@@ -31,47 +31,37 @@ class RamSequence( RamObject ):
         """
         super(RamSequence, self).__init__( uuid, data, create, "RamSequence" )
 
-    def project(self):
-        """Returns the project this sequence belongs to
-        Returns:
-            RamProject"""
-        from .ram_project import RamProject
-        uuid = self.get("project", "")
-        if uuid != "":
-            return RamProject(uuid)
-        return None
-
     def shots(self):
         """Gets the list of shots contained in this sequence
         Returns:
             str[]"""
 
-        return DAEMON.getShots("", self.uuid())
-    
+        return DAEMON.getShots(self.uuid())
+
     def width( self ):
         """The sequence width in pixels
         Returns:
             int"""
-        
+
         if self.get("overrideResolution"):
             return self.get("width", 1920)
         project = self.project()
         if project:
             return project.width()
         return 1920
-    
+
     def height( self ):
         """The sequence height in pixels
         Returns:
             int"""
-        
+
         if self.get("overrideResolution"):
             return self.get("height", 1080)
         project = self.project()
         if project:
             return project.height()
         return 1080
-    
+
     def framerate( self ):
         """The sequence framerate
         Returns:
@@ -85,3 +75,24 @@ class RamSequence( RamObject ):
             return project.framerate()
         return 24.0
 
+    def pixelAspectRatio(self) -> float:
+        """The sequence pixel aspect ratio
+        Returns:
+            float"""
+
+        if self.get("overridePixelAspectRatio"):
+            return self.get("pixelAspectRatio", 1.0)
+        project = self.project()
+        if project:
+            return project.pixelAspectRatio()
+        return 1.0
+
+    def aspectRatio(self) -> float:
+        """The sequence aspect ratio
+        Returns:
+            float"""
+
+        par = float(self.pixelAspectRatio())
+        w = float(self.width())
+        h = float(self.height())
+        return w / h * par
