@@ -31,7 +31,14 @@ class FusionHost(RamHost):
         return self.comp.GetAttrs().get('COMPB_Modified', False)
 
     def _log(self, message:str, level:int):
-        print("[Ramses] " + str(message))
+        prefixes = {
+            LogLevel.Info: "INFO",
+            LogLevel.Warning: "WARNING",
+            LogLevel.Critical: "ERROR",
+            LogLevel.Debug: "DEBUG"
+        }
+        prefix = prefixes.get(level, "LOG")
+        print(f"[Ramses][{prefix}] {str(message)}")
 
     def _saveAs(self, filePath:str, item:RamItem, step:RamStep, version:int, comment:str, incremented:bool) -> bool:
         if not self.comp: return False
@@ -252,15 +259,28 @@ class FusionHost(RamHost):
     def _setupCurrentFile(self, item:RamItem, step:RamStep, setupOptions:dict) -> bool:
         if not self.comp: return False
         
+        # Get duration from options or fallback to item
         fps = setupOptions.get("framerate", 24.0)
-        width = setupOptions.get("width", 1920)
-        height = setupOptions.get("height", 1080)
-        pa = setupOptions.get("pixelAspectRatio", 1.0)
+        duration = setupOptions.get("duration", 0.0)
         
-        duration = setupOptions.get("duration", 5.0)
+        # If duration is 0, try to get it directly from item if it's a shot
+        if duration <= 0 and item and item.itemType() == ItemType.SHOT:
+            try:
+                duration = float(item.duration())
+            except:
+                duration = 5.0
+            
+        # Fallback to a default if still 0
+        if duration <= 0:
+            duration = 5.0
+            
         total_frames = int(duration * fps)
         start = RAM_SETTINGS.userSettings.get("compStartFrame", 1001)
         end = start + total_frames - 1
+        
+        width = setupOptions.get("width", 1920)
+        height = setupOptions.get("height", 1080)
+        pa = setupOptions.get("pixelAspectRatio", 1.0)
         
         # Apply Frame Format
         self.comp.SetPrefs("Comp.FrameFormat.Rate", fps)
@@ -276,7 +296,7 @@ class FusionHost(RamHost):
             "COMPN_RenderEnd": float(end)
         })
         
-        self.log(f"Setup applied: {width}x{height} @ {fps}fps, Range: {start}-{end}", LogLevel.Info)
+        self.log(f"Setup applied: {width}x{height} @ {fps}fps, Range: {start}-{end} ({duration}s)", LogLevel.Info)
         return True
 
     def _statusUI(self, currentStatus:RamStatus = None) -> dict:

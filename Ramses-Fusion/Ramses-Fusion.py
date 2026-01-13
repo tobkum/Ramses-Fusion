@@ -60,6 +60,11 @@ class RamsesFusionApp:
         step_name = step.name() if step else "No Step"
         return f"<font color='#555'>{project_name} / </font><b>{item_name}</b><br><font color='#999'>{step_name}</font>"
 
+    def refresh_header(self):
+        """Updates the context label with current project/item/step info."""
+        if self.dlg:
+            self.dlg.GetItems()["ContextLabel"].Text = self._get_context_text()
+
     def show_main_window(self):
         self.dlg = self.disp.AddWindow(
             {
@@ -74,13 +79,23 @@ class RamsesFusionApp:
                         self.ui.HGap(15),
                         self.ui.VGroup({"Spacing": 4, "Weight": 1}, [
                             # Context Header
-                            self.ui.Label({
-                                "ID": "ContextLabel",
-                                "Text": self._get_context_text(),
-                                "Alignment": {"AlignHCenter": True, "AlignTop": True},
-                                "WordWrap": True,
-                                "Weight": 0,
-                            }),
+                            self.ui.HGroup({"Weight": 0}, [
+                                self.ui.Label({
+                                    "ID": "ContextLabel",
+                                    "Text": self._get_context_text(),
+                                    "Alignment": {"AlignHCenter": True, "AlignTop": True},
+                                    "WordWrap": True,
+                                    "Weight": 1,
+                                }),
+                                self.ui.Button({
+                                    "ID": "RefreshButton",
+                                    "Text": "↺",
+                                    "Weight": 0,
+                                    "MinimumSize": [24, 24],
+                                    "MaximumSize": [24, 24],
+                                    "Flat": True,
+                                })
+                            ]),
                             self.ui.VGap(10),
 
                             # Groups
@@ -113,7 +128,9 @@ class RamsesFusionApp:
         )
 
         # Bind Events
+        self.dlg.On.RefreshButton.Clicked = lambda ev: self.refresh_header()
         self.dlg.On.RamsesButton.Clicked = self.on_run_ramses
+        self.dlg.On.SwitchShotButton.Clicked = self.on_switch_shot
         self.dlg.On.ImportButton.Clicked = self.on_import
         self.dlg.On.ReplaceButton.Clicked = self.on_replace
         self.dlg.On.SaveButton.Clicked = self.on_save
@@ -121,6 +138,7 @@ class RamsesFusionApp:
         self.dlg.On.IncrementalSaveButton.Clicked = self.on_incremental_save
         self.dlg.On.UpdateStatusButton.Clicked = self.on_update_status
         self.dlg.On.PreviewButton.Clicked = self.on_preview
+        self.dlg.On.TemplateButton.Clicked = self.on_save_template
         self.dlg.On.SetupSceneButton.Clicked = self.on_setup_scene
         self.dlg.On.OpenButton.Clicked = self.on_open
         self.dlg.On.RetrieveButton.Clicked = self.on_retrieve
@@ -138,6 +156,7 @@ class RamsesFusionApp:
             self.ui.Label({"Text": "PROJECT & FILES", "Weight": 0, "Font": self.ui.Font({"PixelSize": 11, "Bold": True})}),
             self.create_button("RamsesButton", "Open Ramses Client", "ramses.png"),
             self.create_button("OpenButton", "Open Composition", "open.png"),
+            self.create_button("SwitchShotButton", "Switch Shot", "open.png"),
             self.create_button("RetrieveButton", "Retrieve Version", "retrieveVersion.png"),
         ])
 
@@ -147,6 +166,7 @@ class RamsesFusionApp:
             self.create_button("ImportButton", "Import Asset", "open.png"),
             self.create_button("ReplaceButton", "Replace Loader", "retrieveVersion.png"),
             self.create_button("SetupSceneButton", "Setup Scene", "setupScene.png"),
+            self.create_button("TemplateButton", "Save as Template", "template.png"),
         ])
 
     def _build_working_group(self):
@@ -172,7 +192,7 @@ class RamsesFusionApp:
             self.create_button("AboutButton", "About", "Settings.png"),
         ])
 
-    def create_button(self, id_name, text, icon_name, weight=1):
+    def create_button(self, id_name, text, icon_name, weight=0):
         icon_path = os.path.join(self.script_dir, "icons", icon_name)
         return self.ui.Button(
             {
@@ -225,7 +245,7 @@ class RamsesFusionApp:
             except ValueError:
                 self.settings.userSettings["compStartFrame"] = 1001
             self.settings.save()
-            print("Ramses: Settings Saved.")
+            self.ramses.host.log("Settings Saved.", ram.LogLevel.Info)
 
         def close_settings(ev):
              self.disp.ExitLoop()
@@ -280,6 +300,110 @@ class RamsesFusionApp:
     def on_run_ramses(self, ev):
         self.ramses.showClient()
 
+    def on_switch_shot(self, ev):
+        current_step = self.current_step
+        if not current_step:
+            self.ramses.host.log("Open a valid Ramses file first to set the context.", ram.LogLevel.Warning)
+            return
+
+        # 1. Get all shots in the project
+        all_shots = self.ramses.daemonInterface().getShots()
+        
+        # 2. Find templates for this step
+        template_files = []
+        tpl_folder = current_step.templatesFolderPath()
+        if os.path.isdir(tpl_folder):
+            template_files = [f for f in os.listdir(tpl_folder) if f.endswith(".comp")]
+
+        # 3. Map shots to options
+        shot_options = {}
+        shot_data_map = {} # label -> data
+        
+        for shot in all_shots:
+            status = shot.currentStatus(current_step)
+            # Skip shots that have "Nothing to do" (NO) or "Standby" (STB)
+            if status and status.state().shortName() in ['NO', 'STB']:
+                continue
+
+            # Construct filename using official API standards
+            nm = ram.RamFileInfo()
+            nm.project = shot.projectShortName()
+            nm.ramType = shot.itemType()
+            nm.shortName = shot.shortName()
+            nm.step = current_step.shortName()
+            nm.extension = "comp"
+            filename = nm.fileName()
+            
+            # Mimic API step folder calculation safely
+            # (API creates folders automatically, so we check existence manually first)
+            shot_root = shot.folderPath()
+            step_folder_name = filename.replace(".comp", "")
+            expected_path = os.path.join(shot_root, step_folder_name, filename).replace("\\", "/")
+            
+            exists = os.path.exists(expected_path)
+            status = shot.currentStatus(current_step)
+            
+            if exists:
+                state_name = status.state().name() if status else "WIP"
+                label = f"{shot.shortName()} [{state_name}]"
+            else:
+                label = f"{shot.shortName()} [EMPTY - Create New]"
+            
+            idx = str(len(shot_options))
+            shot_options[idx] = label
+            shot_data_map[label] = {"shot": shot, "path": expected_path, "exists": exists, "filename": filename}
+
+        if not shot_options:
+            self.ramses.host.log("No shots found in project.", ram.LogLevel.Info)
+            return
+
+        # 4. Show selection dialog
+        res = self.ramses.host._request_input("Switch / Create Shot", [
+            {'id': 'Shot', 'label': 'Select Shot:', 'type': 'combo', 'options': shot_options}
+        ])
+
+        if res:
+            selected_label = shot_options[str(res['Shot'])]
+            data = shot_data_map[selected_label]
+            shot_obj = data["shot"]
+            
+            # 5. Handle Creation from Template
+            if not data["exists"]:
+                # Use official API to resolve and create folders
+                step_folder = shot_obj.stepFolderPath(current_step)
+                selected_path = os.path.join(step_folder, data["filename"]).replace("\\", "/")
+                
+                use_template = None
+                if template_files:
+                    if len(template_files) == 1:
+                        use_template = os.path.join(tpl_folder, template_files[0])
+                    else:
+                        tpl_opts = {str(i): f for i, f in enumerate(template_files)}
+                        tpl_res = self.ramses.host._request_input("Select Template", [
+                            {'id': 'Tpl', 'label': 'Template:', 'type': 'combo', 'options': tpl_opts}
+                        ])
+                        if tpl_res:
+                            use_template = os.path.join(tpl_folder, template_files[tpl_res['Tpl']])
+                
+                if use_template:
+                    self.ramses.host.log(f"Creating shot from template: {use_template}", ram.LogLevel.Info)
+                    if self.ramses.host.open(use_template):
+                        self.ramses.host.comp.Save(selected_path)
+                else:
+                    self.ramses.host.log("No template found, initializing clean composition.", ram.LogLevel.Info)
+                    self.ramses.host.comp.Save(selected_path)
+                
+                # 6. Initialize Ramses Versioning idiomaticly
+                # host.save() handles the creation of _versions and metadata v001 automatically.
+                if self.ramses.host.save(comment="Initial creation", setupFile=True):
+                    self.refresh_header()
+                    self.ramses.host.log(f"New shot initialized: {selected_path}", ram.LogLevel.Info)
+            
+            # 7. Standard Open
+            else:
+                if self.ramses.host.open(data["path"]):
+                    self.refresh_header()
+
     def on_import(self, ev):
         self.ramses.host.importItem()
 
@@ -287,10 +411,12 @@ class RamsesFusionApp:
         self.ramses.host.replaceItem()
 
     def on_save(self, ev):
-        self.ramses.host.save()
+        if self.ramses.host.save():
+            self.refresh_header()
 
     def on_incremental_save(self, ev):
-        self.ramses.host.save(incremental=True)
+        if self.ramses.host.save(incremental=True):
+            self.refresh_header()
 
     def on_comment(self, ev):
         res = self.ramses.host._request_input("Add Comment", [
@@ -302,9 +428,11 @@ class RamsesFusionApp:
                 if status:
                     status.setComment(res['Comment'])
                     status.setVersion(self.ramses.host.currentVersion())
+                self.refresh_header()
 
     def on_update_status(self, ev):
-        self.ramses.host.updateStatus()
+        if self.ramses.host.updateStatus():
+            self.refresh_header()
 
     def on_preview(self, ev):
         self.ramses.host.savePreview()
@@ -343,17 +471,19 @@ class RamsesFusionApp:
         comp = self.ramses.host.comp
         if comp:
             comp.Save(path)
-            print(f"Ramses: Template '{name}' saved to {path}")
+            self.ramses.host.log(f"Template '{name}' saved to {path}", ram.LogLevel.Info)
 
     def on_setup_scene(self, ev):
         self.ramses.host.setupCurrentFile()
+        self.refresh_header()
 
     def on_open(self, ev):
         if self.ramses.host.open():
-            self.disp.ExitLoop()
+            self.refresh_header()
 
     def on_retrieve(self, ev):
-        self.ramses.host.restoreVersion()
+        if self.ramses.host.restoreVersion():
+            self.refresh_header()
 
     def on_close(self, ev):
         self.disp.ExitLoop()
