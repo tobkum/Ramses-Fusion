@@ -268,9 +268,15 @@ class FusionHost(RamHost):
 
     def _saveChangesUI(self) -> str:
         res = self._request_input("Save Changes?", [
-            {'id': 'Msg', 'label': '', 'type': 'line', 'default': 'Save current composition? (OK to save, Cancel to discard)'}
+            {'id': 'Mode', 'label': 'Current file is modified. Action:', 'type': 'combo', 'options': {
+                '0': 'Save and Continue',
+                '1': 'Discard and Continue',
+                '2': 'Cancel'
+            }}
         ])
-        return "save" if res else "discard"
+        if not res: return "cancel"
+        modes = {0: "save", 1: "discard", 2: "cancel"}
+        return modes.get(res['Mode'], "cancel")
 
     def _setupCurrentFile(self, item:RamItem, step:RamStep, setupOptions:dict) -> bool:
         if not self.comp: return False
