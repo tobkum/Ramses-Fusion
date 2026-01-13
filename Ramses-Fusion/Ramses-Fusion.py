@@ -122,8 +122,9 @@ class RamsesFusionApp:
                                                         "ID": "RefreshButton",
                                                         "Text": "",
                                                         "Weight": 0,
-                                                        "MinimumSize": [24, 24],
-                                                        "MaximumSize": [24, 24],
+                                                        "MinimumSize": [48, 48],
+                                                        "MaximumSize": [48, 48],
+                                                        "IconSize": [32, 32],
                                                         "Flat": True,
                                                         "ToolTip": "Manually refresh the context header.",
                                                         "Icon": self.ui.Icon(
@@ -609,39 +610,61 @@ class RamsesFusionApp:
                 use_template = None
                 if template_files:
                     # Add "Empty" as the first option
-                    tpl_opts = {'0': 'None - Empty Composition'}
+                    tpl_opts = {"0": "None - Empty Composition"}
                     for i, f in enumerate(template_files):
-                        tpl_opts[str(i+1)] = f
-                        
-                    tpl_res = self.ramses.host._request_input("Select Template", [
-                        {'id': 'Tpl', 'label': 'Template:', 'type': 'combo', 'options': tpl_opts}
-                    ])
-                    
+                        tpl_opts[str(i + 1)] = f
+
+                    tpl_res = self.ramses.host._request_input(
+                        "Select Template",
+                        [
+                            {
+                                "id": "Tpl",
+                                "label": "Template:",
+                                "type": "combo",
+                                "options": tpl_opts,
+                            }
+                        ],
+                    )
+
                     if tpl_res:
-                        idx = int(tpl_res['Tpl'])
-                        if idx > 0: # Selected a file
-                            use_template = os.path.join(tpl_folder, template_files[idx-1])
-                        else: # Selected "None - Empty"
+                        idx = int(tpl_res["Tpl"])
+                        if idx > 0:  # Selected a file
+                            use_template = os.path.join(
+                                tpl_folder, template_files[idx - 1]
+                            )
+                        else:  # Selected "None - Empty"
                             self.ramses.host.fusion.NewComp()
                     else:
-                        return # Cancelled
-                
+                        return  # Cancelled
+
                 if use_template:
-                    self.ramses.host.log(f"Creating shot from template: {use_template}", ram.LogLevel.Info)
+                    self.ramses.host.log(
+                        f"Creating shot from template: {use_template}",
+                        ram.LogLevel.Info,
+                    )
                     if self.ramses.host.open(use_template):
                         self.ramses.host.comp.Save(selected_path)
-                elif not template_files: # Fallback if no templates existed at all
-                    init_res = self.ramses.host._request_input("Initialize Shot", [
-                        {'id': 'Mode', 'label': 'No template found. Use:', 'type': 'combo', 'options': {
-                            '0': 'Empty Composition',
-                            '1': 'Current Composition as base'
-                        }}
-                    ])
-                    if not init_res: return
-                    if init_res['Mode'] == 0:
+                elif not template_files:  # Fallback if no templates existed at all
+                    init_res = self.ramses.host._request_input(
+                        "Initialize Shot",
+                        [
+                            {
+                                "id": "Mode",
+                                "label": "No template found. Use:",
+                                "type": "combo",
+                                "options": {
+                                    "0": "Empty Composition",
+                                    "1": "Current Composition as base",
+                                },
+                            }
+                        ],
+                    )
+                    if not init_res:
+                        return
+                    if init_res["Mode"] == 0:
                         self.ramses.host.fusion.NewComp()
                     self.ramses.host.comp.Save(selected_path)
-                else: # User selected "None - Empty" in the list
+                else:  # User selected "None - Empty" in the list
                     self.ramses.host.comp.Save(selected_path)
 
                 # 6. Initialize Ramses Versioning idiomaticly
