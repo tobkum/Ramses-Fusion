@@ -56,6 +56,8 @@ class RamsesFusionApp:
                     },
                     [
                         self.create_button("RamsesButton", "Open Ramses Client", "ramses.png"),
+                        self.create_button("ImportButton", "Import Item", "open.png"),
+                        self.create_button("ReplaceButton", "Replace Item", "retrieveVersion.png"),
                         self.create_button("SaveButton", "Save", "save.png"),
                         self.create_button("CommentButton", "Comment", "comment.png"),
                         self.create_button("IncrementalSaveButton", "Incremental Save", "incrementalSave.png"),
@@ -81,12 +83,14 @@ class RamsesFusionApp:
 
         # Bind Events
         self.dlg.On.RamsesButton.Clicked = self.on_run_ramses
+        self.dlg.On.ImportButton.Clicked = self.on_import
+        self.dlg.On.ReplaceButton.Clicked = self.on_replace
         self.dlg.On.SaveButton.Clicked = self.on_save
         self.dlg.On.CommentButton.Clicked = self.on_update_status
         self.dlg.On.IncrementalSaveButton.Clicked = self.on_incremental_save
         self.dlg.On.UpdateStatusButton.Clicked = self.on_update_status
         self.dlg.On.PreviewButton.Clicked = self.on_preview
-        self.dlg.On.TemplateButton.Clicked = self.on_dummy 
+        self.dlg.On.TemplateButton.Clicked = self.on_save_template
         self.dlg.On.SetupSceneButton.Clicked = self.on_setup_scene
         self.dlg.On.OpenButton.Clicked = self.on_open
         self.dlg.On.RetrieveButton.Clicked = self.on_retrieve
@@ -162,6 +166,20 @@ class RamsesFusionApp:
                             ],
                         ),
                         self.ui.HGroup(
+                            {"Spacing": 0},
+                            [
+                                self.ui.Label({"Text": "Comp Start Frame:"}),
+                                self.ui.LineEdit(
+                                    {
+                                        "ID": "StartFrameTxt",
+                                        "Weight": 2,
+                                        "Text": str(self.settings.userSettings.get("compStartFrame", 1001)),
+                                        "PlaceholderText": "e.g. 1, 1001",
+                                    }
+                                ),
+                            ],
+                        ),
+                        self.ui.HGroup(
                             {"Spacing": 5},
                             [
                                 self.ui.Button({"ID": "SaveSettingsButton", "Text": "Save"}),
@@ -178,6 +196,10 @@ class RamsesFusionApp:
         def save_settings(ev):
             self.settings.ramsesClientPort = int(itm["RamsesPortTxt"].Text)
             self.settings.ramsesClientPath = str(itm["RamsesPathTxt"].Text)
+            try:
+                self.settings.userSettings["compStartFrame"] = int(itm["StartFrameTxt"].Text)
+            except ValueError:
+                self.settings.userSettings["compStartFrame"] = 1001
             self.settings.save()
 
         def close_settings(ev):
@@ -242,6 +264,12 @@ class RamsesFusionApp:
     def on_run_ramses(self, ev):
         self.ramses.showClient()
 
+    def on_import(self, ev):
+        self.ramses.host.importItem()
+
+    def on_replace(self, ev):
+        self.ramses.host.replaceItem()
+
     def on_save(self, ev):
         self.ramses.host.save()
 
@@ -253,6 +281,69 @@ class RamsesFusionApp:
 
     def on_preview(self, ev):
         self.ramses.host.savePreview()
+
+    def on_save_template(self, ev):
+        # Logic
+        step = self.ramses.host.currentStep()
+        if not step:
+            msg = "Please save the current file as a valid Ramses Step first."
+            print("Ramses Warning: " + msg)
+            
+            # Show Warning Dialog
+            dlg = self.disp.AddWindow(
+                { "WindowTitle": "Ramses Warning", "ID": "WarnWin", "Geometry": [300, 300, 300, 100] },
+                [
+                    self.ui.VGroup({"Spacing": 10}, [
+                        self.ui.Label({"Text": msg, "Alignment": {"AlignHCenter": True}}),
+                        self.ui.Button({"ID": "OkBtn", "Text": "OK"})
+                    ])
+                ]
+            )
+            dlg.On.OkBtn.Clicked = lambda ev: self.disp.ExitLoop()
+            dlg.On.WarnWin.Close = lambda ev: self.disp.ExitLoop()
+            dlg.Show()
+            self.disp.RunLoop()
+            dlg.Hide()
+            return
+
+        # Ask for template name using native Fusion dialog
+        # This avoids nested RunLoop issues
+        ret = fu.AskUser("Save as Template", {
+            "Name": {"Name": "Template Name", "Type": "Text", "Default": "NewTemplate"}
+        })
+        
+        if not ret:
+            return # User cancelled
+
+        raw_name = ret.get("Name", "NewTemplate")
+        
+        # Sanitize Name: Ramses shortNames should be alphanumeric + hyphens
+        import re
+        name = re.sub(r'[^a-zA-Z0-9\-]', '', raw_name)
+        
+        if not name:
+            name = "Template"
+
+        project = step.projectShortName()
+        # Build filename: PROJ_G_Name_STEP.comp
+        nm = ram.RamFileInfo()
+        nm.project = project
+        nm.ramType = ram.ItemType.GENERAL
+        nm.shortName = name
+        nm.step = step.shortName()
+        nm.extension = "comp"
+        
+        folder = step.templatesFolderPath()
+        path = os.path.join(folder, nm.fileName())
+        
+        # Save Comp
+        comp = self.ramses.host.comp
+        if comp:
+            comp.Save(path)
+            
+        # Register
+        self.ramses.saveTemplate("comp", step, name)
+        print(f"Ramses: Template '{name}' saved to {path}")
 
     def on_setup_scene(self, ev):
         self.ramses.host.setupCurrentFile()
