@@ -342,17 +342,17 @@ class FusionHost(RamHost):
         height = setupOptions.get("height", 1080)
         pa = setupOptions.get("pixelAspectRatio", 1.0)
         
-        # Apply Frame Format as an atomic dictionary (most reliable in Fusion)
-        self.comp.SetPrefs({
-            "Comp.FrameFormat.Rate": float(fps),
-            "Comp.FrameFormat.Width": int(width),
-            "Comp.FrameFormat.Height": int(height),
-            "Comp.FrameFormat.AspectX": float(pa),
-            "Comp.FrameFormat.AspectY": 1.0
-        })
+        # Apply Frame Format Rate via Prefs (required for FPS)
+        self.comp.SetPrefs("Comp.FrameFormat.Rate", float(fps))
         
-        # Apply Render Ranges
+        # Apply Resolution and Aspect Ratio via Attrs (Immediate and more reliable)
         self.comp.SetAttrs({
+            "COMPN_Width": int(width),
+            "COMPN_Height": int(height),
+            "COMPN_AspectX": float(pa),
+            "COMPN_AspectY": 1.0,
+            "COMPN_PixelAspectX": float(pa),
+            "COMPN_PixelAspectY": 1.0,
             "COMPN_GlobalStart": float(start), 
             "COMPN_GlobalEnd": float(end), 
             "COMPN_RenderStart": float(start), 

@@ -854,32 +854,32 @@ class RamsesFusionApp:
         item = self.current_item
         step = self.current_step
         
-        # 1. Determine the provider for technical specs (Sequence or Project)
-        # Shots inherit specs from their Sequence.
+        # 1. Start with Project Level technical specs
+        # PAR is strictly a Project setting in Ramses.
         spec_provider = project
+        pa = float(project.pixelAspectRatio())
         duration = 5.0
         
+        # 2. Resolve Overrides (Sequence can override Resolution and FPS)
         if item and item.itemType() == ram.ItemType.SHOT:
             duration = item.duration()
-            # Get the Sequence object to check for overrides
             if hasattr(item, "sequence") and item.sequence():
                 spec_provider = item.sequence()
         
-        # 2. Use official API methods on the provider (Sequence or Project)
-        # These methods handle the internal override logic correctly.
+        # 3. Compile high-performance settings dict
+        # Resolution and FPS come from spec_provider (Sequence or Project)
+        # PAR comes from project (Global)
         settings = {
             "width": int(spec_provider.width()),
             "height": int(spec_provider.height()),
             "framerate": float(spec_provider.framerate()),
             "duration": float(duration),
-            "pixelAspectRatio": float(spec_provider.pixelAspectRatio())
+            "pixelAspectRatio": pa
         }
             
-        # 3. Apply and update UI
+        # 4. Apply directly and refresh UI
         if self.ramses.host._setupCurrentFile(item, step, settings):
-            if self.dlg:
-                self._last_path = self.ramses.host.currentFilePath()
-                self.dlg.GetItems()["ContextLabel"].Text = self._get_context_text()
+            self.refresh_header()
 
     def on_open(self, ev):
         if self.ramses.host.open():
