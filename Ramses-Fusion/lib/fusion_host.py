@@ -322,14 +322,12 @@ class FusionHost(RamHost):
         state_opts = {str(i): s.name() for i, s in enumerate(states)}
         
         cur_comment = currentStatus.comment() if currentStatus else ""
-        cur_ratio = currentStatus.completionRatio() if currentStatus else 50
         cur_short = currentStatus.state().shortName() if currentStatus else "WIP"
         def_idx = next((i for i, s in enumerate(states) if s.shortName() == cur_short), 0)
 
         res = self._request_input("Update Status", [
             {'id': 'Comment', 'label': 'Comment:', 'type': 'text', 'default': cur_comment, 'lines': 6},
             {'id': 'State', 'label': 'State:', 'type': 'combo', 'options': state_opts, 'default': def_idx},
-            {'id': 'Ratio', 'label': 'Ratio (%):', 'type': 'slider', 'default': cur_ratio},
             {'id': 'Publish', 'label': 'Publish:', 'type': 'checkbox', 'default': False}
         ])
         
@@ -340,7 +338,7 @@ class FusionHost(RamHost):
         
         return {
             "comment": res['Comment'], 
-            "completionRatio": int(res['Ratio']), 
+            "completionRatio": int(selected_state.completionRatio()), 
             "publish": res['Publish'], 
             "state": selected_state, 
             "showPublishUI": False, 
