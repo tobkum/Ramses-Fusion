@@ -352,8 +352,8 @@ class RamsesFusionApp:
             filename = nm.fileName()
             
             # Mimic API step folder calculation safely
-            # (API creates folders automatically, so we check existence manually first)
-            shot_root = shot.folderPath()
+            # Use daemon directly to get path without triggering folder creation
+            shot_root = self.ramses.daemonInterface().getPath(shot.uuid(), "RamShot")
             step_folder_name = filename.replace(".comp", "")
             expected_path = os.path.join(shot_root, step_folder_name, filename).replace("\\", "/")
             

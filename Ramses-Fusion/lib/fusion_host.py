@@ -227,6 +227,22 @@ class FusionHost(RamHost):
             self.log(f"Publish failed: {e}", LogLevel.Critical)
             return []
 
+    def _replace(self, filePaths:list, item:RamItem, step:RamStep, importOptions:list, forceShowImportUI:bool) -> bool:
+        if not self.comp: return False
+        active = self.comp.ActiveTool
+        if not active or active.GetAttrs()["TOOLS_RegID"] != "Loader":
+            self.log("Please select a Loader node to replace.", LogLevel.Warning)
+            return False
+        
+        if filePaths:
+            active.Clip[1] = filePaths[0]
+            # Rename if it was a generic name
+            if "Loader" in active.GetAttrs()["TOOLS_Name"]:
+                name = f"{item.shortName()}_{step.shortName()}" if step else item.shortName()
+                active.SetAttrs({"TOOLS_Name": name})
+            return True
+        return False
+
     def _replaceUI(self, item:RamItem, step:RamStep) -> dict:
         res = self._openUI(item, step)
         if res: return {"filePaths": [res["filePath"]]}
