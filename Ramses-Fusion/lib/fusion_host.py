@@ -287,6 +287,7 @@ class FusionHost(RamHost):
         self.comp.SetPrefs("Comp.FrameFormat.Width", width)
         self.comp.SetPrefs("Comp.FrameFormat.Height", height)
         self.comp.SetPrefs("Comp.FrameFormat.AspectX", pa)
+        self.comp.SetPrefs("Comp.FrameFormat.AspectY", 1.0)
         
         # Apply Render Ranges
         self.comp.SetAttrs({
