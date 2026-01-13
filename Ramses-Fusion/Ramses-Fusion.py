@@ -63,37 +63,31 @@ class RamsesFusionApp:
     def _get_context_text(self):
         item = self.current_item
         step = self.current_step
-
+        
         if not item:
             return "<font color='#777'>No Active Ramses Item</font>"
-
+            
         project = item.project()
         project_name = project.name() if project else item.projectShortName()
         item_name = item.shortName()
         step_name = step.name() if step else "No Step"
         return f"<font color='#555'>{project_name} / </font><b>{item_name}</b><br><font color='#999'>{step_name}</font>"
 
-    def _check_connection(self):
-        """Checks if Ramses Daemon is online and shows a dialog if not."""
-        # If marked offline, try to reconnect first
-        if not self.ramses.online():
-            self.ramses.connect()
-
-        if not self.ramses.online():
-            self.ramses.host._request_input("Ramses Connection Error", [
-                {'id': 'E', 'label': '', 'type': 'text', 'default': 'Could not reach the Ramses Client. \n\nPlease make sure Ramses is running and you are logged in.', 'lines': 3}
-            ])
-            return False
-        return True
+    def _get_footer_text(self):
+        user = self.ramses.user()
+        user_name = user.name() if user else "Not Logged In"
+        return f"<font color='#555'>User: {user_name} | Ramses API {self.settings.version}</font>"
 
     def refresh_header(self):
-        """Updates the context label with current project/item/step info."""
+        """Updates the context label and footer with current info."""
         if not self._check_connection():
             return
             
         if self.dlg:
             self._last_path = self.ramses.host.currentFilePath()
-            self.dlg.GetItems()["ContextLabel"].Text = self._get_context_text()
+            items = self.dlg.GetItems()
+            items["ContextLabel"].Text = self._get_context_text()
+            items["RamsesVersion"].Text = self._get_footer_text()
 
     def show_main_window(self):
         # Initial path capture
@@ -169,16 +163,13 @@ class RamsesFusionApp:
                                         self._build_settings_group(),
                                         # Spacer to push everything up
                                         self.ui.VGap(0, 1),
-                                        # Footer Version
-                                        self.ui.Label(
-                                            {
-                                                "ID": "RamsesVersion",
-                                                "Text": "Ramses API "
-                                                + self.settings.version,
-                                                "Alignment": {"AlignHCenter": True},
-                                                "Weight": 0,
-                                            }
-                                        ),
+                                                                    # Footer Version
+                                                                    self.ui.Label({
+                                                                        "ID": "RamsesVersion",
+                                                                        "Text": self._get_footer_text(),
+                                                                        "Alignment": {"AlignHCenter": True},
+                                                                        "Weight": 0,
+                                                                    }),
                                     ],
                                 ),
                                 self.ui.HGap(15),

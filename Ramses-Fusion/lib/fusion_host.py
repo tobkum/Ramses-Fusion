@@ -290,7 +290,7 @@ class FusionHost(RamHost):
         if duration <= 0:
             duration = 5.0
             
-        total_frames = int(duration * fps)
+        total_frames = int(round(duration * fps))
         start = RAM_SETTINGS.userSettings.get("compStartFrame", 1001)
         end = start + total_frames - 1
         
