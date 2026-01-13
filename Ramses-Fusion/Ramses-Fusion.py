@@ -394,8 +394,9 @@ class RamsesFusionApp:
                     self.ramses.host.comp.Save(selected_path)
                 
                 # 6. Initialize Ramses Versioning idiomaticly
-                # host.save() handles the creation of _versions and metadata v001 automatically.
-                if self.ramses.host.save(comment="Initial creation", setupFile=True):
+                # Only attempt setup if a project is active
+                has_project = self.ramses.project() is not None
+                if self.ramses.host.save(comment="Initial creation", setupFile=has_project):
                     self.refresh_header()
                     self.ramses.host.log(f"New shot initialized: {selected_path}", ram.LogLevel.Info)
             
@@ -411,11 +412,13 @@ class RamsesFusionApp:
         self.ramses.host.replaceItem()
 
     def on_save(self, ev):
-        if self.ramses.host.save():
+        has_project = self.ramses.project() is not None
+        if self.ramses.host.save(setupFile=has_project):
             self.refresh_header()
 
     def on_incremental_save(self, ev):
-        if self.ramses.host.save(incremental=True):
+        has_project = self.ramses.project() is not None
+        if self.ramses.host.save(incremental=True, setupFile=has_project):
             self.refresh_header()
 
     def on_comment(self, ev):
@@ -423,7 +426,8 @@ class RamsesFusionApp:
             {'id': 'Comment', 'label': 'Comment:', 'type': 'text', 'default': '', 'lines': 5}
         ])
         if res and res['Comment']:
-            if self.ramses.host.save(comment=res['Comment']):
+            has_project = self.ramses.project() is not None
+            if self.ramses.host.save(comment=res['Comment'], setupFile=has_project):
                 status = self.ramses.host.currentStatus()
                 if status:
                     status.setComment(res['Comment'])
@@ -474,8 +478,11 @@ class RamsesFusionApp:
             self.ramses.host.log(f"Template '{name}' saved to {path}", ram.LogLevel.Info)
 
     def on_setup_scene(self, ev):
-        self.ramses.host.setupCurrentFile()
-        self.refresh_header()
+        if self.ramses.project():
+            self.ramses.host.setupCurrentFile()
+            self.refresh_header()
+        else:
+            self.ramses.host.log("No active Ramses project found. Cannot setup scene parameters.", ram.LogLevel.Warning)
 
     def on_open(self, ev):
         if self.ramses.host.open():
