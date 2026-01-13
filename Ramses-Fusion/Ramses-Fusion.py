@@ -115,6 +115,10 @@ class RamsesFusionApp:
         step_name = step.name() if step else "No Step"
         return f"<font color='#555'>{project_name} / </font><b>{item_name}</b><br><font color='#999'>{step_name}</font>"
 
+    def log(self, message, level=ram.LogLevel.Info):
+        """Directly logs to the Fusion console bypassing API filtering."""
+        self.ramses.host._log(message, level)
+
     def _get_footer_text(self):
         return f"<font color='#555'>User: {self._get_user_name()} | Ramses API {self.settings.version}</font>"
 

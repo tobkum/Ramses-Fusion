@@ -150,42 +150,6 @@ class FusionHost(RamHost):
             
         return ui.Label({"Text": "Unknown Field"}), 30
 
-        dlg = disp.AddWindow(
-            {"WindowTitle": title, "ID": "CustomDlg", "Geometry": [400, 400, 500, total_height]},
-            ui.VGroup([
-                ui.VGroup({"Spacing": 5}, rows),
-                ui.VGap(10),
-                ui.HGroup([
-                    ui.HGap(200),
-                    ui.Button({"ID": "OkBtn", "Text": "OK", "Weight": 0.1}),
-                    ui.Button({"ID": "CancelBtn", "Text": "Cancel", "Weight": 0.1})
-                ])
-            ])
-        )
-        
-        results = {}
-        
-        def on_ok(ev):
-            items = dlg.GetItems()
-            for f in fields:
-                ctrl = items[f['id']]
-                if f['type'] == 'text': results[f['id']] = ctrl.PlainText
-                elif f['type'] == 'line': results[f['id']] = ctrl.Text
-                elif f['type'] == 'combo': results[f['id']] = int(ctrl.CurrentIndex)
-                elif f['type'] == 'slider': results[f['id']] = int(ctrl.Value)
-                elif f['type'] == 'checkbox': results[f['id']] = bool(ctrl.Checked)
-            disp.ExitLoop()
-            
-        dlg.On.OkBtn.Clicked = on_ok
-        dlg.On.CancelBtn.Clicked = lambda ev: disp.ExitLoop()
-        dlg.On.CustomDlg.Close = lambda ev: disp.ExitLoop()
-        
-        dlg.Show()
-        disp.RunLoop()
-        dlg.Hide()
-        
-        return results if results else None
-
     # -------------------------------------------------------------------------
     # Pipeline Implementation
     # -------------------------------------------------------------------------
