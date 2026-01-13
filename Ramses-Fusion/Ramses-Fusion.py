@@ -154,51 +154,68 @@ class RamsesFusionApp:
     def _build_project_group(self):
         return self.ui.VGroup([
             self.ui.Label({"Text": "PROJECT & SCENE", "Weight": 0, "Font": self.ui.Font({"PixelSize": 11, "Bold": True})}),
-            self.create_button("OpenButton", "Open Composition", "open.png"),
-            self.create_button("SwitchShotButton", "Switch Shot", "open.png"),
-            self.create_button("SetupSceneButton", "Setup Scene", "setupScene.png"),
-            self.create_button("RamsesButton", "Open Ramses Client", "ramses.png"),
+            self.create_button("OpenButton", "Open Composition", "open.png", 
+                               tooltip="Browse and open an existing Ramses composition."),
+            self.create_button("SwitchShotButton", "Switch Shot", "open.png", 
+                               tooltip="Quickly jump to another shot in this project or create a new one from a template."),
+            self.create_button("SetupSceneButton", "Setup Scene", "setupScene.png", 
+                               tooltip="Automatically set the resolution, FPS, and frame range based on Ramses project settings."),
+            self.create_button("RamsesButton", "Open Ramses Client", "ramses.png", 
+                               tooltip="Launch the main Ramses Client application."),
         ])
 
     def _build_pipeline_group(self):
         return self.ui.VGroup([
             self.ui.Label({"Text": "ASSETS & TOOLS", "Weight": 0, "Font": self.ui.Font({"PixelSize": 11, "Bold": True})}),
-            self.create_button("ImportButton", "Import Asset", "open.png"),
-            self.create_button("ReplaceButton", "Replace Loader", "retrieveVersion.png"),
-            self.create_button("TemplateButton", "Save as Template", "template.png"),
+            self.create_button("ImportButton", "Import Asset", "open.png", 
+                               tooltip="Import a published asset or render into the current composition."),
+            self.create_button("ReplaceButton", "Replace Loader", "retrieveVersion.png", 
+                               tooltip="Replace the selected Loader node with a different version or asset."),
+            self.create_button("TemplateButton", "Save as Template", "template.png", 
+                               tooltip="Save the current composition as a template for other shots in this step."),
         ])
 
     def _build_working_group(self):
         return self.ui.VGroup([
             self.ui.Label({"Text": "SAVING & ITERATION", "Weight": 0, "Font": self.ui.Font({"PixelSize": 11, "Bold": True})}),
-            self.create_button("IncrementalSaveButton", "Incremental Save", "incrementalSave.png"),
-            self.create_button("SaveButton", "Save", "save.png"),
-            self.create_button("RetrieveButton", "Retrieve Version", "retrieveVersion.png"),
-            self.create_button("CommentButton", "Add Comment", "comment.png"),
+            self.create_button("IncrementalSaveButton", "Incremental Save", "incrementalSave.png", 
+                               tooltip="Save a new version of the current file (v001 -> v002)."),
+            self.create_button("SaveButton", "Save", "save.png", 
+                               tooltip="Overwrite the current working file version."),
+            self.create_button("RetrieveButton", "Retrieve Version", "retrieveVersion.png", 
+                               tooltip="Open a previous version of this composition from the _versions folder."),
+            self.create_button("CommentButton", "Add Comment", "comment.png", 
+                               tooltip="Add a note to the current version in the Ramses database."),
         ])
 
     def _build_publish_group(self):
         return self.ui.VGroup([
             self.ui.Label({"Text": "REVIEW & PUBLISH", "Weight": 0, "Font": self.ui.Font({"PixelSize": 11, "Bold": True})}),
-            self.create_button("PreviewButton", "Create Preview", "preview.png"),
-            self.create_button("UpdateStatusButton", "Update Status / Publish", "updateStatus.png"),
+            self.create_button("PreviewButton", "Create Preview", "preview.png", 
+                               tooltip="Generate a preview render for review."),
+            self.create_button("UpdateStatusButton", "Update Status / Publish", "updateStatus.png", 
+                               tooltip="Change the shot status (WIP, Review, Done) and optionally publish the final comp."),
         ])
 
     def _build_settings_group(self):
         return self.ui.VGroup([
             self.ui.Label({"Text": "SETTINGS & INFO", "Weight": 0, "Font": self.ui.Font({"PixelSize": 11, "Bold": True})}),
-            self.create_button("PubSettingsButton", "Publish Settings", "publishSettings.png"),
-            self.create_button("SettingsButton", "Plugin Settings", "Settings.png"),
-            self.create_button("AboutButton", "About", "Settings.png"),
+            self.create_button("PubSettingsButton", "Publish Settings", "publishSettings.png", 
+                               tooltip="Configure YAML settings for automated publishing."),
+            self.create_button("SettingsButton", "Plugin Settings", "Settings.png", 
+                               tooltip="Configure Ramses paths, ports, and default frame ranges."),
+            self.create_button("AboutButton", "About", "Settings.png", 
+                               tooltip="Information about Ramses-Fusion and Overmind Studios."),
         ])
 
-    def create_button(self, id_name, text, icon_name, weight=0):
+    def create_button(self, id_name, text, icon_name, weight=0, tooltip=""):
         icon_path = os.path.join(self.script_dir, "icons", icon_name)
         return self.ui.Button(
             {
                 "ID": id_name,
                 "Text": "  " + text if text else "",
                 "Weight": weight,
+                "ToolTip": tooltip,
                 "Icon": self.ui.Icon({"File": icon_path}),
             }
         )
