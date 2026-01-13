@@ -33,28 +33,27 @@ class RamsesFusionApp:
         self.icon_dir = os.path.join(self.script_dir, "icons")
         self._icon_cache = {}
         self.dlg = None
-        self._last_path = ""  # Track path for auto-refresh
         self._project_cache = None
         self._user_name_cache = None
         
         # Context Caching
         self._item_cache = None
         self._step_cache = None
-        self._ctx_path = ""
+        self._active_path = ""
 
     @property
     def current_item(self):
         path = self.ramses.host.currentFilePath()
-        if path != self._ctx_path or not self._item_cache:
-            self._ctx_path = path
+        if path != self._active_path or not self._item_cache:
+            self._active_path = path
             self._item_cache = self.ramses.host.currentItem()
         return self._item_cache
 
     @property
     def current_step(self):
         path = self.ramses.host.currentFilePath()
-        if path != self._ctx_path or not self._step_cache:
-            self._ctx_path = path
+        if path != self._active_path or not self._step_cache:
+            self._active_path = path
             self._step_cache = self.ramses.host.currentStep()
         return self._step_cache
 
@@ -146,21 +145,19 @@ class RamsesFusionApp:
                 self._user_name_cache = None
                 self._item_cache = None
                 self._step_cache = None
-                self._ctx_path = ""
+                self._active_path = ""
                 
-                self._last_path = self.ramses.host.currentFilePath()
+                self._active_path = self.ramses.host.currentFilePath()
                 items = self.dlg.GetItems()
                 if "ContextLabel" in items:
                     items["ContextLabel"].Text = self._get_context_text()
                 if "RamsesVersion" in items:
                     items["RamsesVersion"].Text = self._get_footer_text()
             except:
-                # Window might be closing or invalid
                 pass
 
     def show_main_window(self):
-        # Initial path capture
-        self._last_path = self.ramses.host.currentFilePath()
+        self._active_path = self.ramses.host.currentFilePath()
 
         self.dlg = self.disp.AddWindow(
             {
@@ -862,30 +859,24 @@ class RamsesFusionApp:
         item = self.current_item
         step = self.current_step
         
-        # 1. Start with Project Level technical specs
-        # PAR is strictly a Project setting in Ramses.
+        # Determine tech spec provider (Hierarchy: Sequence > Project)
         spec_provider = project
-        pa = float(project.pixelAspectRatio())
         duration = 5.0
         
-        # 2. Resolve Overrides (Sequence can override Resolution and FPS)
         if item and item.itemType() == ram.ItemType.SHOT:
             duration = item.duration()
-            if hasattr(item, "sequence") and item.sequence():
-                spec_provider = item.sequence()
+            seq = item.sequence()
+            if seq:
+                spec_provider = seq
         
-        # 3. Compile high-performance settings dict
-        # Resolution and FPS come from spec_provider (Sequence or Project)
-        # PAR comes from project (Global)
         settings = {
             "width": int(spec_provider.width()),
             "height": int(spec_provider.height()),
             "framerate": float(spec_provider.framerate()),
             "duration": float(duration),
-            "pixelAspectRatio": pa
+            "pixelAspectRatio": float(project.pixelAspectRatio())
         }
             
-        # 4. Apply directly and refresh UI
         if self.ramses.host._setupCurrentFile(item, step, settings):
             self.refresh_header()
 
