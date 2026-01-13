@@ -193,11 +193,22 @@ class FusionHost(RamHost):
         start_frame = RAM_SETTINGS.userSettings.get("compStartFrame", 1001)
         
         for path in filePaths:
-            loader = self.comp.AddTool("Loader", -32768, -32768, {"Clip": path})
+            loader = self.comp.AddTool("Loader", -32768, -32768)
             if loader:
-                # Smart Naming
-                name = f"{item.shortName()}_{step.shortName()}" if step else item.shortName()
-                loader.SetAttrs({"TOOLS_Name": name})
+                # Explicitly set the clip path
+                loader.Clip[1] = path
+                
+                # Smart Naming with safety fallback
+                if item:
+                    name = f"{item.shortName()}_{step.shortName()}" if step else item.shortName()
+                else:
+                    # Fallback to sanitized base filename
+                    base = os.path.splitext(os.path.basename(path))[0]
+                    # Sanitize: Fusion node names can't have spaces or dots
+                    name = "".join([c if c.isalnum() else "_" for c in base])
+                
+                if name:
+                    loader.SetAttrs({"TOOLS_Name": name})
                 
                 # Automatic Alignment
                 loader.GlobalIn[1] = float(start_frame)
@@ -216,15 +227,42 @@ class FusionHost(RamHost):
     def _preview(self, previewFolderPath:str, previewFileBaseName:str, item:RamItem, step:RamStep) -> list:
         return []
 
+    def _publishOptions(self, proposedOptions:dict, showPublishUI:bool=False) -> dict:
+        # If the UI is forced, we could show a dialog here. 
+        # For now, we return the options to ensure the process continues.
+        return proposedOptions or {}
+
+    def _prePublish(self, publishInfo:RamFileInfo, publishOptions:dict) -> dict:
+        return publishOptions or {}
+
     def _publish(self, publishInfo:RamFileInfo, publishOptions:dict) -> list:
+        if not self.comp: return []
+        
         src = self.currentFilePath()
-        if not src or not os.path.exists(src): return []
-        dst = publishInfo.filePath()
+        if not src:
+            self.log("Cannot publish: current composition has no saved path.", LogLevel.Critical)
+            return []
+            
+        # Ensure publishInfo has the correct extension for the comp backup
+        ext = os.path.splitext(src)[1].lstrip('.')
+        
+        # Use the official API to get the correct publish path
+        dst = self.publishFilePath(ext, "", publishInfo)
+        
+        # Log at INFO level to ensure it appears in console
+        self.log(f"Publishing SRC: {src}", LogLevel.Info)
+        self.log(f"Publishing DST: {dst}", LogLevel.Info)
+        
         try:
-            shutil.copy2(src, dst)
+            # Using comp.Save instead of shutil.copy to avoid file locks
+            self.comp.Save(dst)
+            # Re-save to the original location to keep the working file active
+            self.comp.Save(src)
+            
+            self.log(f"Successfully published comp to: {dst}", LogLevel.Info)
             return [dst]
         except Exception as e:
-            self.log(f"Publish failed: {e}", LogLevel.Critical)
+            self.log(f"Publish failed during file save: {e}", LogLevel.Critical)
             return []
 
     def _replace(self, filePaths:list, item:RamItem, step:RamStep, importOptions:list, forceShowImportUI:bool) -> bool:
