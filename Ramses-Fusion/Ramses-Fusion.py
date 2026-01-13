@@ -118,6 +118,66 @@ class RamsesFusionApp:
     def _get_footer_text(self):
         return f"<font color='#555'>User: {self._get_user_name()} | Ramses API {self.settings.version}</font>"
 
+    def _create_render_anchors(self):
+        """Intelligently creates _PREVIEW and _FINAL anchor nodes in the Flow."""
+        comp = self.ramses.host.comp
+        if not comp:
+            return
+
+        anchors_config = {
+            "_PREVIEW": {"color": {"R": 0.3, "G": 0.7, "B": 0.3}, "offset": -1},
+            "_FINAL": {"color": {"R": 0.7, "G": 0.3, "B": 0.3}, "offset": 1},
+        }
+
+        # Find bounding box of current flow using standard attributes
+        tools = comp.GetToolList().values()
+        pos_x, pos_y = 0, 0
+        
+        if tools:
+            min_x, max_x = 9999, -9999
+            max_y = -9999
+            valid_nodes = 0
+            
+            for t in tools:
+                attrs = t.GetAttrs()
+                x = attrs.get("TOOLN_PosX")
+                y = attrs.get("TOOLN_PosY")
+                
+                if x is not None and y is not None:
+                    # Filter out tools that are way off-grid (sometimes happens with hidden nodes)
+                    if abs(x) > 10000 or abs(y) > 10000: continue
+                    
+                    if x < min_x: min_x = x
+                    if x > max_x: max_x = x
+                    if y > max_y: max_y = y
+                    valid_nodes += 1
+            
+            if valid_nodes > 0:
+                # Center X and place 1 unit below max Y
+                pos_x = round((min_x + max_x) / 2)
+                pos_y = round(max_y + 1)
+            else:
+                pos_x, pos_y = 0, 1
+        else:
+            pos_x, pos_y = 0, 1
+
+        for name, cfg in anchors_config.items():
+            node = comp.FindTool(name)
+            if not node:
+                # Create anchor side-by-side
+                node = comp.AddTool("BrightnessContrast", pos_x + cfg["offset"], pos_y)
+                if node:
+                    node.SetAttrs({"TOOLS_Name": name})
+                    
+                    # Specific wording based on anchor type
+                    target_type = "preview" if name == "_PREVIEW" else "final"
+                    node.Comments[1] = f"Ramses {name} Anchor. Connect your {target_type} output here."
+                    
+                    self.ramses.host.log(f"Created render anchor: {name}", ram.LogLevel.Info)
+            
+            if node:
+                node.TileColor = cfg["color"]
+
     def _validate_publish(self):
         """Validates comp settings against Ramses database before publishing."""
         item = self.current_item
@@ -930,6 +990,7 @@ class RamsesFusionApp:
         }
             
         if self.ramses.host._setupCurrentFile(item, step, settings):
+            self._create_render_anchors()
             self.refresh_header()
 
     def on_open(self, ev):

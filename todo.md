@@ -8,7 +8,6 @@ This list contains proposed improvements to elevate the Ramses-Fusion plugin for
     - Makes the file "self-aware" even if moved or renamed outside of Ramses.
 - [ ] **Version Comment Display**
     - Pull the comment for the currently active file version from the Ramses sidecar metadata and display it in the UI header.
-    - Keeps artist notes ("Fixed glow", "Retimed") immediately visible.
 - [ ] **Production Notes Integration**
     - Pull official "Instructions" or "Task Briefing" from the Ramses database and display them in the UI.
 - [ ] **Project Audit Tool**
@@ -17,23 +16,21 @@ This list contains proposed improvements to elevate the Ramses-Fusion plugin for
     - Automatically update the Ramses database when assets/renders are imported, linking dependencies between tasks.
 
 ## High Priority Workflow Features
-- [ ] **Automated Preview Generation**
-    - Implement the "Create Preview" action:
-        - Dynamically attach a temporary lightweight `Saver` (H.264/MP4) to the **currently selected node**.
-        - Render the shot frame range.
-        - Automatically delete the temporary `Saver` node after completion.
-        - Register the preview file in the Ramses database for instant review.
+- [ ] **Anchor-based Rendering System (Preview & Final)**
+    - Implement logic to identify terminal nodes named `_PREVIEW` and `_FINAL` (preferred as colored **Wireless Nodes**).
+    - **Smart Fallback Hierarchy**: Specific Anchor > Current Node Selection > MediaOut1.
+    - **Automated Execution**: Dynamically attach a temporary hidden `Saver`, render the range, and auto-cleanup (delete) the node.
+- [ ] **Quick-Render Presets UI**
+    - If Ramses YAML settings are missing, present a dropdown with studio-standard presets (e.g., H.264 MP4 Proxy, ProRes 422 High-Res, DNxHR).
+    - Use `comp.SetData` to remember the chosen preset for each specific composition.
 - [ ] **Full Publish Workflow (Final Delivery)**
-    - Upgrade the "Publish" checkbox logic in the Status Update dialog:
-        - Read centralized **Global Render Specifications** (EXR/ProRes) from Ramses settings.
-        - Automate a final-quality render to the official Ramses `Published` folder.
-        - Save a backup copy of the `.comp` file alongside the renders.
-        - Register all rendered sequences in the Ramses database and update downstream dependencies.
+    - Upgrade the "Publish" checkbox logic to use the `_FINAL` anchor system.
+    - Automate a final-quality render to the official Ramses `Published` folder using centralized specs.
+    - Save a backup copy of the `.comp` file alongside the renders.
 - [ ] **Smart Saver Setup (Automated Rendering)**
     - Add a "Setup Saver" button to create a `Saver` node pre-configured with Ramses-compliant paths.
 - [ ] **Loader Version Control (Version Up/Down)**
     - Add buttons to "Version Up" or "Version Down" selected `Loader` nodes.
-    - Scan Ramses directories to find existing versions and update paths instantly.
 
 ## Advanced Integration & Automation
 - [ ] **Global Render Specifications (Project-wide Formats)**
@@ -43,7 +40,7 @@ This list contains proposed improvements to elevate the Ramses-Fusion plugin for
 - [ ] **Self-Aware Composition (Automatic Context)**
     - Trigger a context refresh every time a Comp is opened or saved by reading stored metadata.
 - [ ] **Loader Version Scanner (Audit Tool)**
-    - "Audit Scene" button to scan all Loaders and highlight outdated versions (e.g., turning the node tile red in the Flow).
+    - "Audit Scene" button to scan all Loaders and highlight outdated versions.
 - [ ] **Right-Click Context Menus**
     - Add a "Ramses" submenu to Loader/Saver nodes for quick versioning or showing items in the Ramses Client.
 - [ ] **Automated Burn-in / Slates**
