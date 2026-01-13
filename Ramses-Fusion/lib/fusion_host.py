@@ -319,7 +319,7 @@ class FusionHost(RamHost):
             "COMPN_RenderEnd": float(end)
         })
         
-        self.log(f"Setup applied: {width}x{height} @ {fps}fps, Range: {start}-{end} ({duration}s)", LogLevel.Info)
+        self.log(f"Setup applied: {width}x{height} (PA:{pa}) @ {fps}fps, Range: {start}-{end} ({duration}s)", LogLevel.Info)
         return True
 
     def _statusUI(self, currentStatus:RamStatus = None) -> dict:

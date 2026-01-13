@@ -31,9 +31,11 @@ class RamsesFusionApp:
         self.disp = bmd.UIDispatcher(self.ui)
         self.script_dir = script_dir
         self.icon_dir = os.path.join(self.script_dir, "icons")
+        self._icon_cache = {}
         self.dlg = None
         self._last_path = ""  # Track path for auto-refresh
         self._project_cache = None
+        self._user_name_cache = None
 
     @property
     def current_item(self):
@@ -48,6 +50,13 @@ class RamsesFusionApp:
         if not self._project_cache:
             self._project_cache = self.ramses.project()
         return self._project_cache
+
+    def _get_user_name(self):
+        """Cached access to the user name."""
+        if not self._user_name_cache:
+            user = self.ramses.user()
+            self._user_name_cache = user.name() if user else "Not Logged In"
+        return self._user_name_cache
 
     def _require_step(self):
         """Validates that a step is active before proceeding."""
@@ -68,35 +77,47 @@ class RamsesFusionApp:
             return None
         return step
 
-        def _get_context_text(self):
-            item = self.current_item
-            step = self.current_step
-    
-            if not item:
-                return "<font color='#777'>No Active Ramses Item</font>"
-    
-            project = self._get_project()
-            project_name = project.name() if project else item.projectShortName()
-            item_name = item.shortName()
-            step_name = step.name() if step else "No Step"
-            return f"<font color='#555'>{project_name} / </font><b>{item_name}</b><br><font color='#999'>{step_name}</font>"
-    
-        def _get_footer_text(self):
-            user = self.ramses.user()
-            user_name = user.name() if user else "Not Logged In"
-            return f"<font color='#555'>User: {user_name} | Ramses API {self.settings.version}</font>"
-    
-        def refresh_header(self):
-            """Updates the context label and footer with current info."""
-            if not self._check_connection():
-                return
-                
-            if self.dlg:
-                self._project_cache = None # Reset cache on manual refresh
-                self._last_path = self.ramses.host.currentFilePath()
-                items = self.dlg.GetItems()
-                items["ContextLabel"].Text = self._get_context_text()
-                items["RamsesVersion"].Text = self._get_footer_text()
+    def _check_connection(self):
+        """Checks if Ramses Daemon is online and shows a dialog if not."""
+        # If marked offline, try to reconnect first
+        if not self.ramses.online():
+            self.ramses.connect()
+
+        if not self.ramses.online():
+            self.ramses.host._request_input("Ramses Connection Error", [
+                {'id': 'E', 'label': '', 'type': 'text', 'default': 'Could not reach the Ramses Client. \n\nPlease make sure Ramses is running and you are logged in.', 'lines': 3}
+            ])
+            return False
+        return True
+
+    def _get_context_text(self):
+        item = self.current_item
+        step = self.current_step
+
+        if not item:
+            return "<font color='#777'>No Active Ramses Item</font>"
+
+        project = self._get_project()
+        project_name = project.name() if project else item.projectShortName()
+        item_name = item.shortName()
+        step_name = step.name() if step else "No Step"
+        return f"<font color='#555'>{project_name} / </font><b>{item_name}</b><br><font color='#999'>{step_name}</font>"
+
+    def _get_footer_text(self):
+        return f"<font color='#555'>User: {self._get_user_name()} | Ramses API {self.settings.version}</font>"
+
+    def refresh_header(self):
+        """Updates the context label and footer with current info."""
+        if not self._check_connection():
+            return
+            
+        if self.dlg:
+            self._project_cache = None # Invalidate caches
+            self._user_name_cache = None
+            self._last_path = self.ramses.host.currentFilePath()
+            items = self.dlg.GetItems()
+            items["ContextLabel"].Text = self._get_context_text()
+            items["RamsesVersion"].Text = self._get_footer_text()
     def show_main_window(self):
         # Initial path capture
         self._last_path = self.ramses.host.currentFilePath()
@@ -374,15 +395,21 @@ class RamsesFusionApp:
             ]
         )
 
-    def create_button(self, id_name, text, icon_name, weight=0, tooltip=""):
-        icon_path = os.path.join(self.script_dir, "icons", icon_name)
+    def create_button(self, id_name, text, icon_name, weight=0, tooltip="", min_size=None, max_size=None):
+        if icon_name not in self._icon_cache:
+            icon_path = os.path.join(self.icon_dir, icon_name)
+            self._icon_cache[icon_name] = self.ui.Icon({"File": icon_path})
+            
         return self.ui.Button(
             {
                 "ID": id_name,
                 "Text": "  " + text if text else "",
                 "Weight": weight,
                 "ToolTip": tooltip,
-                "Icon": self.ui.Icon({"File": icon_path}),
+                "MinimumSize": min_size or [16, 28],
+                "MaximumSize": max_size or [2000, 28],
+                "IconSize": [16, 16],
+                "Icon": self._icon_cache[icon_name],
             }
         )
 
@@ -539,11 +566,20 @@ class RamsesFusionApp:
             )
             return
 
-        # 1. Bulk fetch shots and sequences for efficiency
-        self.ramses.host.log("Fetching shots list...", ram.LogLevel.Info)
+        # 1. Bulk fetch all relevant objects once for maximum performance
+        self.ramses.host.log("Fetching shots and statuses...", ram.LogLevel.Info)
         all_shots = self.ramses.daemonInterface().getObjects("RamShot")
         all_seqs = self.ramses.daemonInterface().getObjects("RamSequence")
+        all_statuses = self.ramses.daemonInterface().getObjects("RamStatus")
+        
         seq_map = {s.uuid(): s.shortName() for s in all_seqs}
+        step_uuid = current_step.uuid()
+        status_map = {s.get("item"): s for s in all_statuses if s.get("step") == step_uuid}
+        
+        # Get common naming variables once
+        project = self._get_project()
+        proj_sn = project.shortName() if project else "Unknown"
+        step_sn = current_step.shortName()
 
         # 2. Find templates for this step
         template_files = []
@@ -559,30 +595,21 @@ class RamsesFusionApp:
         all_shots.sort(key=lambda s: (seq_map.get(s.get("sequence", ""), ""), s.shortName()))
 
         for shot in all_shots:
-            status = shot.currentStatus(current_step)
+            status = status_map.get(shot.uuid())
             # Skip shots that have "Nothing to do" (NO) or "Standby" (STB)
             if status and status.state().shortName() in ["NO", "STB"]:
                 continue
 
-            # Construct filename using official API standards
-            nm = ram.RamFileInfo()
-            nm.project = shot.projectShortName()
-            nm.ramType = shot.itemType()
-            nm.shortName = shot.shortName()
-            nm.step = current_step.shortName()
-            nm.extension = "comp"
-            filename = nm.fileName()
-
+            # High-speed path resolution (skipping class overhead)
+            filename = f"{proj_sn}_S_{shot.shortName()}_{step_sn}.comp"
+            
             # Mimic API step folder calculation safely
-            # Use daemon directly to get path without triggering folder creation
             shot_root = self.ramses.daemonInterface().getPath(shot.uuid(), "RamShot")
             if not shot_root: continue
             
-            step_folder_name = os.path.splitext(filename)[0]
-            expected_path = os.path.join(shot_root, step_folder_name, filename).replace(
-                "\\", "/"
-            )
-
+            step_folder_name = filename.replace(".comp", "")
+            expected_path = os.path.join(shot_root, step_folder_name, filename).replace("\\", "/")
+            
             exists = os.path.exists(expected_path)
             seq_name = seq_map.get(shot.get("sequence", ""), "None")
 
