@@ -134,8 +134,20 @@ class FusionHost(RamHost):
     def _import(self, filePaths:list, item:RamItem, step:RamStep, importOptions:list, forceShowImportUI:bool) -> bool:
         if not self.comp: return False
         self.comp.Lock()
+        
+        # Get start frame for alignment
+        start_frame = RAM_SETTINGS.userSettings.get("compStartFrame", 1001)
+        
         for path in filePaths:
-            self.comp.AddTool("Loader", -32768, -32768, {"Clip": path})
+            loader = self.comp.AddTool("Loader", -32768, -32768, {"Clip": path})
+            if loader:
+                # Smart Naming
+                name = f"{item.shortName()}_{step.shortName()}" if step else item.shortName()
+                loader.SetAttrs({"TOOLS_Name": name})
+                
+                # Automatic Alignment
+                loader.GlobalIn[1] = float(start_frame)
+                
         self.comp.Unlock()
         return True
 
@@ -192,16 +204,32 @@ class FusionHost(RamHost):
 
     def _setupCurrentFile(self, item:RamItem, step:RamStep, setupOptions:dict) -> bool:
         if not self.comp: return False
-        project = RAMSES.project()
-        if not project: return False
-        fps = project.framerate()
-        duration = item.duration() if (item and item.itemType() == ItemType.SHOT) else 5.0
+        
+        fps = setupOptions.get("framerate", 24.0)
+        width = setupOptions.get("width", 1920)
+        height = setupOptions.get("height", 1080)
+        pa = setupOptions.get("pixelAspectRatio", 1.0)
+        
+        duration = setupOptions.get("duration", 5.0)
         total_frames = int(duration * fps)
         start = RAM_SETTINGS.userSettings.get("compStartFrame", 1001)
         end = start + total_frames - 1
+        
+        # Apply Frame Format
         self.comp.SetPrefs("Comp.FrameFormat.Rate", fps)
-        self.comp.SetAttrs({"COMPN_GlobalStart": float(start), "COMPN_GlobalEnd": float(end), "COMPN_RenderStart": float(start), "COMPN_RenderEnd": float(end)})
-        self.log(f"Setup applied: Start {start}, Duration {total_frames}", LogLevel.Info)
+        self.comp.SetPrefs("Comp.FrameFormat.Width", width)
+        self.comp.SetPrefs("Comp.FrameFormat.Height", height)
+        self.comp.SetPrefs("Comp.FrameFormat.AspectX", pa)
+        
+        # Apply Render Ranges
+        self.comp.SetAttrs({
+            "COMPN_GlobalStart": float(start), 
+            "COMPN_GlobalEnd": float(end), 
+            "COMPN_RenderStart": float(start), 
+            "COMPN_RenderEnd": float(end)
+        })
+        
+        self.log(f"Setup applied: {width}x{height} @ {fps}fps, Range: {start}-{end}", LogLevel.Info)
         return True
 
     def _statusUI(self, currentStatus:RamStatus = None) -> dict:
