@@ -119,6 +119,21 @@ class RamsesFusionApp:
     def _get_footer_text(self):
         return f"<font color='#555'>User: {self._get_user_name()} | Ramses API {self.settings.version}</font>"
 
+    def _resolve_shot_path(self, shot, step):
+        """Standardizes how we predict a shot's composition path."""
+        project = self._get_project()
+        proj_sn = project.shortName() if project else "Unknown"
+        filename = f"{proj_sn}_S_{shot.shortName()}_{step.shortName()}.comp"
+        
+        # Use daemon directly to avoid auto-folder creation
+        shot_root = self.ramses.daemonInterface().getPath(shot.uuid(), "RamShot")
+        if not shot_root:
+            return None, None
+            
+        step_folder = os.path.splitext(filename)[0]
+        path = os.path.join(shot_root, step_folder, filename).replace("\\", "/")
+        return path, filename
+
     def refresh_header(self):
         """Updates the context label and footer with current info."""
         if not self._check_connection():
@@ -601,15 +616,8 @@ class RamsesFusionApp:
             if status and status.state().shortName() in ["NO", "STB"]:
                 continue
 
-            # High-speed path resolution (skipping class overhead)
-            filename = f"{proj_sn}_S_{shot.shortName()}_{step_sn}.comp"
-            
-            # Mimic API step folder calculation safely
-            shot_root = self.ramses.daemonInterface().getPath(shot.uuid(), "RamShot")
-            if not shot_root: continue
-            
-            step_folder_name = filename.replace(".comp", "")
-            expected_path = os.path.join(shot_root, step_folder_name, filename).replace("\\", "/")
+            expected_path, filename = self._resolve_shot_path(shot, current_step)
+            if not expected_path: continue
             
             exists = os.path.exists(expected_path)
             seq_name = seq_map.get(shot.get("sequence", ""), "None")

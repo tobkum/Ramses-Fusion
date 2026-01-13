@@ -7,6 +7,13 @@ class FusionHost(RamHost):
     """
     Ramses Host implementation for Blackmagic Fusion.
     """
+    LOG_PREFIXES = {
+        LogLevel.Info: "INFO",
+        LogLevel.Warning: "WARNING",
+        LogLevel.Critical: "ERROR",
+        LogLevel.Debug: "DEBUG"
+    }
+
     def __init__(self, fusion_obj):
         super(FusionHost, self).__init__()
         self.fusion = fusion_obj
@@ -31,13 +38,7 @@ class FusionHost(RamHost):
         return self.comp.GetAttrs().get('COMPB_Modified', False)
 
     def _log(self, message:str, level:int):
-        prefixes = {
-            LogLevel.Info: "INFO",
-            LogLevel.Warning: "WARNING",
-            LogLevel.Critical: "ERROR",
-            LogLevel.Debug: "DEBUG"
-        }
-        prefix = prefixes.get(level, "LOG")
+        prefix = self.LOG_PREFIXES.get(level, "LOG")
         print(f"[Ramses][{prefix}] {str(message)}")
 
     def _saveAs(self, filePath:str, item:RamItem, step:RamStep, version:int, comment:str, incremented:bool) -> bool:
