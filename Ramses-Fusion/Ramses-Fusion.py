@@ -177,7 +177,7 @@ class RamsesFusionApp:
                     target_type = "preview" if name == "_PREVIEW" else "final"
                     node.Comments[1] = f"Ramses {name} Anchor. Connect your {target_type} output here."
                     
-                    self.ramses.host.log(f"Created render anchor: {name}", ram.LogLevel.Info)
+                    self.log(f"Created render anchor: {name}", ram.LogLevel.Info)
             
             if node:
                 node.TileColor = cfg["color"]
@@ -612,7 +612,7 @@ class RamsesFusionApp:
             except ValueError:
                 self.settings.userSettings["compStartFrame"] = 1001
             self.settings.save()
-            self.ramses.host.log("Settings Saved.", ram.LogLevel.Info)
+            self.log("Settings Saved.", ram.LogLevel.Info)
 
         def close_settings(ev):
             self.disp.ExitLoop()
@@ -675,14 +675,11 @@ class RamsesFusionApp:
         if not self._check_connection(): return
         current_step = self.current_step
         if not current_step:
-            self.ramses.host.log(
-                "Open a valid Ramses file first to set the context.",
-                ram.LogLevel.Warning,
-            )
+            self.log("Open a valid Ramses file first to set the context.", ram.LogLevel.Warning)
             return
 
         # 1. Bulk fetch all relevant objects once for maximum performance
-        self.ramses.host.log("Fetching shots and statuses...", ram.LogLevel.Info)
+        self.log("Fetching shots and statuses...", ram.LogLevel.Info)
         all_shots = self.ramses.daemonInterface().getObjects("RamShot")
         all_seqs = self.ramses.daemonInterface().getObjects("RamSequence")
         all_statuses = self.ramses.daemonInterface().getObjects("RamStatus")
@@ -737,7 +734,7 @@ class RamsesFusionApp:
             }
 
         if not shot_options:
-            self.ramses.host.log("No shots found in project.", ram.LogLevel.Info)
+            self.log("No shots found in project.", ram.LogLevel.Info)
             return
 
         # 4. Show selection dialog
@@ -797,7 +794,7 @@ class RamsesFusionApp:
                         return  # Cancelled
 
                 if use_template:
-                    self.ramses.host.log(
+                    self.log(
                         f"Creating shot from template: {use_template}",
                         ram.LogLevel.Info,
                     )
@@ -833,7 +830,7 @@ class RamsesFusionApp:
                     comment="Initial creation", setupFile=has_project
                 ):
                     self.refresh_header()
-                    self.ramses.host.log(
+                    self.log(
                         f"New shot initialized: {selected_path}", ram.LogLevel.Info
                     )
 
@@ -960,16 +957,14 @@ class RamsesFusionApp:
         comp = self.ramses.host.comp
         if comp:
             comp.Save(path)
-            self.ramses.host.log(
-                f"Template '{name}' saved to {path}", ram.LogLevel.Info
-            )
+            self.log(f"Template '{name}' saved to {path}", ram.LogLevel.Info)
 
     def on_setup_scene(self, ev):
         if not self._check_connection(): return
         
         project = self._get_project()
         if not project:
-            self.ramses.host.log("No active Ramses project found.", ram.LogLevel.Warning)
+            self.log("No active Ramses project found.", ram.LogLevel.Warning)
             return
 
         item = self.current_item
