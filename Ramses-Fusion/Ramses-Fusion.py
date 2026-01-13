@@ -73,8 +73,24 @@ class RamsesFusionApp:
         step_name = step.name() if step else "No Step"
         return f"<font color='#555'>{project_name} / </font><b>{item_name}</b><br><font color='#999'>{step_name}</font>"
 
+    def _check_connection(self):
+        """Checks if Ramses Daemon is online and shows a dialog if not."""
+        # If marked offline, try to reconnect first
+        if not self.ramses.online():
+            self.ramses.connect()
+
+        if not self.ramses.online():
+            self.ramses.host._request_input("Ramses Connection Error", [
+                {'id': 'E', 'label': '', 'type': 'text', 'default': 'Could not reach the Ramses Client. \n\nPlease make sure Ramses is running and you are logged in.', 'lines': 3}
+            ])
+            return False
+        return True
+
     def refresh_header(self):
         """Updates the context label with current project/item/step info."""
+        if not self._check_connection():
+            return
+            
         if self.dlg:
             self._last_path = self.ramses.host.currentFilePath()
             self.dlg.GetItems()["ContextLabel"].Text = self._get_context_text()
@@ -515,6 +531,7 @@ class RamsesFusionApp:
         self.ramses.showClient()
 
     def on_switch_shot(self, ev):
+        if not self._check_connection(): return
         current_step = self.current_step
         if not current_step:
             self.ramses.host.log(
@@ -684,22 +701,27 @@ class RamsesFusionApp:
                     self.refresh_header()
 
     def on_import(self, ev):
+        if not self._check_connection(): return
         self.ramses.host.importItem()
 
     def on_replace(self, ev):
+        if not self._check_connection(): return
         self.ramses.host.replaceItem()
 
     def on_save(self, ev):
+        if not self._check_connection(): return
         has_project = self.ramses.project() is not None
         if self.ramses.host.save(setupFile=has_project):
             self.refresh_header()
 
     def on_incremental_save(self, ev):
+        if not self._check_connection(): return
         has_project = self.ramses.project() is not None
         if self.ramses.host.save(incremental=True, setupFile=has_project):
             self.refresh_header()
 
     def on_comment(self, ev):
+        if not self._check_connection(): return
         res = self.ramses.host._request_input(
             "Add Comment",
             [
@@ -722,10 +744,12 @@ class RamsesFusionApp:
                 self.refresh_header()
 
     def on_update_status(self, ev):
+        if not self._check_connection(): return
         if self.ramses.host.updateStatus():
             self.refresh_header()
 
     def on_preview(self, ev):
+        if not self._check_connection(): return
         self.ramses.host.savePreview()
 
     def on_publish_settings(self, ev):
