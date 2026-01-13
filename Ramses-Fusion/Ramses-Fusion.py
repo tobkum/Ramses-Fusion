@@ -21,8 +21,8 @@ class RamsesFusionApp:
         self.ramses = ram.Ramses.instance()
         self.settings = ram.RamSettings.instance()
         
-        # Initialize Host with Fusion instance
-        self.ramses.host = fusion_host.FusionHost(fu)
+        # Initialize Host with global fusion object
+        self.ramses.host = fusion_host.FusionHost(fusion)
         
         self.ui = fu.UIManager
         self.disp = bmd.UIDispatcher(self.ui)
@@ -77,7 +77,7 @@ class RamsesFusionApp:
         self.dlg.On.ImportButton.Clicked = self.on_import
         self.dlg.On.ReplaceButton.Clicked = self.on_replace
         self.dlg.On.SaveButton.Clicked = self.on_save
-        self.dlg.On.CommentButton.Clicked = self.on_update_status
+        self.dlg.On.CommentButton.Clicked = self.on_comment
         self.dlg.On.IncrementalSaveButton.Clicked = self.on_incremental_save
         self.dlg.On.UpdateStatusButton.Clicked = self.on_update_status
         self.dlg.On.PreviewButton.Clicked = self.on_preview
@@ -217,6 +217,13 @@ class RamsesFusionApp:
     def on_incremental_save(self, ev):
         self.ramses.host.save(incremental=True)
 
+    def on_comment(self, ev):
+        res = self.ramses.host._request_input("Add Comment", [
+            {'id': 'Comment', 'label': 'Comment:', 'type': 'text', 'default': '', 'lines': 5}
+        ])
+        if res and res['Comment']:
+            self.ramses.host.save(comment=res['Comment'])
+
     def on_update_status(self, ev):
         self.ramses.host.updateStatus()
 
@@ -226,25 +233,32 @@ class RamsesFusionApp:
     def on_publish_settings(self, ev):
         step = self.ramses.host.currentStep()
         if not step:
-            fu.AskUser("Ramses Warning", {
-                "1": {"Name": "Warning", "Type": "Text", "Default": "Save as valid Step first.", "ReadOnly": True}
-            })
+            self.ramses.host._request_input("Ramses Warning", [
+                {'id': 'W', 'label': '', 'type': 'text', 'default': 'Save as valid Step first.', 'lines': 1}
+            ])
             return
+        
         current_yaml = step.publishSettings()
-        ret = fu.AskUser(f"Publishing Settings: {step.name()}", {
-            "YAML": {"Name": "YAML Config", "Type": "Text", "Default": current_yaml or "", "Lines": 15}
-        })
-        if ret:
-            step.setPublishSettings(ret.get("YAML", ""))
+        res = self.ramses.host._request_input(f"Publish Settings: {step.name()}", [
+            {'id': 'YAML', 'label': 'YAML Config:', 'type': 'text', 'default': current_yaml or "", 'lines': 15}
+        ])
+        if res:
+            step.setPublishSettings(res['YAML'])
 
     def on_save_template(self, ev):
         step = self.ramses.host.currentStep()
         if not step:
-            fu.AskUser("Ramses Warning", {"1": {"Name": "W", "Type": "Text", "Default": "Save as valid Step first.", "ReadOnly": True}})
+            self.ramses.host._request_input("Ramses Warning", [
+                {'id': 'W', 'label': '', 'type': 'text', 'default': 'Save as valid Step first.', 'lines': 1}
+            ])
             return
-        ret = fu.AskUser("Save as Template", {"Name": {"Name": "Name", "Type": "Text", "Default": "NewTemplate"}})
-        if not ret: return
-        name = re.sub(r'[^a-zA-Z0-9\-]', '', ret.get("Name", "Template"))
+            
+        res = self.ramses.host._request_input("Save as Template", [
+            {'id': 'Name', 'label': 'Template Name:', 'type': 'line', 'default': 'NewTemplate'}
+        ])
+        if not res or not res['Name']: return
+        
+        name = re.sub(r'[^a-zA-Z0-9\-]', '', res['Name'])
         nm = ram.RamFileInfo()
         nm.project = step.projectShortName()
         nm.ramType = ram.ItemType.GENERAL
@@ -252,9 +266,11 @@ class RamsesFusionApp:
         nm.step = step.shortName()
         nm.extension = "comp"
         path = os.path.join(step.templatesFolderPath(), nm.fileName())
-        if self.ramses.host.comp:
-            self.ramses.host.comp.Save(path)
-            print(f"Ramses: Template '{name}' saved.")
+        
+        comp = self.ramses.host.comp
+        if comp:
+            comp.Save(path)
+            print(f"Ramses: Template '{name}' saved to {path}")
 
     def on_setup_scene(self, ev):
         self.ramses.host.setupCurrentFile()
