@@ -64,32 +64,79 @@ class FusionHost(RamHost):
         disp = bmd.UIDispatcher(ui)
         
         rows = []
-        # Calculate height
         total_height = 80 # Buttons + Margins
         
         for f in fields:
             label = ui.Label({"Text": f['label'], "Weight": 0.25})
-            if f['type'] == 'text':
-                h = f.get('lines', 1) * 25 + 20
-                ctrl = ui.TextEdit({"ID": f['id'], "Text": str(f.get('default', '')), "Weight": 0.75, "MinimumSize": [200, h]})
-                total_height += h
-            elif f['type'] == 'line':
-                ctrl = ui.LineEdit({"ID": f['id'], "Text": str(f.get('default', '')), "Weight": 0.75})
-                total_height += 30
-            elif f['type'] == 'combo':
-                ctrl = ui.ComboBox({"ID": f['id'], "Weight": 0.75})
-                for k, v in sorted(f.get('options', {}).items()):
-                    ctrl.AddItem(v)
-                ctrl.CurrentIndex = int(f.get('default', 0))
-                total_height += 30
-            elif f['type'] == 'slider':
-                ctrl = ui.Slider({"ID": f['id'], "Value": float(f.get('default', 50)), "Minimum": 0, "Maximum": 100, "Weight": 0.75})
-                total_height += 30
-            elif f['type'] == 'checkbox':
-                ctrl = ui.CheckBox({"ID": f['id'], "Checked": bool(f.get('default', False)), "Text": "", "Weight": 0.75})
-                total_height += 30
-            
+            ctrl, height = self._create_ui_element(ui, f)
+            total_height += height
             rows.append(ui.HGroup([label, ctrl]))
+
+        dlg = disp.AddWindow(
+            {"WindowTitle": title, "ID": "CustomDlg", "Geometry": [400, 400, 500, total_height]},
+            ui.VGroup([
+                ui.VGroup({"Spacing": 5}, rows),
+                ui.VGap(10),
+                ui.HGroup([
+                    ui.HGap(200),
+                    ui.Button({"ID": "OkBtn", "Text": "OK", "Weight": 0.1}),
+                    ui.Button({"ID": "CancelBtn", "Text": "Cancel", "Weight": 0.1})
+                ])
+            ])
+        )
+        
+        results = {}
+        
+        def on_ok(ev):
+            items = dlg.GetItems()
+            for f in fields:
+                ctrl = items[f['id']]
+                if f['type'] == 'text': results[f['id']] = ctrl.PlainText
+                elif f['type'] == 'line': results[f['id']] = ctrl.Text
+                elif f['type'] == 'combo': results[f['id']] = int(ctrl.CurrentIndex)
+                elif f['type'] == 'slider': results[f['id']] = int(ctrl.Value)
+                elif f['type'] == 'checkbox': results[f['id']] = bool(ctrl.Checked)
+            disp.ExitLoop()
+            
+        dlg.On.OkBtn.Clicked = on_ok
+        dlg.On.CancelBtn.Clicked = lambda ev: disp.ExitLoop()
+        dlg.On.CustomDlg.Close = lambda ev: disp.ExitLoop()
+        
+        dlg.Show()
+        disp.RunLoop()
+        dlg.Hide()
+        
+        return results if results else None
+
+    def _create_ui_element(self, ui, field_def):
+        """Helper to create UIManager elements from field definitions."""
+        f_type = field_def['type']
+        f_id = field_def['id']
+        default = field_def.get('default', '')
+        
+        if f_type == 'text':
+            h = field_def.get('lines', 1) * 25 + 20
+            return ui.TextEdit({"ID": f_id, "Text": str(default), "Weight": 0.75, "MinimumSize": [200, h]}), h
+            
+        if f_type == 'line':
+            return ui.LineEdit({"ID": f_id, "Text": str(default), "Weight": 0.75}), 30
+            
+        if f_type == 'combo':
+            ctrl = ui.ComboBox({"ID": f_id, "Weight": 0.75})
+            options = field_def.get('options', {})
+            for i in range(len(options)):
+                val = options.get(str(i))
+                if val: ctrl.AddItem(str(val))
+            ctrl.CurrentIndex = int(field_def.get('default', 0))
+            return ctrl, 30
+            
+        if f_type == 'slider':
+            return ui.Slider({"ID": f_id, "Value": float(default), "Minimum": 0, "Maximum": 100, "Weight": 0.75}), 30
+            
+        if f_type == 'checkbox':
+            return ui.CheckBox({"ID": f_id, "Checked": bool(default), "Text": "", "Weight": 0.75}), 30
+            
+        return ui.Label({"Text": "Unknown Field"}), 30
 
         dlg = disp.AddWindow(
             {"WindowTitle": title, "ID": "CustomDlg", "Geometry": [400, 400, 500, total_height]},

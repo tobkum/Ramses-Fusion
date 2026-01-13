@@ -29,19 +29,38 @@ class RamsesFusionApp:
         self.script_dir = script_dir
         self.dlg = None
 
-    def show_main_window(self):
-        # Get Current Context
-        item = self.ramses.host.currentItem()
-        step = self.ramses.host.currentStep()
-        
-        context_text = "<font color='#777'>No Active Ramses Item</font>"
-        if item:
-            project = item.project()
-            project_name = project.name() if project else item.projectShortName()
-            item_name = item.shortName()
-            step_name = step.name() if step else "No Step"
-            context_text = f"<font color='#555'>{project_name} / </font><b>{item_name}</b><br><font color='#999'>{step_name}</font>"
+    @property
+    def current_item(self):
+        return self.ramses.host.currentItem()
 
+    @property
+    def current_step(self):
+        return self.ramses.host.currentStep()
+
+    def _require_step(self):
+        """Validates that a step is active before proceeding."""
+        step = self.current_step
+        if not step:
+            self.ramses.host._request_input("Ramses Warning", [
+                {'id': 'W', 'label': '', 'type': 'text', 'default': 'Save as valid Step first.', 'lines': 1}
+            ])
+            return None
+        return step
+
+    def _get_context_text(self):
+        item = self.current_item
+        step = self.current_step
+        
+        if not item:
+            return "<font color='#777'>No Active Ramses Item</font>"
+            
+        project = item.project()
+        project_name = project.name() if project else item.projectShortName()
+        item_name = item.shortName()
+        step_name = step.name() if step else "No Step"
+        return f"<font color='#555'>{project_name} / </font><b>{item_name}</b><br><font color='#999'>{step_name}</font>"
+
+    def show_main_window(self):
         self.dlg = self.disp.AddWindow(
             {
                 "WindowTitle": "Ramses-Fusion",
@@ -57,58 +76,34 @@ class RamsesFusionApp:
                             # Context Header
                             self.ui.Label({
                                 "ID": "ContextLabel",
-                                "Text": context_text,
+                                "Text": self._get_context_text(),
                                 "Alignment": {"AlignHCenter": True, "AlignTop": True},
                                 "WordWrap": True,
                                 "Weight": 0,
                             }),
                             self.ui.VGap(10),
 
-                            # Section: Project & Files
-                            self.ui.Label({"Text": "PROJECT & FILES", "Weight": 0, "Font": self.ui.Font({"PixelSize": 11, "Bold": True})}),
-                            self.create_button("RamsesButton", "Open Ramses Client", "ramses.png"),
-                            self.create_button("OpenButton", "Open Composition", "open.png"),
-                            self.create_button("RetrieveButton", "Retrieve Version", "retrieveVersion.png"),
+                            # Groups
+                            self._build_project_group(),
                             self.ui.VGap(8),
-
-                            # Section: Pipeline
-                            self.ui.Label({"Text": "PIPELINE", "Weight": 0, "Font": self.ui.Font({"PixelSize": 11, "Bold": True})}),
-                            self.create_button("ImportButton", "Import Asset", "open.png"),
-                            self.create_button("ReplaceButton", "Replace Loader", "retrieveVersion.png"),
-                            self.create_button("SetupSceneButton", "Setup Scene", "setupScene.png"),
+                            self._build_pipeline_group(),
                             self.ui.VGap(8),
-
-                            # Section: Working
-                            self.ui.Label({"Text": "WORKING", "Weight": 0, "Font": self.ui.Font({"PixelSize": 11, "Bold": True})}),
-                            self.create_button("SaveButton", "Save", "save.png"),
-                            self.create_button("IncrementalSaveButton", "Incremental Save", "incrementalSave.png"),
-                            self.create_button("CommentButton", "Add Comment", "comment.png"),
+                            self._build_working_group(),
                             self.ui.VGap(8),
-
-                            # Section: Publish
-                            self.ui.Label({"Text": "PUBLISH / STATUS", "Weight": 0, "Font": self.ui.Font({"PixelSize": 11, "Bold": True})}),
-                            self.create_button("UpdateStatusButton", "Update Status/Publish", "updateStatus.png"),
-                            self.create_button("PreviewButton", "Create Preview", "preview.png"),
+                            self._build_publish_group(),
                             self.ui.VGap(8),
-
-                            # Section: Settings
-                            self.ui.Label({"Text": "SETTINGS & INFO", "Weight": 0, "Font": self.ui.Font({"PixelSize": 11, "Bold": True})}),
-                            self.create_button("PubSettingsButton", "Publish Settings", "publishSettings.png"),
-                            self.create_button("SettingsButton", "Plugin Settings", "Settings.png"),
-                            self.create_button("AboutButton", "About", "Settings.png"),
+                            self._build_settings_group(),
                             
                             # Spacer to push everything up
                             self.ui.VGap(0, 1),
 
-                            # Footer
-                            self.ui.Label(
-                                {
-                                    "ID": "RamsesVersion",
-                                    "Text": "Ramses API " + self.settings.version,
-                                    "Alignment": {"AlignHCenter": True},
-                                    "Weight": 0,
-                                }
-                            ),
+                            # Footer Version
+                            self.ui.Label({
+                                "ID": "RamsesVersion",
+                                "Text": "Ramses API " + self.settings.version,
+                                "Alignment": {"AlignHCenter": True},
+                                "Weight": 0,
+                            }),
                         ]),
                         self.ui.HGap(15),
                     ]),
@@ -138,7 +133,46 @@ class RamsesFusionApp:
         self.disp.RunLoop()
         self.dlg.Hide()
 
-    def create_button(self, id_name, text, icon_name, weight=0):
+    def _build_project_group(self):
+        return self.ui.VGroup([
+            self.ui.Label({"Text": "PROJECT & FILES", "Weight": 0, "Font": self.ui.Font({"PixelSize": 11, "Bold": True})}),
+            self.create_button("RamsesButton", "Open Ramses Client", "ramses.png"),
+            self.create_button("OpenButton", "Open Composition", "open.png"),
+            self.create_button("RetrieveButton", "Retrieve Version", "retrieveVersion.png"),
+        ])
+
+    def _build_pipeline_group(self):
+        return self.ui.VGroup([
+            self.ui.Label({"Text": "PIPELINE", "Weight": 0, "Font": self.ui.Font({"PixelSize": 11, "Bold": True})}),
+            self.create_button("ImportButton", "Import Asset", "open.png"),
+            self.create_button("ReplaceButton", "Replace Loader", "retrieveVersion.png"),
+            self.create_button("SetupSceneButton", "Setup Scene", "setupScene.png"),
+        ])
+
+    def _build_working_group(self):
+        return self.ui.VGroup([
+            self.ui.Label({"Text": "WORKING", "Weight": 0, "Font": self.ui.Font({"PixelSize": 11, "Bold": True})}),
+            self.create_button("SaveButton", "Save", "save.png"),
+            self.create_button("IncrementalSaveButton", "Incremental Save", "incrementalSave.png"),
+            self.create_button("CommentButton", "Add Comment", "comment.png"),
+        ])
+
+    def _build_publish_group(self):
+        return self.ui.VGroup([
+            self.ui.Label({"Text": "PUBLISH / STATUS", "Weight": 0, "Font": self.ui.Font({"PixelSize": 11, "Bold": True})}),
+            self.create_button("UpdateStatusButton", "Update Status/Publish", "updateStatus.png"),
+            self.create_button("PreviewButton", "Create Preview", "preview.png"),
+        ])
+
+    def _build_settings_group(self):
+        return self.ui.VGroup([
+            self.ui.Label({"Text": "SETTINGS & INFO", "Weight": 0, "Font": self.ui.Font({"PixelSize": 11, "Bold": True})}),
+            self.create_button("PubSettingsButton", "Publish Settings", "publishSettings.png"),
+            self.create_button("SettingsButton", "Plugin Settings", "Settings.png"),
+            self.create_button("AboutButton", "About", "Settings.png"),
+        ])
+
+    def create_button(self, id_name, text, icon_name, weight=1):
         icon_path = os.path.join(self.script_dir, "icons", icon_name)
         return self.ui.Button(
             {
@@ -276,11 +310,8 @@ class RamsesFusionApp:
         self.ramses.host.savePreview()
 
     def on_publish_settings(self, ev):
-        step = self.ramses.host.currentStep()
+        step = self._require_step()
         if not step:
-            self.ramses.host._request_input("Ramses Warning", [
-                {'id': 'W', 'label': '', 'type': 'text', 'default': 'Save as valid Step first.', 'lines': 1}
-            ])
             return
         
         current_yaml = step.publishSettings()
@@ -291,11 +322,8 @@ class RamsesFusionApp:
             step.setPublishSettings(res['YAML'])
 
     def on_save_template(self, ev):
-        step = self.ramses.host.currentStep()
+        step = self._require_step()
         if not step:
-            self.ramses.host._request_input("Ramses Warning", [
-                {'id': 'W', 'label': '', 'type': 'text', 'default': 'Save as valid Step first.', 'lines': 1}
-            ])
             return
             
         res = self.ramses.host._request_input("Save as Template", [
