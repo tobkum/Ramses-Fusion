@@ -172,6 +172,8 @@ class RamsesFusionApp:
                 node = comp.AddTool("BrightnessContrast", pos_x + cfg["offset"], pos_y)
                 if node:
                     node.SetAttrs({"TOOLS_Name": name})
+                    # Set Blend to 0.0 to turn off processing (pass-through)
+                    node.Blend[0] = 0.0
                     
                     # Specific wording based on anchor type
                     target_type = "preview" if name == "_PREVIEW" else "final"
