@@ -573,7 +573,7 @@ class RamsesFusionApp:
         self.dlg.Hide()
 
     def _build_project_group(self):
-        bg_color = "#2a3442" # Very Dark Desaturated Blue
+        bg_color = "#2a3442"  # Very Dark Desaturated Blue
         return self.ui.VGroup(
             [
                 self.ui.Label(
@@ -586,21 +586,21 @@ class RamsesFusionApp:
                 self.create_button(
                     "OpenButton",
                     "Open Composition",
-                    "open.png",
+                    "ramopen.png",
                     tooltip="Browse and open an existing Ramses composition.",
                     accent_color=bg_color,
                 ),
                 self.create_button(
                     "SwitchShotButton",
                     "Switch Shot",
-                    "open.png",
+                    "ramshot.png",
                     tooltip="Quickly jump to another shot in this project or create a new one from a template.",
                     accent_color=bg_color,
                 ),
                 self.create_button(
                     "SetupSceneButton",
                     "Setup Scene",
-                    "setupScene.png",
+                    "ramsetupscene.png",
                     tooltip="Automatically set the resolution, FPS, and frame range based on Ramses project settings.",
                     accent_color=bg_color,
                 ),
@@ -615,7 +615,7 @@ class RamsesFusionApp:
         )
 
     def _build_pipeline_group(self):
-        bg_color = "#342a42" # Very Dark Desaturated Purple
+        bg_color = "#342a42"  # Very Dark Desaturated Purple
         return self.ui.VGroup(
             [
                 self.ui.Label(
@@ -628,21 +628,21 @@ class RamsesFusionApp:
                 self.create_button(
                     "ImportButton",
                     "Import Asset",
-                    "open.png",
+                    "ramimport.png",
                     tooltip="Import a published asset or render into the current composition.",
                     accent_color=bg_color,
                 ),
                 self.create_button(
                     "ReplaceButton",
                     "Replace Loader",
-                    "retrieveVersion.png",
+                    "ramreplace.png",
                     tooltip="Replace the selected Loader node with a different version or asset.",
                     accent_color=bg_color,
                 ),
                 self.create_button(
                     "TemplateButton",
                     "Save as Template",
-                    "template.png",
+                    "ramtemplate.png",
                     tooltip="Save the current composition as a template for other shots in this step.",
                     accent_color=bg_color,
                 ),
@@ -650,7 +650,7 @@ class RamsesFusionApp:
         )
 
     def _build_working_group(self):
-        bg_color = "#2a423d" # Very Dark Desaturated Teal
+        bg_color = "#2a423d"  # Very Dark Desaturated Teal
         return self.ui.VGroup(
             [
                 self.ui.Label(
@@ -663,28 +663,28 @@ class RamsesFusionApp:
                 self.create_button(
                     "IncrementalSaveButton",
                     "Incremental Save",
-                    "incrementalSave.png",
+                    "ramsaveincremental.png",
                     tooltip="Save a new version of the current file (v001 -> v002).",
                     accent_color=bg_color,
                 ),
                 self.create_button(
                     "SaveButton",
                     "Save",
-                    "save.png",
+                    "ramsave.png",
                     tooltip="Overwrite the current working file version.",
                     accent_color=bg_color,
                 ),
                 self.create_button(
                     "RetrieveButton",
                     "Retrieve Version",
-                    "retrieveVersion.png",
+                    "ramretrieve.png",
                     tooltip="Open a previous version of this composition from the _versions folder.",
                     accent_color=bg_color,
                 ),
                 self.create_button(
                     "CommentButton",
                     "Add Comment",
-                    "comment.png",
+                    "ramcomment.png",
                     tooltip="Add a note to the current version in the Ramses database.",
                     accent_color=bg_color,
                 ),
@@ -692,7 +692,7 @@ class RamsesFusionApp:
         )
 
     def _build_publish_group(self):
-        bg_color = "#2a422a" # Very Dark Desaturated Green
+        bg_color = "#2a422a"  # Very Dark Desaturated Green
         return self.ui.VGroup(
             [
                 self.ui.Label(
@@ -705,14 +705,14 @@ class RamsesFusionApp:
                 self.create_button(
                     "PreviewButton",
                     "Create Preview",
-                    "preview.png",
+                    "rampreview.png",
                     tooltip="Generate a preview render for review.",
                     accent_color=bg_color,
                 ),
                 self.create_button(
                     "UpdateStatusButton",
                     "Update Status / Publish",
-                    "updateStatus.png",
+                    "ramstatus.png",
                     tooltip="Change the shot status (WIP, Review, Done) and optionally publish the final comp.",
                     accent_color=bg_color,
                 ),
@@ -720,7 +720,7 @@ class RamsesFusionApp:
         )
 
     def _build_settings_group(self):
-        bg_color = "#333333" # Dark Grey
+        bg_color = "#333333"  # Dark Grey
         return self.ui.VGroup(
             [
                 self.ui.Label(
@@ -733,21 +733,21 @@ class RamsesFusionApp:
                 self.create_button(
                     "PubSettingsButton",
                     "Publish Settings",
-                    "publishSettings.png",
+                    "rampublishsettings.png",
                     tooltip="Configure YAML settings for automated publishing.",
                     accent_color=bg_color,
                 ),
                 self.create_button(
                     "SettingsButton",
                     "Plugin Settings",
-                    "Settings.png",
+                    "ramsettings.png",
                     tooltip="Configure Ramses paths, ports, and default frame ranges.",
                     accent_color=bg_color,
                 ),
                 self.create_button(
                     "AboutButton",
                     "About",
-                    "Settings.png",
+                    "ramses.png",
                     tooltip="Information about Ramses-Fusion and Overmind Studios.",
                     accent_color=bg_color,
                 ),
@@ -772,10 +772,18 @@ class RamsesFusionApp:
             # Calculate Hover (slightly brighter)
             h = accent_color.lstrip("#")
             hr, hg, hb = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
-            hover = "#%02x%02x%02x" % (min(255, hr + 15), min(255, hg + 15), min(255, hb + 15))
+            hover = "#%02x%02x%02x" % (
+                min(255, hr + 15),
+                min(255, hg + 15),
+                min(255, hb + 15),
+            )
             # Calculate Pressed (slightly darker)
-            pressed = "#%02x%02x%02x" % (max(0, hr - 10), max(0, hg - 10), max(0, hb - 10))
-            
+            pressed = "#%02x%02x%02x" % (
+                max(0, hr - 10),
+                max(0, hg - 10),
+                max(0, hb - 10),
+            )
+
             ss += f" QPushButton:hover {{ background-color: {hover}; }}"
             ss += f" QPushButton:pressed {{ background-color: {pressed}; }}"
             ss += f" QPushButton:disabled {{ background-color: #222; color: #555; border: 1px solid #1a1a1a; }}"
