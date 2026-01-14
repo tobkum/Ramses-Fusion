@@ -194,7 +194,37 @@ class FusionHost(RamHost):
         return {'filePath': path} if path else None
 
     def _preview(self, previewFolderPath:str, previewFileBaseName:str, item:RamItem, step:RamStep) -> list:
-        return []
+        if not self.comp: return []
+        
+        # 1. Find the Preview Anchor
+        preview_node = self.comp.FindTool("_PREVIEW")
+        if not preview_node:
+            self.log("Preview anchor (_PREVIEW) not found in Flow. Use 'Setup Scene' to add one.", LogLevel.Warning)
+            return []
+
+        # 2. Construct the final path (Ramses provides the folder and basename)
+        # Note: We use .mov as our standard preview format
+        dst = os.path.join(previewFolderPath, previewFileBaseName + ".mov").replace("\\", "/")
+        
+        # 3. Armed for render
+        self.log(f"Starting preview render to: {dst}", LogLevel.Info)
+        preview_node.Clip[1] = dst
+        # Ensure ProRes 422 settings
+        preview_node.SetInput("OutputFormat", "QuickTimeMovies", 0)
+        preview_node.SetInput("QuickTimeMovies.Compression", "Apple ProRes 422_apcn", 0)
+        preview_node.SetAttrs({"TOOLB_PassThrough": False})
+        
+        try:
+            # 4. Trigger Fusion Render
+            if self.comp.Render(True):
+                return [dst]
+            return []
+        except Exception as e:
+            self.log(f"Preview render failed: {e}", LogLevel.Critical)
+            return []
+        finally:
+            # 5. Always disarm
+            preview_node.SetAttrs({"TOOLB_PassThrough": True})
 
     def _publishOptions(self, proposedOptions:dict, showPublishUI:bool=False) -> dict:
         # If the UI is forced, we could show a dialog here. 
@@ -291,12 +321,24 @@ class FusionHost(RamHost):
     def _saveAsUI(self) -> dict:
         path = self.fusion.RequestFile()
         if not path: return None
-        nm = RamFileInfo(); nm.setFilePath(path)
+        
+        # Use API to parse the selected path
+        nm = RamFileInfo()
+        nm.setFilePath(path)
+        
         item = RamItem.fromPath(path, virtualIfNotFound=True)
         step = RamStep.fromPath(path)
-        if not item: item = RamItem(data={'name': 'New', 'shortName': 'New'}, create=False)
-        if not step: step = RamStep(data={'name': 'New', 'shortName': 'New'}, create=False)
-        return {'item': item, 'step': step, 'extension': os.path.splitext(path)[1].lstrip('.'), 'resource': nm.resource}
+        
+        # Ensure we have valid Ramses objects
+        if not item: item = RamItem(data={'name': 'New', 'shortName': nm.shortName or 'New'}, create=False)
+        if not step: step = RamStep(data={'name': 'New', 'shortName': nm.step or 'New'}, create=False)
+        
+        return {
+            'item': item, 
+            'step': step, 
+            'extension': os.path.splitext(path)[1].lstrip('.'), 
+            'resource': nm.resource
+        }
 
     def _saveChangesUI(self) -> str:
         res = self._request_input("Save Changes?", [

@@ -979,40 +979,7 @@ class RamsesFusionApp:
 
     def on_preview(self, ev):
         if not self._check_connection(): return
-        
-        comp = self.ramses.host.comp
-        if not comp: return
-
-        # 1. Find the Preview Anchor
-        preview_node = comp.FindTool("_PREVIEW")
-        if not preview_node:
-            self.log("Preview anchor (_PREVIEW) not found in Flow. Run 'Setup Scene' or add one manually.", ram.LogLevel.Warning)
-            return
-
-        # 2. Sync paths to ensure we are on the latest version
-        self._sync_render_anchors()
-        
-        # 3. Armed for render
-        self.log("Starting preview render...", ram.LogLevel.Info)
-        preview_node.SetAttrs({"TOOLB_PassThrough": False})
-        
-        try:
-            # 4. Trigger Fusion Render
-            # True means wait for render to finish
-            success = comp.Render(True)
-            
-            if success:
-                self.log(f"Preview render complete: {preview_node.Clip[1]}", ram.LogLevel.Info)
-                # 5. Register in Ramses
-                # (This tells the client that a new preview exists for this version)
-                self.ramses.host.savePreview()
-            else:
-                self.log("Preview render failed or was cancelled.", ram.LogLevel.Critical)
-        except Exception as e:
-            self.log(f"Error during preview render: {e}", ram.LogLevel.Critical)
-        finally:
-            # 6. Disarm the node
-            preview_node.SetAttrs({"TOOLB_PassThrough": True})
+        self.ramses.host.savePreview()
 
     def on_publish_settings(self, ev):
         step = self._require_step()
