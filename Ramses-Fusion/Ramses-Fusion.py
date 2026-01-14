@@ -975,14 +975,17 @@ class RamsesFusionApp:
                 return
 
             selected_step = data_cache["steps"][state["step_idx"]]
+            step_uuid = selected_step.uuid()
             
             shots = data_cache["shots"]
             seq_map = data_cache["seq_map"]
-            status_map = data_cache["status_map"]
+            
+            # Map statuses for the SELECTED step only
+            current_status_map = {s.get("item"): s for s in data_cache["status_map"].values() if s.get("step") == step_uuid}
             
             valid_options = []
             for shot in shots:
-                status = status_map.get(shot.uuid())
+                status = current_status_map.get(shot.uuid())
                 if status and status.state().shortName() in ["NO", "STB"]:
                     continue
                 
@@ -1095,6 +1098,8 @@ class RamsesFusionApp:
             self.log(f"Fetching data for project: {proj.name()}", ram.LogLevel.Info)
             
             proj_uuid = proj.uuid()
+            
+            # Bulk fetch shots, seqs and statuses for this project
             all_shots = self.ramses.daemonInterface().getObjects("RamShot")
             data_cache["shots"] = [s for s in all_shots if s.get("project") == proj_uuid]
             
@@ -1102,9 +1107,8 @@ class RamsesFusionApp:
             data_cache["seq_map"] = {s.uuid(): s.shortName() for s in all_seqs if s.get("project") == proj_uuid}
             
             all_statuses = self.ramses.daemonInterface().getObjects("RamStatus")
-            data_cache["status_map"] = {s.get("item"): s for s in all_statuses if s.get("step") == proj_uuid} # Wait, this should be step filtering in status?
-            # Re-fetch statuses filtered by current step will happen in update_shots
-            data_cache["status_map"] = {s.get("item"): s for s in all_statuses} # Global for project
+            # Cache all statuses for the project to filter by step in update_shots
+            data_cache["status_map"] = {s.uuid(): s for s in all_statuses if s.get("project") == proj_uuid}
             
             update_steps()
 
