@@ -137,84 +137,94 @@ class RamsesFusionApp:
         if not comp:
             return
 
-        # Fixed absolute coordinates
-        anchors_config = {
-            "_PREVIEW": {"color": {"R": 0.3, "G": 0.7, "B": 0.3}, "x": 0, "y": 0},
-            "_FINAL": {"color": {"R": 0.7, "G": 0.3, "B": 0.3}, "x": 1, "y": 0},
-        }
+        comp.Lock()
+        try:
+            # Fixed absolute coordinates
+            anchors_config = {
+                "_PREVIEW": {"color": {"R": 0.3, "G": 0.7, "B": 0.3}, "x": 0, "y": 0},
+                "_FINAL": {"color": {"R": 0.7, "G": 0.3, "B": 0.3}, "x": 1, "y": 0},
+            }
 
-        # Pre-calculate paths if project is active
-        preview_path = ""
-        publish_path = ""
-        if self._get_project():
-            try:
-                # Get official Ramses paths
-                preview_folder = self.ramses.host.previewPath()
-
-                # Try to construct a proper filename if context is available
+            # Pre-calculate paths if project is active
+            preview_path = ""
+            publish_path = ""
+            if self._get_project():
                 try:
-                    pub_info = self.ramses.host.publishInfo()
-                    preview_info = pub_info.copy()
-                    preview_info.version = -1
-                    preview_info.state = ""
-                    preview_info.resource = ""
-                    preview_info.extension = "mov"
-                    preview_path = os.path.join(
-                        preview_folder, preview_info.fileName()
+                    # Get official Ramses paths
+                    preview_folder = self.ramses.host.previewPath()
+
+                    # Try to construct a proper filename if context is available
+                    try:
+                        pub_info = self.ramses.host.publishInfo()
+                        preview_info = pub_info.copy()
+                        preview_info.version = -1
+                        preview_info.state = ""
+                        preview_info.resource = ""
+                        preview_info.extension = "mov"
+                        preview_path = os.path.join(
+                            preview_folder, preview_info.fileName()
+                        ).replace("\\", "/")
+                    except:
+                        # Fallback to simple name if info not available yet
+                        preview_path = os.path.join(
+                            preview_folder, "preview.mov"
+                        ).replace("\\", "/")
+
+                    # Get publish info for the final saver (ProRes 4444 MOV)
+                    publish_path = self.ramses.host.publishFilePath(
+                        "mov", ""
                     ).replace("\\", "/")
                 except:
-                    # Fallback to simple name if info not available yet
-                    preview_path = os.path.join(preview_folder, "preview.mov").replace(
-                        "\\", "/"
-                    )
+                    pass
 
-                # Get publish info for the final saver (ProRes 4444 MOV)
-                publish_path = self.ramses.host.publishFilePath("mov", "").replace(
-                    "\\", "/"
-                )
-            except:
-                pass
+            for name, cfg in anchors_config.items():
+                node = comp.FindTool(name)
+                if not node:
+                    # Create a Saver node directly
+                    node = comp.AddTool("Saver", cfg["x"], cfg["y"])
+                    if node:
+                        # Set core attributes
+                        node.SetAttrs(
+                            {
+                                "TOOLS_Name": name,
+                                "TOOLB_PassThrough": True,  # Create in PASSTHROUGH state
+                            }
+                        )
 
-        for name, cfg in anchors_config.items():
-            node = comp.FindTool(name)
-            if not node:
-                # Create a Saver node directly
-                node = comp.AddTool("Saver", cfg["x"], cfg["y"])
+                        # Set the path and format based on type
+                        if name == "_PREVIEW":
+                            if preview_path:
+                                node.Clip[1] = preview_path
+                            # Configure for ProRes 422 based on technical specs
+                            node.SetInput("OutputFormat", "QuickTimeMovies", 0)
+                            node.SetInput(
+                                "QuickTimeMovies.Compression",
+                                "Apple ProRes 422_apcn",
+                                0,
+                            )
+                        else:
+                            if publish_path:
+                                node.Clip[1] = publish_path
+                            # Configure for ProRes 4444 based on technical specs
+                            node.SetInput("OutputFormat", "QuickTimeMovies", 0)
+                            node.SetInput(
+                                "QuickTimeMovies.Compression",
+                                "Apple ProRes 4444_ap4h",
+                                0,
+                            )
+
+                        target_type = "Preview" if name == "_PREVIEW" else "Final"
+                        node.Comments[1] = (
+                            f"{target_type} renders will be saved here. Connect your output."
+                        )
+                        self.log(
+                            f"Created render anchor: {name}", ram.LogLevel.Info
+                        )
+
                 if node:
-                    # Set core attributes
-                    node.SetAttrs(
-                        {
-                            "TOOLS_Name": name,
-                            "TOOLB_PassThrough": True,  # Create in PASSTHROUGH state
-                        }
-                    )
-
-                    # Set the path and format based on type
-                    if name == "_PREVIEW":
-                        if preview_path:
-                            node.Clip[1] = preview_path
-                        # Configure for ProRes 422 based on technical specs
-                        node.SetInput("OutputFormat", "QuickTimeMovies", 0)
-                        node.SetInput(
-                            "QuickTimeMovies.Compression", "Apple ProRes 422_apcn", 0
-                        )
-                    else:
-                        if publish_path:
-                            node.Clip[1] = publish_path
-                        # Configure for ProRes 4444 based on technical specs
-                        node.SetInput("OutputFormat", "QuickTimeMovies", 0)
-                        node.SetInput(
-                            "QuickTimeMovies.Compression", "Apple ProRes 4444_ap4h", 0
-                        )
-
-                    target_type = "Preview" if name == "_PREVIEW" else "Final"
-                    node.Comments[1] = (
-                        f"{target_type} renders will be saved here. Connect your output."
-                    )
-                    self.log(f"Created render anchor: {name}", ram.LogLevel.Info)
-
-            if node:
-                node.TileColor = cfg["color"]
+                    node.TileColor = cfg["color"]
+        finally:
+            comp.Unlock()
 
     def _validate_publish(self):
         """Validates comp settings against Ramses database before publishing."""
