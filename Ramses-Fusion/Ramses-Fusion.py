@@ -142,7 +142,7 @@ class RamsesFusionApp:
             # 1. Determine Reference Position (Grid Units)
             flow = comp.CurrentFrame.FlowView
             start_x, start_y = 0, 0
-            
+
             active = comp.ActiveTool
             if active and flow:
                 pos = flow.GetPosTable(active)
@@ -187,38 +187,52 @@ class RamsesFusionApp:
                             preview_folder, "preview.mov"
                         ).replace("\\", "/")
 
-                    publish_path = self.ramses.host.publishFilePath(
-                        "mov", ""
-                    ).replace("\\", "/")
+                    publish_path = self.ramses.host.publishFilePath("mov", "").replace(
+                        "\\", "/"
+                    )
                 except:
                     pass
 
             for name, cfg in anchors_config.items():
                 node = comp.FindTool(name)
-                
+
                 # Create if missing, using calculated coordinates directly
                 if not node:
                     node = comp.AddTool("Saver", cfg["target_x"], cfg["target_y"])
                     if node:
                         node.SetAttrs({"TOOLS_Name": name, "TOOLB_PassThrough": True})
-                        
+
                         if name == "_PREVIEW":
-                            if preview_path: node.Clip[1] = preview_path
+                            if preview_path:
+                                node.Clip[1] = preview_path
                             node.SetInput("OutputFormat", "QuickTimeMovies", 0)
-                            node.SetInput("QuickTimeMovies.Compression", "Apple ProRes 422_apcn", 0)
-                            node.Comments[1] = "Preview renders will be saved here. Connect your output."
+                            node.SetInput(
+                                "QuickTimeMovies.Compression",
+                                "Apple ProRes 422_apcn",
+                                0,
+                            )
+                            node.Comments[1] = (
+                                "Preview renders will be saved here. Connect your output."
+                            )
                         else:
-                            if publish_path: node.Clip[1] = publish_path
+                            if publish_path:
+                                node.Clip[1] = publish_path
                             node.SetInput("OutputFormat", "QuickTimeMovies", 0)
-                            node.SetInput("QuickTimeMovies.Compression", "Apple ProRes 4444_ap4h", 0)
-                            node.Comments[1] = "Final renders will be saved here. Connect your output."
-                            
+                            node.SetInput(
+                                "QuickTimeMovies.Compression",
+                                "Apple ProRes 4444_ap4h",
+                                0,
+                            )
+                            node.Comments[1] = (
+                                "Final renders will be saved here. Connect your output."
+                            )
+
                         self.log(f"Created render anchor: {name}", ram.LogLevel.Info)
 
                 # Ensure color is correct (even if existing)
                 if node:
                     node.TileColor = cfg["color"]
-                    
+
                     # Optional: If node existed but was far away, we could enforce position here.
                     # For now, we only set position on creation as requested.
         finally:
@@ -233,7 +247,7 @@ class RamsesFusionApp:
 
         errors = []
         comp = self.ramses.host.comp
-        
+
         # 1. Check Frame Range
         if item.itemType() == ram.ItemType.SHOT:
             framerate = project.framerate() if project else 24.0
@@ -252,13 +266,13 @@ class RamsesFusionApp:
         # 2. Check Resolution (Project Master)
         db_w = int(project.width() or 1920)
         db_h = int(project.height() or 1080)
-        
+
         prefs = comp.GetPrefs()
         frame_format = prefs.get("Comp", {}).get("FrameFormat", {})
-        
+
         comp_w = int(frame_format.get("Width", 0))
         comp_h = int(frame_format.get("Height", 0))
-        
+
         if db_w != comp_w or db_h != comp_h:
             errors.append(
                 f"• Resolution Mismatch: DB expects {db_w}x{db_h}, Comp is {comp_w}x{comp_h}."
@@ -267,7 +281,7 @@ class RamsesFusionApp:
         # 3. Check Framerate
         db_fps = float(project.framerate() or 24.0)
         comp_fps = float(frame_format.get("Rate", 24.0))
-        
+
         if abs(db_fps - comp_fps) > 0.001:
             errors.append(
                 f"• Framerate Mismatch: DB expects {db_fps} fps, Comp is set to {comp_fps} fps."
@@ -278,7 +292,7 @@ class RamsesFusionApp:
             node = comp.FindTool(tool_name)
             if not node:
                 return f"• Missing Anchor: '{tool_name}' node not found. Run 'Setup Scene' to create it."
-            
+
             inp = node.FindMainInput(1)
             if not inp or inp.GetConnectedOutput() is None:
                 return f"• Disconnected Anchor: '{tool_name}' node has no input connection."
@@ -288,15 +302,11 @@ class RamsesFusionApp:
             err_preview = check_anchor("_PREVIEW")
             if err_preview:
                 errors.append(err_preview)
-        
+
         if check_final:
             err_final = check_anchor("_FINAL")
             if err_final:
                 errors.append(err_final)
-
-        if errors:
-            return False, "\n".join(errors)
-        return True, ""
 
         if errors:
             return False, "\n".join(errors)
