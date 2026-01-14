@@ -20,8 +20,14 @@ class FusionHost(RamHost):
         
         try:
             self.hostVersion = str(self.fusion.GetAttrs().get('FUSION_Version', 'Unknown'))
-        except:
+        except Exception:
             self.hostVersion = "Unknown"
+
+    @staticmethod
+    def normalizePath(path: str) -> str:
+        """Centralized path normalization for Fusion (forward slashes)."""
+        if not path: return ""
+        return path.replace("\\", "/")
 
     @property
     def comp(self):
@@ -31,7 +37,7 @@ class FusionHost(RamHost):
     def currentFilePath(self) -> str:
         if not self.comp: return ""
         path = self.comp.GetAttrs().get('COMPS_FileName', '')
-        return path.replace("\\", "/") if path else ""
+        return self.normalizePath(path)
 
     def _isDirty(self) -> bool:
         if not self.comp: return False
@@ -40,6 +46,41 @@ class FusionHost(RamHost):
     def _log(self, message:str, level:int):
         prefix = self.LOG_PREFIXES.get(level, "LOG")
         print(f"[Ramses][{prefix}] {str(message)}")
+
+    def collectItemSettings(self, item: RamItem) -> dict:
+        """
+        Optimized version of base class __collectItemSettings.
+        Fetches sequence data in bulk if the item is a shot.
+        """
+        project = RAMSES.project()
+        if not project:
+            return {}
+
+        settings = {
+            "width": int(project.width() or 1920),
+            "height": int(project.height() or 1080),
+            "framerate": float(project.framerate() or 24.0),
+            "duration": 0.0,
+            "pixelAspectRatio": float(project.pixelAspectRatio() or 1.0),
+            "aspectRatio": float(project.aspectRatio() or 1.0)
+        }
+
+        if item and item.itemType() == ItemType.SHOT:
+            settings['duration'] = float(item.duration())
+            seq_uuid = item.get("sequence", "")
+            if seq_uuid:
+                # Optimized bulk fetch
+                seq_data = RAMSES.daemonInterface().getData(seq_uuid, "RamSequence")
+                if seq_data:
+                    settings['width'] = int(seq_data.get("width", settings['width']))
+                    settings['height'] = int(seq_data.get("height", settings['height']))
+                    settings['framerate'] = float(seq_data.get("framerate", settings['framerate']))
+                    pa = float(seq_data.get("pixelAspectRatio", settings['pixelAspectRatio']))
+                    settings['pixelAspectRatio'] = pa
+                    if settings['height'] > 0:
+                        settings['aspectRatio'] = (settings['width'] / settings['height']) * pa
+
+        return settings
 
     def _saveAs(self, filePath:str, item:RamItem, step:RamStep, version:int, comment:str, incremented:bool) -> bool:
         if not self.comp: return False
@@ -67,40 +108,15 @@ class FusionHost(RamHost):
         """
         Overridden to bypass sub-optimal base class implementation of __collectItemSettings.
         """
-        saveFilePath = self.saveFilePath()
-        if saveFilePath == "":
-            self.log("Malformed file name, attempting Save As.", LogLevel.Warning)
-            return self.saveAs()
-
         if setupFile:
             item = self.currentItem()
-            step = self.currentStep()
             if item:
-                # Optimized settings collection
-                project = RAMSES.project()
-                settings = {
-                    "width": project.width(),
-                    "height": project.height(),
-                    "framerate": project.framerate(),
-                    "duration": 0.0,
-                    "pixelAspectRatio": project.pixelAspectRatio(),
-                    "aspectRatio": project.aspectRatio()
-                }
-                
-                if item.itemType() == ItemType.SHOT:
-                    settings['duration'] = item.duration()
-                    # Use sequence() (object) instead of group() (string) to avoid base class bugs
-                    seq = item.sequence() if hasattr(item, 'sequence') else None
-                    if seq:
-                        settings['width'] = seq.width()
-                        settings['height'] = seq.height()
-                        settings['pixelAspectRatio'] = seq.pixelAspectRatio()
-                        settings['aspectRatio'] = seq.aspectRatio()
-                
-                self._setupCurrentFile(item, step, settings)
+                settings = self.collectItemSettings(item)
+                self._setupCurrentFile(item, self.currentStep(), settings)
 
-        # Call the private __save method of the base class via name mangling
-        return self._RamHost__save(saveFilePath, incremental, comment)
+        # Calling super().save with setupFile=False avoids the API's __collectItemSettings 
+        # while safely calling the private __save method without name-mangling.
+        return super(FusionHost, self).save(incremental, comment, setupFile=False)
 
     # -------------------------------------------------------------------------
     # UI Implementation helpers using UIManager

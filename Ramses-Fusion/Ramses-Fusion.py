@@ -42,21 +42,32 @@ class RamsesFusionApp:
         self._step_cache = None
         self._step_path = ""
 
+    def _get_icon(self, icon_name):
+        """Lazy-loading icon cache."""
+        if icon_name not in self._icon_cache:
+            icon_path = os.path.join(self.icon_dir, icon_name)
+            self._icon_cache[icon_name] = self.ui.Icon({"File": icon_path})
+        return self._icon_cache[icon_name]
+
     @property
     def current_item(self):
-        path = self.ramses.host.currentFilePath()
-        if path != self._item_path or not self._item_cache:
-            self._item_path = path
-            self._item_cache = self.ramses.host.currentItem()
+        self._update_context()
         return self._item_cache
 
     @property
     def current_step(self):
+        self._update_context()
+        return self._step_cache
+
+    def _update_context(self):
+        """Internal helper to sync item and step from the host once per access cycle."""
         path = self.ramses.host.currentFilePath()
-        if path != self._step_path or not self._step_cache:
+        if path != self._item_path or not self._item_cache or not self._step_cache:
+            self._item_path = path
+            self._item_cache = self.ramses.host.currentItem()
             self._step_path = path
             self._step_cache = self.ramses.host.currentStep()
-        return self._step_cache
+        return path
 
     def _get_project(self):
         """Cached access to the current project."""
@@ -183,7 +194,7 @@ class RamsesFusionApp:
                         preview_path = os.path.join(
                             preview_folder, preview_info.fileName()
                         ).replace("\\", "/")
-                    except:
+                    except Exception:
                         preview_path = os.path.join(
                             preview_folder, "preview.mov"
                         ).replace("\\", "/")
@@ -191,8 +202,8 @@ class RamsesFusionApp:
                     publish_path = self.ramses.host.publishFilePath("mov", "").replace(
                         "\\", "/"
                     )
-                except:
-                    pass
+                except Exception as e:
+                    self.log(f"Could not pre-calculate anchor paths: {e}", ram.LogLevel.Debug)
 
             for name, cfg in anchors_config.items():
                 node = comp.FindTool(name)
@@ -415,8 +426,8 @@ class RamsesFusionApp:
                     final_node.SetInput(
                         "QuickTimeMovies.Compression", "Apple ProRes 4444_ap4h", 0
                     )
-        except:
-            pass
+        except Exception as e:
+            self.log(f"Sync Render Anchors failed: {e}", ram.LogLevel.Debug)
 
     def refresh_header(self):
         """Updates the context label and footer with current info."""
@@ -441,8 +452,8 @@ class RamsesFusionApp:
                     items["ContextLabel"].Text = self._get_context_text()
                 if "RamsesVersion" in items:
                     items["RamsesVersion"].Text = self._get_footer_text()
-            except:
-                pass
+            except Exception as e:
+                self.log(f"UI Refresh failed: {e}", ram.LogLevel.Debug)
 
     def show_main_window(self):
         self.dlg = self.disp.AddWindow(
@@ -489,15 +500,7 @@ class RamsesFusionApp:
                                                         "IconSize": [32, 32],
                                                         "Flat": True,
                                                         "ToolTip": "Manually refresh the context header.",
-                                                        "Icon": self.ui.Icon(
-                                                            {
-                                                                "File": os.path.join(
-                                                                    self.script_dir,
-                                                                    "icons",
-                                                                    "ramupdate.png",
-                                                                )
-                                                            }
-                                                        ),
+                                                        "Icon": self._get_icon("ramupdate.png"),
                                                     }
                                                 ),
                                             ],
@@ -730,10 +733,6 @@ class RamsesFusionApp:
         min_size=None,
         max_size=None,
     ):
-        if icon_name not in self._icon_cache:
-            icon_path = os.path.join(self.icon_dir, icon_name)
-            self._icon_cache[icon_name] = self.ui.Icon({"File": icon_path})
-
         return self.ui.Button(
             {
                 "ID": id_name,
@@ -743,7 +742,7 @@ class RamsesFusionApp:
                 "MinimumSize": min_size or [16, 28],
                 "MaximumSize": max_size or [2000, 28],
                 "IconSize": [16, 16],
-                "Icon": self._icon_cache[icon_name],
+                "Icon": self._get_icon(icon_name),
             }
         )
 
@@ -1297,44 +1296,16 @@ class RamsesFusionApp:
         if not self._check_connection():
             return
 
-        project = self._get_project()
-        if not project:
-            self.log("No active Ramses project found.", ram.LogLevel.Warning)
-            return
-
         item = self.current_item
         step = self.current_step
 
-        # 1. Start with Project Specs (Master)
-        duration = 5.0
-        width = int(project.width())
-        height = int(project.height())
-        fps = float(project.framerate())
-        pa = float(project.pixelAspectRatio())
+        # Use the optimized host implementation to collect settings
+        settings = self.ramses.host.collectItemSettings(item)
+        if not settings:
+            self.log("No active Ramses project found or context is invalid.", ram.LogLevel.Warning)
+            return
 
-        # 2. Override with Shot/Sequence Specs if applicable
-        if item and item.itemType() == ram.ItemType.SHOT:
-            duration = float(item.duration())
-            seq_uuid = item.get("sequence", "")
-            if seq_uuid:
-                # Use bulk-friendly getData to fetch sequence specs in one hit
-                seq_data = self.ramses.daemonInterface().getData(seq_uuid, "RamSequence")
-                if seq_data:
-                    width = int(seq_data.get("width", width))
-                    height = int(seq_data.get("height", height))
-                    fps = float(seq_data.get("framerate", fps))
-
-        # 3. Compile high-performance settings dict
-        settings = {
-            "width": width,
-            "height": height,
-            "framerate": fps,
-            "duration": duration,
-            "pixelAspectRatio": pa,
-            "aspectRatio": (width / height) * pa if height > 0 else 1.0,
-        }
-
-        # 4. Apply directly and refresh UI
+        # Apply directly and refresh UI
         self.ramses.host._setupCurrentFile(item, step, settings)
         self._create_render_anchors()
         self.refresh_header()
