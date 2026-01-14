@@ -44,6 +44,10 @@ class FusionHost(RamHost):
         return self.comp.GetAttrs().get('COMPB_Modified', False)
 
     def _log(self, message:str, level:int):
+        # Silence anything below Info level (0=Debug, -1=DataSent, -2=DataReceived)
+        if level < LogLevel.Info:
+            return
+            
         prefix = self.LOG_PREFIXES.get(level, "LOG")
         print(f"[Ramses][{prefix}] {str(message)}")
 
@@ -507,7 +511,6 @@ class FusionHost(RamHost):
             "COMPN_RenderEnd": float(end)
         })
         
-        self.log(f"Setup applied: {width}x{height} (PA:{pa}) @ {fps}fps, Range: {start}-{end} ({duration}s)", LogLevel.Info)
         return True
 
     def _statusUI(self, currentStatus:RamStatus = None) -> dict:
@@ -528,7 +531,6 @@ class FusionHost(RamHost):
         if not res: return None
         
         selected_state = states[res['State']]
-        self.log(f"UI selected state: {selected_state.name()} ({selected_state.shortName()})", LogLevel.Debug)
         
         return {
             "comment": res['Comment'], 

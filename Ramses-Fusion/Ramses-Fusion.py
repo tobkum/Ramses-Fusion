@@ -206,8 +206,8 @@ class RamsesFusionApp:
                     publish_path = self.ramses.host.publishFilePath("mov", "").replace(
                         "\\", "/"
                     )
-                except Exception as e:
-                    self.log(f"Could not pre-calculate anchor paths: {e}", ram.LogLevel.Debug)
+                except Exception:
+                    pass
 
             for name, cfg in anchors_config.items():
                 node = comp.FindTool(name)
@@ -242,8 +242,6 @@ class RamsesFusionApp:
                             node.Comments[1] = (
                                 "Final renders will be saved here. Connect your output."
                             )
-
-                        self.log(f"Created render anchor: {name}", ram.LogLevel.Info)
 
                 # Ensure color is correct (even if existing)
                 if node:
@@ -408,8 +406,8 @@ class RamsesFusionApp:
                     final_node.SetInput(
                         "QuickTimeMovies.Compression", "Apple ProRes 4444_ap4h", 0
                     )
-        except Exception as e:
-            self.log(f"Sync Render Anchors failed: {e}", ram.LogLevel.Debug)
+        except Exception:
+            pass
 
     def refresh_header(self):
         """Updates the context label and footer with current info."""
@@ -450,8 +448,8 @@ class RamsesFusionApp:
                     if btn_id in items:
                         items[btn_id].Enabled = is_pipeline
 
-            except Exception as e:
-                self.log(f"UI Refresh failed: {e}", ram.LogLevel.Debug)
+            except Exception:
+                pass
 
     def show_main_window(self):
         self.dlg = self.disp.AddWindow(
@@ -1095,7 +1093,6 @@ class RamsesFusionApp:
         def on_project_changed(ev):
             state["project_idx"] = int(itm["ProjCombo"].CurrentIndex)
             proj = data_cache["projects"][state["project_idx"]]
-            self.log(f"Fetching data for project: {proj.name()}", ram.LogLevel.Info)
             
             proj_uuid = proj.uuid()
             
