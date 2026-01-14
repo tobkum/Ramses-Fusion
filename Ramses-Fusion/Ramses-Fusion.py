@@ -202,8 +202,10 @@ class RamsesFusionApp:
         
         # 1. Check Frame Range
         if item.itemType() == ram.ItemType.SHOT:
-            # Use official API method for shot frame count
-            expected_frames = item.frames()
+            # Calculate frames manually using round() to match Fusion setup and GUI behavior,
+            # bypassing the API's item.frames() which truncates.
+            framerate = project.framerate() if project else 24.0
+            expected_frames = int(round(item.duration() * framerate))
             
             comp = self.ramses.host.comp
             # Query specific attributes directly for maximum reliability
