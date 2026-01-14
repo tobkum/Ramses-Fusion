@@ -25,10 +25,10 @@ This list contains proposed improvements to elevate the Ramses-Fusion plugin for
     - Add a "Final Export" action to distinguish from "Publishing":
         - **Publishing**: Versioned hand-off to the `_published` folder (internal).
         - **Final Export**: Master delivery to the `project.exportPath()` (client/mastering).
-- [ ] **Full Publish Workflow (Final Delivery)**
+- [x] **Full Publish Workflow (Final Delivery)**
     - Upgrade the "Publish" checkbox logic to use the `_FINAL` anchor system.
     - Automate a final-quality render to the official Ramses `Published` folder using centralized specs.
-- [ ] **Smart Loader Alignment**
+- [x] **Smart Loader Alignment**
     - Automatically adjust the `Global In` of all `Loader` nodes to match the Ramses start frame (e.g., 1001) during "Setup Scene".
 - [ ] **Loader Version Control (Version Up/Down)**
     - Add buttons to "Version Up" or "Version Down" selected `Loader` nodes.
