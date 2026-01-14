@@ -911,18 +911,54 @@ class RamsesFusionApp:
     def on_switch_shot(self, ev):
         if not self._check_connection():
             return
+        
         current_step = self.current_step
+        project = self._get_project()
+
+        # --- Context Setup Wizard (for Out-of-Context starts) ---
         if not current_step:
-            self.log(
-                "Open a valid Ramses file first to set the context.",
-                ram.LogLevel.Warning,
-            )
-            return
+            self.log("Initializing context wizard...", ram.LogLevel.Info)
+            
+            # 1. Project Selection
+            all_projects = self.ramses.daemonInterface().getObjects("RamProject")
+            if not all_projects:
+                self.log("No projects found in Ramses.", ram.LogLevel.Warning)
+                return
+                
+            project_opts = {str(i): p.name() for i, p in enumerate(all_projects)}
+            res_p = self.ramses.host._request_input("Context Wizard: Select Project", [
+                {"id": "P", "label": "Project:", "type": "combo", "options": project_opts}
+            ])
+            if not res_p: return
+            project = all_projects[res_p["P"]]
+            
+            # 2. Step Selection
+            # Performance Optimization: Inject the project into the daemon interface 
+            # to ensure getSteps() filters for the correct project.
+            # Some Ramses versions require the project to be 'active' in the daemon for getSteps().
+            self.ramses.daemonInterface()._dataCache['project'] = project.uuid() # Soft-inject if needed
+            project_steps = self.ramses.daemonInterface().getSteps()
+            
+            if not project_steps:
+                # Fallback: manually filter if getSteps() returns all projects' steps
+                all_steps = self.ramses.daemonInterface().getObjects("RamStep")
+                project_steps = [s for s in all_steps if s.get("project") == project.uuid()]
+            
+            if not project_steps:
+                self.log(f"No steps found for project '{project.name()}'.", ram.LogLevel.Warning)
+                return
+                
+            step_opts = {str(i): s.name() for i, s in enumerate(project_steps)}
+            res_s = self.ramses.host._request_input("Context Wizard: Select Step", [
+                {"id": "S", "label": "Step:", "type": "combo", "options": step_opts}
+            ])
+            if not res_s: return
+            current_step = project_steps[res_s["S"]]
+        # --- End of Wizard ---
 
         # 1. Bulk fetch all relevant objects once for maximum performance
         self.log("Fetching shots and statuses...", ram.LogLevel.Info)
 
-        project = self._get_project()
         project_uuid = project.uuid() if project else None
 
         # Use getObjects (Bulk with Data) instead of project.shots() (UUID only, leads to N+1 requests)
@@ -1014,9 +1050,7 @@ class RamsesFusionApp:
             if not data["exists"]:
                 # Use official API to resolve and create folders
                 step_folder = shot_obj.stepFolderPath(current_step)
-                selected_path = os.path.join(step_folder, data["filename"]).replace(
-                    "\\", "/"
-                )
+                selected_path = os.path.join(step_folder, data["filename"])
 
                 use_template = None
 
@@ -1063,7 +1097,7 @@ class RamsesFusionApp:
                         ram.LogLevel.Info,
                     )
                     if self.ramses.host.open(use_template):
-                        self.ramses.host.comp.Save(selected_path)
+                        self.ramses.host.comp.Save(self.ramses.host.normalizePath(selected_path))
                 elif not template_files:  # Fallback if no templates existed at all
                     init_res = self.ramses.host._request_input(
                         "Initialize Shot",
@@ -1083,13 +1117,13 @@ class RamsesFusionApp:
                         return
                     if init_res["Mode"] == 0:
                         self.ramses.host.fusion.NewComp()
-                    self.ramses.host.comp.Save(selected_path)
+                    self.ramses.host.comp.Save(self.ramses.host.normalizePath(selected_path))
                 else:  # User selected "None - Empty" in the list
-                    self.ramses.host.comp.Save(selected_path)
+                    self.ramses.host.comp.Save(self.ramses.host.normalizePath(selected_path))
 
                 # 6. Initialize Ramses Versioning idiomaticly
                 # Only attempt setup if a project is active
-                has_project = self.ramses.project() is not None
+                has_project = project is not None
                 if self.ramses.host.save(
                     comment="Initial creation", setupFile=has_project
                 ):
