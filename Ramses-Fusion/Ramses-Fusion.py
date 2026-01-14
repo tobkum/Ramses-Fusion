@@ -144,8 +144,8 @@ class RamsesFusionApp:
                 # construct a dummy preview filename (ProRes MOV)
                 preview_path = os.path.join(preview_folder, "preview.mov").replace("\\", "/")
                 
-                # Get publish info for the final saver
-                publish_path = self.ramses.host.publishFilePath("exr", "Final").replace("\\", "/")
+                # Get publish info for the final saver (ProRes 4444 MOV)
+                publish_path = self.ramses.host.publishFilePath("mov", "").replace("\\", "/")
             except:
                 pass
 
@@ -169,6 +169,9 @@ class RamsesFusionApp:
                         node.SetInput("QuickTimeMovies.Compression", "Apple ProRes 422_apcn", 0)
                     else:
                         if publish_path: node.Clip[1] = publish_path
+                        # Configure for ProRes 4444 based on technical specs
+                        node.SetInput("OutputFormat", "QuickTimeMovies", 0)
+                        node.SetInput("QuickTimeMovies.Compression", "Apple ProRes 4444_ap4h", 0)
                     
                     target_type = "Preview" if name == "_PREVIEW" else "Final"
                     node.Comments[1] = f"{target_type} renders will be saved here. Connect your output."
@@ -247,8 +250,8 @@ class RamsesFusionApp:
             preview_filename = pub_info.fileName().replace(pub_info.extension, ".mov")
             preview_path = os.path.join(preview_folder, preview_filename).replace("\\", "/")
             
-            # Final (typically EXR, resolved via official API)
-            final_path = self.ramses.host.publishFilePath("exr", "").replace("\\", "/")
+            # Final (Switching to ProRes 4444 .mov)
+            final_path = self.ramses.host.publishFilePath("mov", "").replace("\\", "/")
 
             # 2. Update existing nodes
             preview_node = comp.FindTool("_PREVIEW")
@@ -261,6 +264,9 @@ class RamsesFusionApp:
             final_node = comp.FindTool("_FINAL")
             if final_node:
                 final_node.Clip[1] = final_path
+                # Configure for ProRes 4444 based on technical specs
+                final_node.SetInput("OutputFormat", "QuickTimeMovies", 0)
+                final_node.SetInput("QuickTimeMovies.Compression", "Apple ProRes 4444_ap4h", 0)
         except:
             pass
 

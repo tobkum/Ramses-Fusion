@@ -36,8 +36,22 @@ This list contains proposed improvements to elevate the Ramses-Fusion plugin for
 ## Advanced Integration & Automation
 - [ ] **Global Render Specifications (Project-wide Formats)**
     - Implement a system to read render specs (EXR, ProRes, etc.) from Ramses Project/Step settings.
+    - **Reference YAML Template** (Paste into Ramses 'Custom Settings'):
+      ```yaml
+      render_presets:
+        Preview:
+          extension: "mov"
+          format: "QuickTimeMovies"
+          codec: "Apple ProRes 422_apcn"
+        Final:
+          extension: "mov"
+          format: "QuickTimeMovies"
+          codec: "Apple ProRes 4444_ap4h"
+      ```
 - [ ] **Self-Aware Composition (Automatic Context)**
     - Trigger a context refresh every time a Comp is opened or saved by reading stored metadata.
+- [ ] **Loader Version Scanner (Audit Tool)**
+    - "Audit Scene" button to scan all Loaders and highlight outdated versions.
 - [ ] **Right-Click Context Menus**
     - Add a "Ramses" submenu to Loader/Saver nodes.
 - [ ] **Automated Burn-in / Slates**
@@ -50,3 +64,5 @@ This list contains proposed improvements to elevate the Ramses-Fusion plugin for
     - Option to update status/comments for all imported assets (Loaders) directly from the Fusion UI.
 - [x] **Contextual Refresh**
     - Automatically refresh the UI header when a new file is opened, saved, or switched via the plugin.
+- [ ] **Live Context Refresh**
+    - Automatically refresh the UI header when switching between multiple open compositions in Fusion.
