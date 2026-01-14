@@ -132,7 +132,7 @@ class RamsesFusionApp:
             path = self.ramses.host.currentFilePath()
             if path:
                 return "<font color='#cc9900'>External Composition</font><br><font color='#777'>Not in a Ramses Project</font>"
-            return "<font color='#777'>No Active Ramses Item</font>"
+            return "<font color='#cc9900'>No Active Ramses Item</font>"
 
         project = self._get_project()
         project_name = project.name() if project else item.projectShortName()
@@ -347,9 +347,9 @@ class RamsesFusionApp:
             preview_info.state = ""
             preview_info.resource = ""
             preview_info.extension = "mov"
-            preview_path = host.normalizePath(os.path.join(
-                preview_folder, preview_info.fileName()
-            ))
+            preview_path = host.normalizePath(
+                os.path.join(preview_folder, preview_info.fileName())
+            )
 
             # Final: Master ProRes 4444 in the project's flat Output (Export) folder
             export_folder = project.exportPath()
@@ -369,7 +369,9 @@ class RamsesFusionApp:
                 final_info.extension = "mov"
                 final_filename = final_info.fileName()
 
-                final_path = host.normalizePath(os.path.join(export_folder, final_filename))
+                final_path = host.normalizePath(
+                    os.path.join(export_folder, final_filename)
+                )
             else:
                 # Fallback only if export path is totally undefined
                 final_path = host.normalizePath(host.publishFilePath("mov", ""))
@@ -419,7 +421,7 @@ class RamsesFusionApp:
                 # Force cache refresh for project and user
                 self._project_cache = None
                 self._user_name_cache = None
-                
+
                 # Clear item/step caches and path trackers to force re-fetch from host
                 self._item_cache = None
                 self._item_path = ""
@@ -438,14 +440,21 @@ class RamsesFusionApp:
                 # Toggle Pipeline Buttons
                 item = self.current_item
                 is_pipeline = item is not None and bool(item.uuid())
-                
+
                 pipeline_buttons = [
-                    "SetupSceneButton", "ImportButton", "ReplaceButton", 
-                    "TemplateButton", "IncrementalSaveButton", "SaveButton", 
-                    "RetrieveButton", "CommentButton", "PreviewButton", 
-                    "UpdateStatusButton", "PubSettingsButton"
+                    "SetupSceneButton",
+                    "ImportButton",
+                    "ReplaceButton",
+                    "TemplateButton",
+                    "IncrementalSaveButton",
+                    "SaveButton",
+                    "RetrieveButton",
+                    "CommentButton",
+                    "PreviewButton",
+                    "UpdateStatusButton",
+                    "PubSettingsButton",
                 ]
-                
+
                 for btn_id in pipeline_buttons:
                     if btn_id in items:
                         items[btn_id].Enabled = is_pipeline
@@ -498,7 +507,9 @@ class RamsesFusionApp:
                                                         "IconSize": [32, 32],
                                                         "Flat": True,
                                                         "ToolTip": "Manually refresh the context header.",
-                                                        "Icon": self._get_icon("ramupdate.png"),
+                                                        "Icon": self._get_icon(
+                                                            "ramupdate.png"
+                                                        ),
                                                     }
                                                 ),
                                             ],
@@ -894,7 +905,7 @@ class RamsesFusionApp:
 
         dlg.On.AboutCloseButton.Clicked = on_close
         dlg.On[win_id].Close = on_close
-        
+
         self.dlg.Enabled = False
         try:
             dlg.Show()
@@ -916,7 +927,7 @@ class RamsesFusionApp:
         ui = self.ui
         disp = self.disp
         host = self.ramses.host
-        
+
         # 1. Initial Data Fetch
         all_projects = self.ramses.daemonInterface().getObjects("RamProject")
         if not all_projects:
@@ -926,11 +937,11 @@ class RamsesFusionApp:
         # Cache for performance
         data_cache = {
             "projects": all_projects,
-            "steps": [], # Filtered by project
-            "shots": [], # Filtered by project
+            "steps": [],  # Filtered by project
+            "shots": [],  # Filtered by project
             "seq_map": {},
             "status_map": {},
-            "shot_options": [] # Data for the shot combo
+            "shot_options": [],  # Data for the shot combo
         }
 
         # Determine initial selection
@@ -939,61 +950,89 @@ class RamsesFusionApp:
         cur_item = self.current_item
 
         # UI State
-        state = {
-            "project_idx": 0,
-            "step_idx": 0,
-            "shot_idx": 0
-        }
+        state = {"project_idx": 0, "step_idx": 0, "shot_idx": 0}
 
         # 2. Build UI
         win_id = f"ShotWizard_{int(os.getpid())}"
         dlg = disp.AddWindow(
-            {"WindowTitle": "Ramses: Switch Shot", "ID": win_id, "Geometry": [400, 400, 500, 180]},
-            ui.VGroup([
-                ui.VGroup({"Spacing": 5}, [
-                    ui.HGroup([ui.Label({"Text": "Project:", "Weight": 0.25}), ui.ComboBox({"ID": "ProjCombo", "Weight": 0.75})]),
-                    ui.HGroup([ui.Label({"Text": "Step:", "Weight": 0.25}), ui.ComboBox({"ID": "StepCombo", "Weight": 0.75})]),
-                    ui.HGroup([ui.Label({"Text": "Shot:", "Weight": 0.25}), ui.ComboBox({"ID": "ShotCombo", "Weight": 0.75})]),
-                ]),
-                ui.VGap(10),
-                ui.HGroup([
-                    ui.HGap(200),
-                    ui.Button({"ID": "OkBtn", "Text": "OK", "Weight": 0.1}),
-                    ui.Button({"ID": "CancelBtn", "Text": "Cancel", "Weight": 0.1})
-                ])
-            ])
+            {
+                "WindowTitle": "Ramses: Switch Shot",
+                "ID": win_id,
+                "Geometry": [400, 400, 500, 180],
+            },
+            ui.VGroup(
+                [
+                    ui.VGroup(
+                        {"Spacing": 5},
+                        [
+                            ui.HGroup(
+                                [
+                                    ui.Label({"Text": "Project:", "Weight": 0.25}),
+                                    ui.ComboBox({"ID": "ProjCombo", "Weight": 0.75}),
+                                ]
+                            ),
+                            ui.HGroup(
+                                [
+                                    ui.Label({"Text": "Step:", "Weight": 0.25}),
+                                    ui.ComboBox({"ID": "StepCombo", "Weight": 0.75}),
+                                ]
+                            ),
+                            ui.HGroup(
+                                [
+                                    ui.Label({"Text": "Shot:", "Weight": 0.25}),
+                                    ui.ComboBox({"ID": "ShotCombo", "Weight": 0.75}),
+                                ]
+                            ),
+                        ],
+                    ),
+                    ui.VGap(10),
+                    ui.HGroup(
+                        [
+                            ui.HGap(200),
+                            ui.Button({"ID": "OkBtn", "Text": "OK", "Weight": 0.1}),
+                            ui.Button(
+                                {"ID": "CancelBtn", "Text": "Cancel", "Weight": 0.1}
+                            ),
+                        ]
+                    ),
+                ]
+            ),
         )
-        
+
         itm = dlg.GetItems()
-        
+
         # 3. Logic: Update Helpers
         def update_shots():
             itm["ShotCombo"].Clear()
             data_cache["shot_options"] = []
-            
+
             if not data_cache["steps"]:
                 return
 
             selected_step = data_cache["steps"][state["step_idx"]]
             step_uuid = selected_step.uuid()
-            
+
             shots = data_cache["shots"]
             seq_map = data_cache["seq_map"]
-            
+
             # Map statuses for the SELECTED step only
-            current_status_map = {s.get("item"): s for s in data_cache["status_map"].values() if s.get("step") == step_uuid}
-            
+            current_status_map = {
+                s.get("item"): s
+                for s in data_cache["status_map"].values()
+                if s.get("step") == step_uuid
+            }
+
             valid_options = []
             for shot in shots:
                 status = current_status_map.get(shot.uuid())
                 if status and status.state().shortName() in ["NO", "STB"]:
                     continue
-                
+
                 expected_path = shot.stepFilePath(step=selected_step, extension="comp")
                 exists = bool(expected_path)
-                
+
                 if not exists:
-                    # If stepFilePath is empty, the file doesn't exist yet. 
+                    # If stepFilePath is empty, the file doesn't exist yet.
                     # We construct what the path WOULD be to allow creation.
                     folder = shot.stepFolderPath(selected_step)
                     nm = ram.RamFileInfo()
@@ -1005,25 +1044,27 @@ class RamsesFusionApp:
                     expected_path = os.path.join(folder, nm.fileName())
 
                 seq_name = seq_map.get(shot.get("sequence", ""), "None")
-                
+
                 if exists:
                     state_name = status.state().name() if status else "WIP"
                     label = f"{seq_name} / {shot.shortName()} [{state_name}]"
                 else:
                     label = f"{seq_name} / {shot.shortName()} [EMPTY - Create New]"
-                
-                valid_options.append({
-                    "label": label,
-                    "shot": shot,
-                    "path": expected_path,
-                    "exists": exists,
-                    "filename": os.path.basename(expected_path)
-                })
-            
+
+                valid_options.append(
+                    {
+                        "label": label,
+                        "shot": shot,
+                        "path": expected_path,
+                        "exists": exists,
+                        "filename": os.path.basename(expected_path),
+                    }
+                )
+
             data_cache["shot_options"] = valid_options
             for opt in valid_options:
                 itm["ShotCombo"].AddItem(opt["label"])
-            
+
             # Try to pre-select current shot
             if cur_item and state["step_idx"] == state.get("initial_step_idx", -1):
                 cur_uuid = cur_item.uuid()
@@ -1039,11 +1080,11 @@ class RamsesFusionApp:
         def update_steps():
             itm["StepCombo"].Clear()
             project = data_cache["projects"][state["project_idx"]]
-            
+
             # Fetch steps for this project
             all_steps = self.ramses.daemonInterface().getObjects("RamStep")
             project_uuid = project.uuid()
-            
+
             fusion_steps = []
             app_name_cache = {}
             for s in all_steps:
@@ -1051,20 +1092,25 @@ class RamsesFusionApp:
                 s_proj = s_data.get("project") or s_data.get("projectUuid")
                 if s_proj and s_proj != project_uuid:
                     continue
-                
+
                 is_fusion = False
                 apps = s_data.get("applications", [])
                 if isinstance(apps, list) and len(apps) > 0:
                     for app_uuid in apps:
                         if app_uuid not in app_name_cache:
                             try:
-                                app_data = self.ramses.daemonInterface().getData(app_uuid, "RamApplication")
-                                app_name_cache[app_uuid] = str(app_data.get("name", "")).upper()
-                            except: app_name_cache[app_uuid] = ""
+                                app_data = self.ramses.daemonInterface().getData(
+                                    app_uuid, "RamApplication"
+                                )
+                                app_name_cache[app_uuid] = str(
+                                    app_data.get("name", "")
+                                ).upper()
+                            except:
+                                app_name_cache[app_uuid] = ""
                         if "FUSION" in app_name_cache[app_uuid]:
                             is_fusion = True
                             break
-                
+
                 if not is_fusion:
                     for key in ["application", "software", "app", "dcc"]:
                         if "FUSION" in str(s_data.get(key, "")).upper():
@@ -1080,14 +1126,18 @@ class RamsesFusionApp:
 
                 if is_fusion:
                     fusion_steps.append(s)
-            
+
             if not fusion_steps:
-                fusion_steps = [s for s in all_steps if (s.get("project") or s.get("projectUuid")) == project_uuid]
-            
+                fusion_steps = [
+                    s
+                    for s in all_steps
+                    if (s.get("project") or s.get("projectUuid")) == project_uuid
+                ]
+
             data_cache["steps"] = fusion_steps
             for s in fusion_steps:
                 itm["StepCombo"].AddItem(s.name())
-            
+
             # Try to pre-select current step
             if cur_step and cur_project and project.uuid() == cur_project.uuid():
                 cur_step_uuid = cur_step.uuid()
@@ -1100,26 +1150,34 @@ class RamsesFusionApp:
             else:
                 itm["StepCombo"].CurrentIndex = 0
                 state["step_idx"] = 0
-            
+
             update_shots()
 
         def on_project_changed(ev):
             state["project_idx"] = int(itm["ProjCombo"].CurrentIndex)
             proj = data_cache["projects"][state["project_idx"]]
-            
+
             proj_uuid = proj.uuid()
-            
+
             # Bulk fetch shots, seqs and statuses for this project
             all_shots = self.ramses.daemonInterface().getObjects("RamShot")
-            data_cache["shots"] = [s for s in all_shots if s.get("project") == proj_uuid]
-            
+            data_cache["shots"] = [
+                s for s in all_shots if s.get("project") == proj_uuid
+            ]
+
             all_seqs = self.ramses.daemonInterface().getObjects("RamSequence")
-            data_cache["seq_map"] = {s.uuid(): s.shortName() for s in all_seqs if s.get("project") == proj_uuid}
-            
+            data_cache["seq_map"] = {
+                s.uuid(): s.shortName()
+                for s in all_seqs
+                if s.get("project") == proj_uuid
+            }
+
             all_statuses = self.ramses.daemonInterface().getObjects("RamStatus")
             # Cache all statuses for the project to filter by step in update_shots
-            data_cache["status_map"] = {s.uuid(): s for s in all_statuses if s.get("project") == proj_uuid}
-            
+            data_cache["status_map"] = {
+                s.uuid(): s for s in all_statuses if s.get("project") == proj_uuid
+            }
+
             update_steps()
 
         def on_step_changed(ev):
@@ -1133,14 +1191,16 @@ class RamsesFusionApp:
         dlg.On.ProjCombo.CurrentIndexChanged = on_project_changed
         dlg.On.StepCombo.CurrentIndexChanged = on_step_changed
         dlg.On.ShotCombo.CurrentIndexChanged = on_shot_changed
-        
+
         results = {"confirmed": False}
+
         def on_ok(ev):
             results["confirmed"] = True
             disp.ExitLoop()
+
         def on_cancel(ev):
             disp.ExitLoop()
-            
+
         dlg.On.OkBtn.Clicked = on_ok
         dlg.On.CancelBtn.Clicked = on_cancel
         dlg.On[win_id].Close = on_cancel
@@ -1148,7 +1208,7 @@ class RamsesFusionApp:
         # 5. Initialization
         for p in data_cache["projects"]:
             itm["ProjCombo"].AddItem(p.name())
-        
+
         # Pre-select project
         initial_proj_idx = 0
         if cur_project:
@@ -1157,7 +1217,7 @@ class RamsesFusionApp:
                 if p.uuid() == cur_p_uuid:
                     initial_proj_idx = i
                     break
-        
+
         itm["ProjCombo"].CurrentIndex = initial_proj_idx
         state["project_idx"] = initial_proj_idx
         on_project_changed(None)
@@ -1176,38 +1236,69 @@ class RamsesFusionApp:
             shot_data = data_cache["shot_options"][state["shot_idx"]]
             selected_step = data_cache["steps"][state["step_idx"]]
             shot_obj = shot_data["shot"]
-            
+
             if not shot_data["exists"]:
                 selected_path = shot_data["path"]
                 use_template = None
                 tpl_folder = selected_step.templatesFolderPath()
                 template_files = []
                 if tpl_folder and os.path.isdir(tpl_folder):
-                    template_files = [f for f in os.listdir(tpl_folder) if f.endswith(".comp")]
+                    template_files = [
+                        f for f in os.listdir(tpl_folder) if f.endswith(".comp")
+                    ]
 
                 if template_files:
                     tpl_opts = {"0": "None - Empty Composition"}
-                    for i, f in enumerate(template_files): tpl_opts[str(i + 1)] = f
-                    tpl_res = host._request_input("Select Template", [
-                        {"id": "Tpl", "label": "Template:", "type": "combo", "options": tpl_opts}
-                    ])
+                    for i, f in enumerate(template_files):
+                        tpl_opts[str(i + 1)] = f
+                    tpl_res = host._request_input(
+                        "Select Template",
+                        [
+                            {
+                                "id": "Tpl",
+                                "label": "Template:",
+                                "type": "combo",
+                                "options": tpl_opts,
+                            }
+                        ],
+                    )
                     if tpl_res:
                         idx = int(tpl_res["Tpl"])
-                        if idx > 0: use_template = os.path.join(tpl_folder, template_files[idx - 1])
-                        else: host.fusion.NewComp()
-                    else: return
+                        if idx > 0:
+                            use_template = os.path.join(
+                                tpl_folder, template_files[idx - 1]
+                            )
+                        else:
+                            host.fusion.NewComp()
+                    else:
+                        return
 
                 if use_template:
-                    self.log(f"Creating shot from template: {use_template}", ram.LogLevel.Info)
+                    self.log(
+                        f"Creating shot from template: {use_template}",
+                        ram.LogLevel.Info,
+                    )
                     if host.open(use_template):
                         host.comp.Save(host.normalizePath(selected_path))
                 elif not template_files:
-                    init_res = host._request_input("Initialize Shot", [
-                        {"id": "Mode", "label": "No template found. Use:", "type": "combo", 
-                         "options": {"0": "Empty Composition", "1": "Current Composition as base"}}
-                    ])
-                    if not init_res: return
-                    if init_res["Mode"] == 0: host.fusion.NewComp()
+                    init_res = host._request_input(
+                        "Initialize Shot",
+                        [
+                            {
+                                "id": "Mode",
+                                "label": "No template found. Use:",
+                                "type": "combo",
+                                "options": {
+                                    "0": "Empty Composition",
+                                    "1": "Current Composition as base",
+                                },
+                            }
+                        ],
+                    )
+                    if not init_res:
+                        return
+                    if init_res["Mode"] == 0:
+                        host.fusion.NewComp()
                     host.comp.Save(host.normalizePath(selected_path))
                 else:
                     host.comp.Save(host.normalizePath(selected_path))
@@ -1215,7 +1306,9 @@ class RamsesFusionApp:
                 # Initialize Versioning
                 if host.save(comment="Initial creation", setupFile=True):
                     self.refresh_header()
-                    self.log(f"New shot initialized: {selected_path}", ram.LogLevel.Info)
+                    self.log(
+                        f"New shot initialized: {selected_path}", ram.LogLevel.Info
+                    )
             else:
                 if host.open(shot_data["path"]):
                     self.refresh_header()
@@ -1271,21 +1364,21 @@ class RamsesFusionApp:
         if res and res["Comment"]:
             host = self.ramses.host
             has_project = self.ramses.project() is not None
-            
+
             # Cache the status before save if possible (less network hit than currentStatus after save)
             status = host.currentStatus()
-            
+
             if host.save(comment=res["Comment"], setupFile=has_project):
                 # 1. Update Database Status
                 if status:
                     status.setComment(res["Comment"])
                     status.setVersion(host.currentVersion())
-                
+
                 # 2. Sync Metadata to Version File (for 'Retrieve Version' list)
                 version_file = host.currentVersionFilePath()
                 if version_file and os.path.isfile(version_file):
                     ram.RamMetaDataManager.setComment(version_file, res["Comment"])
-                    
+
                 self.refresh_header()
 
     def on_update_status(self, ev):
@@ -1402,12 +1495,14 @@ class RamsesFusionApp:
         nm.shortName = name
         nm.step = step.shortName()
         nm.extension = "comp"
-        
+
         tpl_folder = step.templatesFolderPath()
         if not tpl_folder:
-            self.log("Step does not have a valid templates folder.", ram.LogLevel.Warning)
+            self.log(
+                "Step does not have a valid templates folder.", ram.LogLevel.Warning
+            )
             return
-            
+
         path = os.path.join(tpl_folder, nm.fileName())
 
         comp = self.ramses.host.comp
@@ -1425,7 +1520,10 @@ class RamsesFusionApp:
         # Use the optimized host implementation to collect settings
         settings = self.ramses.host.collectItemSettings(item)
         if not settings:
-            self.log("No active Ramses project found or context is invalid.", ram.LogLevel.Warning)
+            self.log(
+                "No active Ramses project found or context is invalid.",
+                ram.LogLevel.Warning,
+            )
             return
 
         # Apply directly and refresh UI
