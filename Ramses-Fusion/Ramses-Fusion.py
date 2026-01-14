@@ -326,24 +326,6 @@ class RamsesFusionApp:
             return False, "\n".join(errors)
         return True, ""
 
-    def _resolve_shot_path(self, shot, step):
-        """Standardizes how we predict a shot's composition path using the API."""
-        nm = ram.RamFileInfo()
-        nm.project = shot.projectShortName()
-        nm.ramType = ram.ItemType.SHOT
-        nm.shortName = shot.shortName()
-        nm.step = step.shortName()
-        nm.extension = "comp"
-        filename = nm.fileName()
-
-        # Use API to get the folder path (this ensures correct structure)
-        step_folder = shot.stepFolderPath(step)
-        if not step_folder:
-            return None, None
-
-        path = os.path.join(step_folder, filename).replace("\\", "/")
-        return path, filename
-
     def _sync_render_anchors(self):
         """Syncs existing _PREVIEW and _FINAL Saver paths with current version and project specs."""
         comp = self.ramses.host.comp
@@ -355,27 +337,27 @@ class RamsesFusionApp:
         try:
             # 1. Resolve current Ramses paths
             pub_info = self.ramses.host.publishInfo()
+            host = self.ramses.host
 
             # Preview: Official flat filename in the shot's _preview folder
-            # Pattern from RamHost.savePreview(): No version, no state, no resource
-            preview_folder = self.ramses.host.previewPath()
+            preview_folder = host.previewPath()
             preview_info = pub_info.copy()
             preview_info.version = -1
             preview_info.state = ""
             preview_info.resource = ""
             preview_info.extension = "mov"
-            preview_path = os.path.join(
+            preview_path = host.normalizePath(os.path.join(
                 preview_folder, preview_info.fileName()
-            ).replace("\\", "/")
+            ))
 
             # Final: Master ProRes 4444 in the project's flat Output (Export) folder
-            export_folder = project.exportPath().replace("\\", "/")
+            export_folder = project.exportPath()
             if export_folder:
                 # Ensure the folder exists on disk
                 if not os.path.isdir(export_folder):
                     try:
                         os.makedirs(export_folder)
-                    except:
+                    except Exception:
                         pass
 
                 # Use API to generate the standard filename without version
@@ -386,14 +368,10 @@ class RamsesFusionApp:
                 final_info.extension = "mov"
                 final_filename = final_info.fileName()
 
-                final_path = os.path.join(export_folder, final_filename).replace(
-                    "\\", "/"
-                )
+                final_path = host.normalizePath(os.path.join(export_folder, final_filename))
             else:
                 # Fallback only if export path is totally undefined
-                final_path = self.ramses.host.publishFilePath("mov", "").replace(
-                    "\\", "/"
-                )
+                final_path = host.normalizePath(host.publishFilePath("mov", ""))
 
             # 2. Update existing nodes
             preview_node = comp.FindTool("_PREVIEW")
@@ -966,20 +944,12 @@ class RamsesFusionApp:
                 continue
 
             # Official API way to predict/get the working file path
-            expected_path = shot.stepFilePath(
-                step=current_step, extension="comp"
-            ).replace("\\", "/")
-
-            # If the file doesn't exist yet, we still need to know where it WOULD be
-            if not expected_path:
-                # Use resolve_shot_path as a fallback for 'EMPTY' shots only
-                expected_path, filename = self._resolve_shot_path(shot, current_step)
-            else:
-                filename = os.path.basename(expected_path)
+            expected_path = shot.stepFilePath(step=current_step, extension="comp")
 
             if not expected_path:
                 continue
 
+            filename = os.path.basename(expected_path)
             exists = os.path.exists(expected_path)
             seq_name = seq_map.get(shot.get("sequence", ""), "None")
 
@@ -1295,11 +1265,17 @@ class RamsesFusionApp:
         nm.shortName = name
         nm.step = step.shortName()
         nm.extension = "comp"
-        path = os.path.join(step.templatesFolderPath(), nm.fileName())
+        
+        tpl_folder = step.templatesFolderPath()
+        if not tpl_folder:
+            self.log("Step does not have a valid templates folder.", ram.LogLevel.Warning)
+            return
+            
+        path = os.path.join(tpl_folder, nm.fileName())
 
         comp = self.ramses.host.comp
         if comp:
-            comp.Save(path)
+            comp.Save(self.ramses.host.normalizePath(path))
             self.log(f"Template '{name}' saved to {path}", ram.LogLevel.Info)
 
     def on_setup_scene(self, ev):
