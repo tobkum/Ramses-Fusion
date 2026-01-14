@@ -356,6 +356,9 @@ class RamsesFusionApp:
                 self._item_path = ""
                 self._step_cache = None
                 self._step_path = ""
+                
+                # Reset sync gate to force Saver anchor updates on manual refresh
+                self._last_synced_path = None
 
                 # Sync Savers before updating UI (Optimized with path gating)
                 self._sync_render_anchors()
@@ -945,7 +948,8 @@ class RamsesFusionApp:
             "current_seq_map": {},
             "current_steps": [],
             "shot_options": [],
-            "initial_step_idx": -1
+            "initial_step_idx": -1,
+            "last_proj_idx": -1
         }
 
         cur_project = self._get_project()
@@ -994,10 +998,13 @@ class RamsesFusionApp:
                 for shot in shots:
                     shot_uuid = str(shot.uuid())
                     
-                    # Fetch status lazily (Safe for 100+ shots as it avoids the 64KB global buffer limit)
+                    # Fetch status lazily with error handling
                     cache_key = (shot_uuid, step_uuid)
                     if cache_key not in session_cache["status_cache"]:
-                        session_cache["status_cache"][cache_key] = shot.currentStatus(selected_step)
+                        try:
+                            session_cache["status_cache"][cache_key] = shot.currentStatus(selected_step)
+                        except Exception:
+                            session_cache["status_cache"][cache_key] = None
                     
                     status = session_cache["status_cache"][cache_key]
                     if status:
@@ -1054,22 +1061,26 @@ class RamsesFusionApp:
                     s_data = s.data()
                     is_fusion = False
                     
-                    # DCC Detection
+                    # DCC Detection (Broadened for studio compatibility)
                     apps = s_data.get("applications", [])
                     if isinstance(apps, list):
                         for app_uuid in apps:
                             app_data = daemon.getData(str(app_uuid), "RamApplication")
-                            if "FUSION" in str(app_data.get("name", "")).upper():
+                            app_name = str(app_data.get("name", "")).upper()
+                            if "FUSION" in app_name or "BMF" in app_name:
                                 is_fusion = True; break
                     
                     if not is_fusion:
                         for key in ["application", "software", "app", "dcc"]:
-                            if "FUSION" in str(s_data.get(key, "")).upper():
+                            val = str(s_data.get(key, "")).upper()
+                            if "FUSION" in val or "BMF" in val:
                                 is_fusion = True; break
                         if not is_fusion and "FUSION" in s.shortName().upper(): is_fusion = True
                         if not is_fusion:
                             stgs = s.generalSettings("yaml")
-                            if isinstance(stgs, dict) and "FUSION" in str(stgs.get("application", "")).upper(): is_fusion = True
+                            if isinstance(stgs, dict):
+                                stg_val = str(stgs.get("application", "")).upper()
+                                if "FUSION" in stg_val or "BMF" in stg_val: is_fusion = True
 
                     if is_fusion: fusion_steps.append(s)
                 
@@ -1080,15 +1091,16 @@ class RamsesFusionApp:
                 
                 # Pre-selection logic
                 proj_idx = int(itm["ProjCombo"].CurrentIndex)
-                proj = session_cache["projects"][proj_idx]
-                if cur_step and str(proj.uuid()) == str(cur_project.uuid()):
-                    cur_uuid = str(cur_step.uuid())
-                    for i, s in enumerate(fusion_steps):
-                        if str(s.uuid()) == cur_uuid:
-                            itm["StepCombo"].CurrentIndex = i
-                            session_cache["initial_step_idx"] = i; break
-                else:
-                    itm["StepCombo"].CurrentIndex = 0
+                if proj_idx >= 0:
+                    proj = session_cache["projects"][proj_idx]
+                    if cur_step and str(proj.uuid()) == str(cur_project.uuid()):
+                        cur_uuid = str(cur_step.uuid())
+                        for i, s in enumerate(fusion_steps):
+                            if str(s.uuid()) == cur_uuid:
+                                itm["StepCombo"].CurrentIndex = i
+                                session_cache["initial_step_idx"] = i; break
+                    else:
+                        itm["StepCombo"].CurrentIndex = 0
                 
                 update_shots()
             except Exception as e:
@@ -1097,7 +1109,9 @@ class RamsesFusionApp:
         def on_project_changed(ev=None):
             try:
                 idx = int(itm["ProjCombo"].CurrentIndex)
-                if idx < 0: return
+                if idx < 0 or idx == session_cache["last_proj_idx"]: return
+                session_cache["last_proj_idx"] = idx
+                
                 proj = session_cache["projects"][idx]
                 proj_uuid = str(proj.uuid())
                 
@@ -1115,7 +1129,7 @@ class RamsesFusionApp:
                     # Get shots with no sequence
                     shots.extend(proj.shots(sequence=""))
                     
-                    # Remove duplicates (some APIs might return items twice)
+                    # Remove duplicates
                     unique_shots = []
                     seen_uuids = set()
                     for s in shots:
@@ -1125,13 +1139,11 @@ class RamsesFusionApp:
                             seen_uuids.add(u)
                     
                     # 2. Steps: Fetch only project-relevant steps
-                    # We fetch all and filter manually because proj.steps() relies on the active Client project context
                     all_steps_studio = daemon.getObjects("RamStep")
                     steps = [s for s in all_steps_studio if str(ram.RamObject.getUuid(s.get("project"))) == proj_uuid 
                              and s.stepType() == ram.StepType.SHOT_PRODUCTION]
                     
                     if not steps:
-                        # Fallback to standard API if data-filtering fails
                         steps = proj.steps(ram.StepType.SHOT_PRODUCTION)
 
                     session_cache["project_data"][proj_uuid] = {
@@ -1231,177 +1243,6 @@ class RamsesFusionApp:
                         self.log(f"New shot initialized: {selected_path}", ram.LogLevel.Info)
                 else:
                     if host.open(shot_data["path"]): self.refresh_header()
-
-        # 4. Event Binding
-        dlg.On.ProjCombo.CurrentIndexChanged = on_project_changed
-        dlg.On.StepCombo.CurrentIndexChanged = update_steps
-        dlg.On.ShotCombo.CurrentIndexChanged = update_shots
-        
-        results = {"confirmed": False}
-        def on_ok(ev):
-            results["confirmed"] = True
-            disp.ExitLoop()
-        def on_cancel(ev):
-            disp.ExitLoop()
-            
-        dlg.On.OkBtn.Clicked = on_ok
-        dlg.On.CancelBtn.Clicked = on_cancel
-        dlg.On[win_id].Close = on_cancel
-
-        # 5. Initialization
-        for p in session_data["projects"]: itm["ProjCombo"].AddItem(p.name())
-        
-        initial_proj_idx = 0
-        if cur_project:
-            cur_p_uuid = str(cur_project.uuid())
-            for i, p in enumerate(session_data["projects"]):
-                if str(p.uuid()) == cur_p_uuid:
-                    initial_proj_idx = i; break
-        
-        itm["ProjCombo"].CurrentIndex = initial_proj_idx
-        on_project_changed(None)
-
-        # 6. Show Dialog
-        self.dlg.Enabled = False
-        try:
-            dlg.Show()
-            disp.RunLoop()
-        finally:
-            dlg.Hide()
-            self.dlg.Enabled = True
-
-        # 7. Execution
-        if results["confirmed"] and session_data["shot_options"]:
-            shot_idx = int(itm["ShotCombo"].CurrentIndex)
-            step_idx = int(itm["StepCombo"].CurrentIndex)
-            
-            if shot_idx >= 0 and step_idx >= 0:
-                shot_data = session_data["shot_options"][shot_idx]
-                selected_step = session_data["steps"][step_idx]
-                
-                if not shot_data["exists"]:
-                    selected_path = shot_data["path"]
-                    use_template = None
-                    tpl_folder = selected_step.templatesFolderPath()
-                    template_files = []
-                    if tpl_folder and os.path.isdir(tpl_folder):
-                        template_files = [f for f in os.listdir(tpl_folder) if f.endswith(".comp")]
-
-                    if template_files:
-                        tpl_opts = {"0": "None - Empty Composition"}
-                        for i, f in enumerate(template_files): tpl_opts[str(i + 1)] = f
-                        tpl_res = host._request_input("Select Template", [{"id": "Tpl", "label": "Template:", "type": "combo", "options": tpl_opts}])
-                        if tpl_res:
-                            idx = int(tpl_res["Tpl"])
-                            if idx > 0: use_template = os.path.join(tpl_folder, template_files[idx - 1])
-                            else: host.fusion.NewComp()
-                        else: return
-
-                    if use_template:
-                        self.log(f"Creating shot from template: {use_template}", ram.LogLevel.Info)
-                        if host.open(use_template): host.comp.Save(host.normalizePath(selected_path))
-                    elif not template_files:
-                        init_res = host._request_input("Initialize Shot", [{"id": "Mode", "label": "No template found. Use:", "type": "combo", "options": {"0": "Empty Composition", "1": "Current Composition as base"}}])
-                        if not init_res: return
-                        if init_res["Mode"] == 0: host.fusion.NewComp()
-                        host.comp.Save(host.normalizePath(selected_path))
-                    else:
-                        host.comp.Save(host.normalizePath(selected_path))
-
-                    if host.save(comment="Initial creation", setupFile=True):
-                        self.refresh_header()
-                        self.log(f"New shot initialized: {selected_path}", ram.LogLevel.Info)
-                else:
-                    if host.open(shot_data["path"]): self.refresh_header()
-
-        def on_step_changed(ev):
-            idx = int(itm["StepCombo"].CurrentIndex)
-            if idx >= 0:
-                state["step_idx"] = idx
-                update_shots()
-
-        def on_shot_changed(ev):
-            idx = int(itm["ShotCombo"].CurrentIndex)
-            if idx >= 0: state["shot_idx"] = idx
-
-        # 4. Event Binding
-        dlg.On.ProjCombo.CurrentIndexChanged = on_project_changed
-        dlg.On.StepCombo.CurrentIndexChanged = on_step_changed
-        dlg.On.ShotCombo.CurrentIndexChanged = on_shot_changed
-        
-        results = {"confirmed": False}
-        def on_ok(ev):
-            results["confirmed"] = True
-            disp.ExitLoop()
-        def on_cancel(ev):
-            disp.ExitLoop()
-            
-        dlg.On.OkBtn.Clicked = on_ok
-        dlg.On.CancelBtn.Clicked = on_cancel
-        dlg.On[win_id].Close = on_cancel
-
-        # 5. Initialization
-        for p in data_cache["projects"]: itm["ProjCombo"].AddItem(p.name())
-        
-        initial_proj_idx = 0
-        if cur_project:
-            cur_p_uuid = str(cur_project.uuid())
-            for i, p in enumerate(data_cache["projects"]):
-                if str(p.uuid()) == cur_p_uuid:
-                    initial_proj_idx = i; break
-        
-        itm["ProjCombo"].CurrentIndex = initial_proj_idx
-        state["project_idx"] = initial_proj_idx
-        on_project_changed(None)
-
-        # 6. Show Dialog
-        self.dlg.Enabled = False
-        try:
-            dlg.Show()
-            disp.RunLoop()
-        finally:
-            dlg.Hide()
-            self.dlg.Enabled = True
-
-        # 7. Execution
-        if results["confirmed"] and data_cache["shot_options"]:
-            shot_data = data_cache["shot_options"][state["shot_idx"]]
-            selected_step = data_cache["steps"][state["step_idx"]]
-            
-            if not shot_data["exists"]:
-                selected_path = shot_data["path"]
-                use_template = None
-                tpl_folder = selected_step.templatesFolderPath()
-                template_files = []
-                if tpl_folder and os.path.isdir(tpl_folder):
-                    template_files = [f for f in os.listdir(tpl_folder) if f.endswith(".comp")]
-
-                if template_files:
-                    tpl_opts = {"0": "None - Empty Composition"}
-                    for i, f in enumerate(template_files): tpl_opts[str(i + 1)] = f
-                    tpl_res = host._request_input("Select Template", [{"id": "Tpl", "label": "Template:", "type": "combo", "options": tpl_opts}])
-                    if tpl_res:
-                        idx = int(tpl_res["Tpl"])
-                        if idx > 0: use_template = os.path.join(tpl_folder, template_files[idx - 1])
-                        else: host.fusion.NewComp()
-                    else: return
-
-                if use_template:
-                    self.log(f"Creating shot from template: {use_template}", ram.LogLevel.Info)
-                    if host.open(use_template): host.comp.Save(host.normalizePath(selected_path))
-                elif not template_files:
-                    init_res = host._request_input("Initialize Shot", [{"id": "Mode", "label": "No template found. Use:", "type": "combo", "options": {"0": "Empty Composition", "1": "Current Composition as base"}}])
-                    if not init_res: return
-                    if init_res["Mode"] == 0: host.fusion.NewComp()
-                    host.comp.Save(host.normalizePath(selected_path))
-                else:
-                    host.comp.Save(host.normalizePath(selected_path))
-
-                if host.save(comment="Initial creation", setupFile=True):
-                    self.refresh_header()
-                    self.log(f"New shot initialized: {selected_path}", ram.LogLevel.Info)
-            else:
-                if host.open(shot_data["path"]): self.refresh_header()
 
 
     def on_import(self, ev):
