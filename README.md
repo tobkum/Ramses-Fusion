@@ -28,11 +28,27 @@ Manage the flow of data into your composition without browsing folders.
 * **Retrieval:** Instantly access and restore previous versions of your composition directly from the versioning archive.
 
 ### 🏁 Technical Validation & Publishing
+
 The tool acts as a gatekeeper to ensure only technically correct data moves down the pipeline.
+
 * **Mismatch Detection:** Before publishing, the tool validates your composition's resolution, FPS, and frame range against the database, warning you of any discrepancies.
+
 * **Automated Publishing:** Handles the archival of the `.comp` file and the rendering of master files in one step.
+
 * **Metadata Logging:** Every save and publish can be accompanied by comments that are logged directly into the Ramses database for production tracking.
 
+
+
+## 🛠️ Roadmap / TODO
+
+
+
+* **Configurable Codecs:** Currently, the output codecs for `_PREVIEW` (ProRes 422) and `_FINAL` (ProRes 4444) are hardcoded. Future updates will allow these to be configured via the plugin settings to match specific studio requirements.
+
+
+
 ---
+
+
 
 *Developed with ❤️ by [Overmind Studios](https://www.overmind-studios.de).*
