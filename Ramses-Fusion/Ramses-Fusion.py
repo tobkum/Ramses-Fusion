@@ -132,28 +132,46 @@ class RamsesFusionApp:
         return f"<font color='#555'>User: {self._get_user_name()} | Ramses API {self.settings.version}</font>"
 
     def _create_render_anchors(self):
-        """Creates _PREVIEW and _FINAL Saver nodes at fixed origin coordinates."""
+        """Creates _PREVIEW and _FINAL Saver nodes at calculated grid coordinates."""
         comp = self.ramses.host.comp
         if not comp:
             return
 
         comp.Lock()
         try:
-            # Fixed absolute coordinates
+            # 1. Determine Reference Position (Grid Units)
+            flow = comp.CurrentFrame.FlowView
+            start_x, start_y = 0, 0
+            
+            active = comp.ActiveTool
+            if active and flow:
+                pos = flow.GetPosTable(active)
+                # Fusion returns {1.0: x, 2.0: y} in Grid Units
+                if pos:
+                    start_x = pos[1]
+                    start_y = pos[2]
+
+            # 2. Configuration: Exact Grid Offsets
+            # Place side-by-side BELOW the selection
             anchors_config = {
-                "_PREVIEW": {"color": {"R": 0.3, "G": 0.7, "B": 0.3}, "x": 0, "y": 0},
-                "_FINAL": {"color": {"R": 0.7, "G": 0.3, "B": 0.3}, "x": 1, "y": 0},
+                "_PREVIEW": {
+                    "color": {"R": 0.3, "G": 0.7, "B": 0.3},
+                    "target_x": int(start_x + 0),
+                    "target_y": int(start_y + 2),
+                },
+                "_FINAL": {
+                    "color": {"R": 0.7, "G": 0.3, "B": 0.3},
+                    "target_x": int(start_x + 1),
+                    "target_y": int(start_y + 2),
+                },
             }
 
-            # Pre-calculate paths if project is active
+            # Pre-calculate paths
             preview_path = ""
             publish_path = ""
             if self._get_project():
                 try:
-                    # Get official Ramses paths
                     preview_folder = self.ramses.host.previewPath()
-
-                    # Try to construct a proper filename if context is available
                     try:
                         pub_info = self.ramses.host.publishInfo()
                         preview_info = pub_info.copy()
@@ -165,12 +183,10 @@ class RamsesFusionApp:
                             preview_folder, preview_info.fileName()
                         ).replace("\\", "/")
                     except:
-                        # Fallback to simple name if info not available yet
                         preview_path = os.path.join(
                             preview_folder, "preview.mov"
                         ).replace("\\", "/")
 
-                    # Get publish info for the final saver (ProRes 4444 MOV)
                     publish_path = self.ramses.host.publishFilePath(
                         "mov", ""
                     ).replace("\\", "/")
@@ -179,50 +195,32 @@ class RamsesFusionApp:
 
             for name, cfg in anchors_config.items():
                 node = comp.FindTool(name)
+                
+                # Create if missing, using calculated coordinates directly
                 if not node:
-                    # Create a Saver node directly
-                    node = comp.AddTool("Saver", cfg["x"], cfg["y"])
+                    node = comp.AddTool("Saver", cfg["target_x"], cfg["target_y"])
                     if node:
-                        # Set core attributes
-                        node.SetAttrs(
-                            {
-                                "TOOLS_Name": name,
-                                "TOOLB_PassThrough": True,  # Create in PASSTHROUGH state
-                            }
-                        )
-
-                        # Set the path and format based on type
+                        node.SetAttrs({"TOOLS_Name": name, "TOOLB_PassThrough": True})
+                        
                         if name == "_PREVIEW":
-                            if preview_path:
-                                node.Clip[1] = preview_path
-                            # Configure for ProRes 422 based on technical specs
+                            if preview_path: node.Clip[1] = preview_path
                             node.SetInput("OutputFormat", "QuickTimeMovies", 0)
-                            node.SetInput(
-                                "QuickTimeMovies.Compression",
-                                "Apple ProRes 422_apcn",
-                                0,
-                            )
+                            node.SetInput("QuickTimeMovies.Compression", "Apple ProRes 422_apcn", 0)
+                            node.Comments[1] = "Preview renders will be saved here. Connect your output."
                         else:
-                            if publish_path:
-                                node.Clip[1] = publish_path
-                            # Configure for ProRes 4444 based on technical specs
+                            if publish_path: node.Clip[1] = publish_path
                             node.SetInput("OutputFormat", "QuickTimeMovies", 0)
-                            node.SetInput(
-                                "QuickTimeMovies.Compression",
-                                "Apple ProRes 4444_ap4h",
-                                0,
-                            )
+                            node.SetInput("QuickTimeMovies.Compression", "Apple ProRes 4444_ap4h", 0)
+                            node.Comments[1] = "Final renders will be saved here. Connect your output."
+                            
+                        self.log(f"Created render anchor: {name}", ram.LogLevel.Info)
 
-                        target_type = "Preview" if name == "_PREVIEW" else "Final"
-                        node.Comments[1] = (
-                            f"{target_type} renders will be saved here. Connect your output."
-                        )
-                        self.log(
-                            f"Created render anchor: {name}", ram.LogLevel.Info
-                        )
-
+                # Ensure color is correct (even if existing)
                 if node:
                     node.TileColor = cfg["color"]
+                    
+                    # Optional: If node existed but was far away, we could enforce position here.
+                    # For now, we only set position on creation as requested.
         finally:
             comp.Unlock()
 
