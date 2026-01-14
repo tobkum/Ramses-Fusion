@@ -191,9 +191,8 @@ class RamsesFusionApp:
         
         # 1. Check Frame Range
         if item.itemType() == ram.ItemType.SHOT:
-            db_duration = float(item.duration() or 5.0)
-            db_fps = float(project.framerate() or 24.0)
-            expected_frames = int(round(db_duration * db_fps))
+            # Use official API method for shot frame count
+            expected_frames = item.frames()
             
             comp = self.ramses.host.comp
             # Query specific attributes directly for maximum reliability
@@ -1055,13 +1054,15 @@ class RamsesFusionApp:
             seq = item.sequence()
             if seq:
                 spec_provider = seq
-        
+        # 3. Compile high-performance settings dict
+        # Use official API methods for all calculations
         settings = {
             "width": int(spec_provider.width()),
             "height": int(spec_provider.height()),
             "framerate": float(spec_provider.framerate()),
             "duration": float(duration),
-            "pixelAspectRatio": float(project.pixelAspectRatio())
+            "pixelAspectRatio": float(project.pixelAspectRatio()),
+            "aspectRatio": float(spec_provider.aspectRatio())
         }
             
         # 4. Apply directly and refresh UI
