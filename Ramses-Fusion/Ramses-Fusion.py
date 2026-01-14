@@ -273,6 +273,8 @@ class RamsesFusionApp:
                 # Use API to generate the standard filename without version
                 final_info = pub_info.copy()
                 final_info.version = -1
+                final_info.state = ""
+                final_info.resource = ""
                 final_info.extension = "mov"
                 final_filename = final_info.fileName()
                 
@@ -745,8 +747,10 @@ class RamsesFusionApp:
 
         # 1. Bulk fetch all relevant objects once for maximum performance
         self.log("Fetching shots and statuses...", ram.LogLevel.Info)
-        all_shots = self.ramses.daemonInterface().getObjects("RamShot")
-        all_seqs = self.ramses.daemonInterface().getObjects("RamSequence")
+        
+        project = self._get_project()
+        all_shots = project.shots() if project else []
+        all_seqs = project.sequences() if project else []
         all_statuses = self.ramses.daemonInterface().getObjects("RamStatus")
         
         seq_map = {s.uuid(): s.shortName() for s in all_seqs}
@@ -754,7 +758,6 @@ class RamsesFusionApp:
         status_map = {s.get("item"): s for s in all_statuses if s.get("step") == step_uuid}
         
         # Get common naming variables once
-        project = self._get_project()
         proj_sn = project.shortName() if project else "Unknown"
         step_sn = current_step.shortName()
 
