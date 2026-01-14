@@ -769,10 +769,6 @@ class RamsesFusionApp:
         seq_map = {s.uuid(): s.shortName() for s in all_seqs}
         step_uuid = current_step.uuid()
         status_map = {s.get("item"): s for s in all_statuses if s.get("step") == step_uuid}
-        
-        # Get common naming variables once
-        proj_sn = project.shortName() if project else "Unknown"
-        step_sn = current_step.shortName()
 
         # 2. Find templates for this step
         template_files = []
