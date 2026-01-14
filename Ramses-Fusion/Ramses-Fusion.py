@@ -254,8 +254,9 @@ class RamsesFusionApp:
             expected_frames = int(round(item.duration() * framerate))
 
             # Check Render Range
-            comp_start = comp.GetAttrs("COMPN_RenderStart") or 0
-            comp_end = comp.GetAttrs("COMPN_RenderEnd") or 0
+            attrs = comp.GetAttrs()
+            comp_start = attrs.get("COMPN_RenderStart", 0)
+            comp_end = attrs.get("COMPN_RenderEnd", 0)
             actual_frames = int(comp_end - comp_start + 1)
 
             if actual_frames != expected_frames:
@@ -740,10 +741,11 @@ class RamsesFusionApp:
         )
 
     def show_settings_window(self, ev):
+        win_id = "SettingsWin"
         dlg = self.disp.AddWindow(
             {
                 "WindowTitle": "Ramses Settings",
-                "ID": "SettingsWin",
+                "ID": win_id,
                 "Geometry": [200, 200, 550, 150],
             },
             [
@@ -826,9 +828,12 @@ class RamsesFusionApp:
             self.log("Settings Saved.", ram.LogLevel.Info)
 
         def close_settings(ev):
+            dlg.On[win_id].Close = None
+            dlg.On.CloseSettingsButton.Clicked = None
+            dlg.On.SaveSettingsButton.Clicked = None
             self.disp.ExitLoop()
 
-        dlg.On.SettingsWin.Close = close_settings
+        dlg.On[win_id].Close = close_settings
         dlg.On.CloseSettingsButton.Clicked = close_settings
         dlg.On.SaveSettingsButton.Clicked = save_settings
 
@@ -837,10 +842,11 @@ class RamsesFusionApp:
         dlg.Hide()
 
     def show_about_window(self, ev):
+        win_id = "AboutWin"
         dlg = self.disp.AddWindow(
             {
                 "WindowTitle": "About Ramses-Fusion",
-                "ID": "AboutWin",
+                "ID": win_id,
                 "Geometry": [200, 200, 450, 150],
             },
             [
@@ -871,8 +877,14 @@ class RamsesFusionApp:
                 )
             ],
         )
-        dlg.On.AboutCloseButton.Clicked = lambda ev: self.disp.ExitLoop()
-        dlg.On.AboutWin.Close = lambda ev: self.disp.ExitLoop()
+
+        def on_close(ev):
+            dlg.On.AboutCloseButton.Clicked = None
+            dlg.On[win_id].Close = None
+            self.disp.ExitLoop()
+
+        dlg.On.AboutCloseButton.Clicked = on_close
+        dlg.On[win_id].Close = on_close
         dlg.Show()
         self.disp.RunLoop()
         dlg.Hide()
@@ -1127,10 +1139,17 @@ class RamsesFusionApp:
         if res and res["Comment"]:
             has_project = self.ramses.project() is not None
             if self.ramses.host.save(comment=res["Comment"], setupFile=has_project):
+                # 1. Update Database Status
                 status = self.ramses.host.currentStatus()
                 if status:
                     status.setComment(res["Comment"])
                     status.setVersion(self.ramses.host.currentVersion())
+                
+                # 2. Sync Metadata to Version File (for 'Retrieve Version' list)
+                version_file = self.ramses.host.currentVersionFilePath()
+                if version_file and os.path.isfile(version_file):
+                    ram.RamMetaDataManager.setComment(version_file, res["Comment"])
+                    
                 self.refresh_header()
 
     def on_update_status(self, ev):
@@ -1266,28 +1285,36 @@ class RamsesFusionApp:
         item = self.current_item
         step = self.current_step
 
-        # Determine tech spec provider (Hierarchy: Sequence > Project)
-        spec_provider = project
+        # 1. Start with Project Specs (Master)
         duration = 5.0
+        width = int(project.width())
+        height = int(project.height())
+        fps = float(project.framerate())
+        pa = float(project.pixelAspectRatio())
 
+        # 2. Override with Shot/Sequence Specs if applicable
         if item and item.itemType() == ram.ItemType.SHOT:
-            duration = item.duration()
-            seq = item.sequence()
-            if seq:
-                spec_provider = seq
+            duration = float(item.duration())
+            seq_uuid = item.get("sequence", "")
+            if seq_uuid:
+                # Use bulk-friendly getData to fetch sequence specs in one hit
+                seq_data = self.ramses.daemonInterface().getData(seq_uuid, "RamSequence")
+                if seq_data:
+                    width = int(seq_data.get("width", width))
+                    height = int(seq_data.get("height", height))
+                    fps = float(seq_data.get("framerate", fps))
+
         # 3. Compile high-performance settings dict
-        # Use official API methods for all calculations
         settings = {
-            "width": int(spec_provider.width()),
-            "height": int(spec_provider.height()),
-            "framerate": float(spec_provider.framerate()),
-            "duration": float(duration),
-            "pixelAspectRatio": float(project.pixelAspectRatio()),
-            "aspectRatio": float(spec_provider.aspectRatio()),
+            "width": width,
+            "height": height,
+            "framerate": fps,
+            "duration": duration,
+            "pixelAspectRatio": pa,
+            "aspectRatio": (width / height) * pa if height > 0 else 1.0,
         }
 
         # 4. Apply directly and refresh UI
-        # Note: _setupCurrentFile may return None or True depending on API version
         self.ramses.host._setupCurrentFile(item, step, settings)
         self._create_render_anchors()
         self.refresh_header()

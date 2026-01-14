@@ -63,6 +63,45 @@ class FusionHost(RamHost):
         if not self.comp: return False
         return self.comp.SetAttrs({'COMPS_FileName': fileName.replace("\\", "/")})
 
+    def save(self, incremental:bool=False, comment:str=None, setupFile:bool=True) -> bool:
+        """
+        Overridden to bypass sub-optimal base class implementation of __collectItemSettings.
+        """
+        saveFilePath = self.saveFilePath()
+        if saveFilePath == "":
+            self.log("Malformed file name, attempting Save As.", LogLevel.Warning)
+            return self.saveAs()
+
+        if setupFile:
+            item = self.currentItem()
+            step = self.currentStep()
+            if item:
+                # Optimized settings collection
+                project = RAMSES.project()
+                settings = {
+                    "width": project.width(),
+                    "height": project.height(),
+                    "framerate": project.framerate(),
+                    "duration": 0.0,
+                    "pixelAspectRatio": project.pixelAspectRatio(),
+                    "aspectRatio": project.aspectRatio()
+                }
+                
+                if item.itemType() == ItemType.SHOT:
+                    settings['duration'] = item.duration()
+                    # Use sequence() (object) instead of group() (string) to avoid base class bugs
+                    seq = item.sequence() if hasattr(item, 'sequence') else None
+                    if seq:
+                        settings['width'] = seq.width()
+                        settings['height'] = seq.height()
+                        settings['pixelAspectRatio'] = seq.pixelAspectRatio()
+                        settings['aspectRatio'] = seq.aspectRatio()
+                
+                self._setupCurrentFile(item, step, settings)
+
+        # Call the private __save method of the base class via name mangling
+        return self._RamHost__save(saveFilePath, incremental, comment)
+
     # -------------------------------------------------------------------------
     # UI Implementation helpers using UIManager
     # -------------------------------------------------------------------------
@@ -74,6 +113,9 @@ class FusionHost(RamHost):
         ui = self.fusion.UIManager
         disp = bmd.UIDispatcher(ui)
         
+        # Use a more unique ID to avoid dispatcher conflicts
+        win_id = f"RamsesDlg_{int(os.getpid())}_{id(fields)}"
+        
         rows = []
         total_height = 80 # Buttons + Margins
         
@@ -84,7 +126,7 @@ class FusionHost(RamHost):
             rows.append(ui.HGroup([label, ctrl]))
 
         dlg = disp.AddWindow(
-            {"WindowTitle": title, "ID": "CustomDlg", "Geometry": [400, 400, 500, total_height]},
+            {"WindowTitle": title, "ID": win_id, "Geometry": [400, 400, 500, total_height]},
             ui.VGroup([
                 ui.VGroup({"Spacing": 5}, rows),
                 ui.VGap(10),
@@ -107,11 +149,22 @@ class FusionHost(RamHost):
                 elif f['type'] == 'combo': results[f['id']] = int(ctrl.CurrentIndex)
                 elif f['type'] == 'slider': results[f['id']] = int(ctrl.Value)
                 elif f['type'] == 'checkbox': results[f['id']] = bool(ctrl.Checked)
+            
+            # Cleanup handlers before exiting
+            dlg.On[win_id].Close = None
+            dlg.On.OkBtn.Clicked = None
+            dlg.On.CancelBtn.Clicked = None
+            disp.ExitLoop()
+            
+        def on_cancel(ev):
+            dlg.On[win_id].Close = None
+            dlg.On.OkBtn.Clicked = None
+            dlg.On.CancelBtn.Clicked = None
             disp.ExitLoop()
             
         dlg.On.OkBtn.Clicked = on_ok
-        dlg.On.CancelBtn.Clicked = lambda ev: disp.ExitLoop()
-        dlg.On.CustomDlg.Close = lambda ev: disp.ExitLoop()
+        dlg.On.CancelBtn.Clicked = on_cancel
+        dlg.On[win_id].Close = on_cancel
         
         dlg.Show()
         disp.RunLoop()
@@ -163,8 +216,8 @@ class FusionHost(RamHost):
         for path in filePaths:
             loader = self.comp.AddTool("Loader", -32768, -32768)
             if loader:
-                # Explicitly set the clip path
-                loader.Clip[1] = path
+                # Explicitly set the clip path with forward slashes for cross-platform safety
+                loader.Clip[1] = path.replace("\\", "/")
                 
                 # Smart Naming with safety fallback
                 if item:
@@ -175,6 +228,10 @@ class FusionHost(RamHost):
                     # Sanitize: Fusion node names can't have spaces or dots
                     name = "".join([c if c.isalnum() else "_" for c in base])
                 
+                # Pipeline Safety: Ensure node name starts with a letter to avoid expression bugs
+                if name and name[0].isdigit():
+                    name = "R_" + name
+
                 if name:
                     loader.SetAttrs({"TOOLS_Name": name})
                 
@@ -252,12 +309,7 @@ class FusionHost(RamHost):
         self.log(f"Publishing DST: {dst}", LogLevel.Info)
         
         try:
-            # 1. Perform Comp File Backup (standard Ramses publish)
-            self.comp.Save(dst)
-            self.comp.Save(src)
-            self.log(f"Comp backup published to: {dst}", LogLevel.Info)
-            
-            # 2. Automated Final Render
+            # 1. Automated Final Render
             # Find the _FINAL anchor node
             final_node = self.comp.FindTool("_FINAL")
             if final_node:
@@ -276,6 +328,13 @@ class FusionHost(RamHost):
             else:
                 self.log("No _FINAL anchor found. Skipping final render.", LogLevel.Warning)
 
+            # 2. Perform Comp File Backup (standard Ramses publish)
+            # We save to DST first (the backup)
+            self.comp.Save(dst)
+            # Then save to SRC (the working file) to ensure it's marked clean
+            self.comp.Save(src)
+            self.log(f"Comp backup published to: {dst}", LogLevel.Info)
+
             return [dst]
         except Exception as e:
             self.log(f"Publish failed during process: {e}", LogLevel.Critical)
@@ -289,10 +348,15 @@ class FusionHost(RamHost):
             return False
         
         if filePaths:
-            active.Clip[1] = filePaths[0]
+            active.Clip[1] = filePaths[0].replace("\\", "/")
             # Rename if it was a generic name
             if "Loader" in active.GetAttrs()["TOOLS_Name"]:
                 name = f"{item.shortName()}_{step.shortName()}" if step else item.shortName()
+                
+                # Pipeline Safety: Ensure node name starts with a letter
+                if name and name[0].isdigit():
+                    name = "R_" + name
+                    
                 active.SetAttrs({"TOOLS_Name": name})
             return True
         return False
