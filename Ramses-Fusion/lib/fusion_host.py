@@ -54,7 +54,7 @@ class FusionHost(RamHost):
     def collectItemSettings(self, item: RamItem) -> dict:
         """
         Optimized version of base class __collectItemSettings.
-        Fetches sequence data in bulk if the item is a shot.
+        Uses API methods to handle overrides correctly while benefiting from DAEMON caching.
         """
         project = RAMSES.project()
         if not project:
@@ -71,18 +71,16 @@ class FusionHost(RamHost):
 
         if item and item.itemType() == ItemType.SHOT:
             settings['duration'] = float(item.duration())
-            seq_uuid = item.get("sequence", "")
-            if seq_uuid:
-                # Optimized bulk fetch
-                seq_data = RAMSES.daemonInterface().getData(seq_uuid, "RamSequence")
-                if seq_data:
-                    settings['width'] = int(seq_data.get("width", settings['width']))
-                    settings['height'] = int(seq_data.get("height", settings['height']))
-                    settings['framerate'] = float(seq_data.get("framerate", settings['framerate']))
-                    pa = float(seq_data.get("pixelAspectRatio", settings['pixelAspectRatio']))
-                    settings['pixelAspectRatio'] = pa
-                    if settings['height'] > 0:
-                        settings['aspectRatio'] = (settings['width'] / settings['height']) * pa
+            # Use the sequence object to benefit from API override logic
+            from ramses import RamShot
+            shot = item if isinstance(item, RamShot) else RamShot(item.uuid())
+            seq = shot.sequence()
+            if seq:
+                settings['width'] = int(seq.width())
+                settings['height'] = int(seq.height())
+                settings['framerate'] = float(seq.framerate())
+                settings['pixelAspectRatio'] = float(seq.pixelAspectRatio())
+                settings['aspectRatio'] = float(seq.aspectRatio())
 
         return settings
 
@@ -484,15 +482,18 @@ class FusionHost(RamHost):
         width = setupOptions.get("width", 1920)
         height = setupOptions.get("height", 1080)
         pa = setupOptions.get("pixelAspectRatio", 1.0)
+        ar = setupOptions.get("aspectRatio", 1.777)
         
         # Apply Frame Format Rate via Prefs (required for FPS)
+        self.comp.SetPrefs("Comp.FrameFormat.Width", int(width))
+        self.comp.SetPrefs("Comp.FrameFormat.Height", int(height))
         self.comp.SetPrefs("Comp.FrameFormat.Rate", float(fps))
         
         # Apply Resolution and Aspect Ratio via Attrs (Immediate and more reliable)
         self.comp.SetAttrs({
             "COMPN_Width": int(width),
             "COMPN_Height": int(height),
-            "COMPN_AspectX": float(pa),
+            "COMPN_AspectX": float(ar),
             "COMPN_AspectY": 1.0,
             "COMPN_PixelAspectX": float(pa),
             "COMPN_PixelAspectY": 1.0,
