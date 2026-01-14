@@ -82,6 +82,43 @@ class FusionHost(RamHost):
 
         return settings
 
+    def resolvePreviewPath(self) -> str:
+        """Resolves the official flat preview path for the current shot."""
+        try:
+            pub_info = self.publishInfo()
+            preview_folder = self.previewPath()
+            
+            preview_info = pub_info.copy()
+            preview_info.version = -1
+            preview_info.state = ""
+            preview_info.resource = ""
+            preview_info.extension = "mov"
+            
+            return self.normalizePath(os.path.join(preview_folder, preview_info.fileName()))
+        except Exception:
+            return ""
+
+    def resolveFinalPath(self) -> str:
+        """Resolves the official master export path for the current shot."""
+        try:
+            project = RAMSES.project()
+            if not project: return ""
+            
+            export_folder = project.exportPath()
+            if not export_folder:
+                return self.normalizePath(self.publishFilePath("mov", ""))
+                
+            pub_info = self.publishInfo()
+            final_info = pub_info.copy()
+            final_info.version = -1
+            final_info.state = ""
+            final_info.resource = ""
+            final_info.extension = "mov"
+            
+            return self.normalizePath(os.path.join(export_folder, final_info.fileName()))
+        except Exception:
+            return ""
+
     def _saveAs(self, filePath:str, item:RamItem, step:RamStep, version:int, comment:str, incremented:bool) -> bool:
         if not self.comp: return False
         # Normalize path for Fusion
