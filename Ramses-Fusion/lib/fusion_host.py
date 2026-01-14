@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 import os
-import shutil
 from ramses import RamHost, RamItem, RamStep, RamStatus, RamFileInfo, LogLevel, ItemType, RAMSES, RAM_SETTINGS, RamMetaDataManager
 
 class FusionHost(RamHost):
