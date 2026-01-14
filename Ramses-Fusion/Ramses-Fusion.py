@@ -933,27 +933,79 @@ class RamsesFusionApp:
             project = all_projects[res_p["P"]]
             
             # 2. Step Selection
-            # Performance Optimization: Inject the project into the daemon interface 
-            # to ensure getSteps() filters for the correct project.
-            # Some Ramses versions require the project to be 'active' in the daemon for getSteps().
-            self.ramses.daemonInterface()._dataCache['project'] = project.uuid() # Soft-inject if needed
-            project_steps = self.ramses.daemonInterface().getSteps()
+            # Get steps for the selected project. 
+            # We fetch all steps and filter by the 'project' field in their data.
+            all_steps = self.ramses.daemonInterface().getObjects("RamStep")
+            project_uuid = project.uuid()
             
-            if not project_steps:
-                # Fallback: manually filter if getSteps() returns all projects' steps
-                all_steps = self.ramses.daemonInterface().getObjects("RamStep")
-                project_steps = [s for s in all_steps if s.get("project") == project.uuid()]
+            self.log(f"Filtering steps for project UUID: {project_uuid}", ram.LogLevel.Debug)
             
-            if not project_steps:
-                self.log(f"No steps found for project '{project.name()}'.", ram.LogLevel.Warning)
+            fusion_steps = []
+            app_name_cache = {}
+
+            for s in all_steps:
+                s_data = s.data()
+                
+                # 1. Project Filter
+                # In some daemon versions, the project UUID might be in 'project' or 'projectUuid'
+                s_proj = s_data.get("project") or s_data.get("projectUuid")
+                if s_proj and s_proj != project_uuid:
+                    continue
+                
+                # 2. Application Filter
+                is_fusion = False
+                
+                # Check the 'applications' list (UUIDs)
+                apps = s_data.get("applications", [])
+                if isinstance(apps, list) and len(apps) > 0:
+                    for app_uuid in apps:
+                        if app_uuid not in app_name_cache:
+                            try:
+                                app_data = self.ramses.daemonInterface().getData(app_uuid, "RamApplication")
+                                app_name_cache[app_uuid] = str(app_data.get("name", "")).upper()
+                            except Exception:
+                                app_name_cache[app_uuid] = ""
+                        
+                        if "FUSION" in app_name_cache[app_uuid]:
+                            is_fusion = True
+                            break
+                
+                # Fallbacks
+                if not is_fusion:
+                    # Check other possible keys
+                    for key in ["application", "software", "app", "dcc"]:
+                        if "FUSION" in str(s_data.get(key, "")).upper():
+                            is_fusion = True
+                            break
+                    
+                    # Check shortName
+                    if not is_fusion and "FUSION" in s.shortName().upper():
+                        is_fusion = True
+
+                    # Check YAML settings
+                    if not is_fusion:
+                        settings = s.generalSettings("yaml")
+                        if isinstance(settings, dict) and "application" in settings:
+                            if "FUSION" in str(settings["application"]).upper():
+                                is_fusion = True
+
+                if is_fusion:
+                    fusion_steps.append(s)
+            
+            if not fusion_steps:
+                self.log(f"No FUSION-specific steps found for project '{project.name()}'. Showing all project steps as fallback.", ram.LogLevel.Warning)
+                fusion_steps = [s for s in all_steps if (s.get("project") or s.get("projectUuid")) == project_uuid]
+                
+            if not fusion_steps:
+                self.log(f"No steps found for project '{project.name()}'.", ram.LogLevel.Error)
                 return
                 
-            step_opts = {str(i): s.name() for i, s in enumerate(project_steps)}
+            step_opts = {str(i): s.name() for i, s in enumerate(fusion_steps)}
             res_s = self.ramses.host._request_input("Context Wizard: Select Step", [
                 {"id": "S", "label": "Step:", "type": "combo", "options": step_opts}
             ])
             if not res_s: return
-            current_step = project_steps[res_s["S"]]
+            current_step = fusion_steps[res_s["S"]]
         # --- End of Wizard ---
 
         # 1. Bulk fetch all relevant objects once for maximum performance
