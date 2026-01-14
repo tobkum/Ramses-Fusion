@@ -746,13 +746,14 @@ class RamsesFusionApp:
         return self.ui.Button(
             {
                 "ID": id_name,
-                "Text": "  " + text if text else "",
+                "Text": text if text else "",
                 "Weight": weight,
                 "ToolTip": tooltip,
                 "MinimumSize": min_size or [16, 28],
                 "MaximumSize": max_size or [2000, 28],
                 "IconSize": [16, 16],
                 "Icon": self._get_icon(icon_name),
+                "StyleSheet": "text-align: left; padding-left: 16px;",
             }
         )
 
