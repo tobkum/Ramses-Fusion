@@ -195,17 +195,15 @@ class RamsesFusionApp:
                         preview_info.state = ""
                         preview_info.resource = ""
                         preview_info.extension = "mov"
-                        preview_path = os.path.join(
+                        preview_path = self.ramses.host.normalizePath(os.path.join(
                             preview_folder, preview_info.fileName()
-                        ).replace("\\", "/")
+                        ))
                     except Exception:
-                        preview_path = os.path.join(
+                        preview_path = self.ramses.host.normalizePath(os.path.join(
                             preview_folder, "preview.mov"
-                        ).replace("\\", "/")
+                        ))
 
-                    publish_path = self.ramses.host.publishFilePath("mov", "").replace(
-                        "\\", "/"
-                    )
+                    publish_path = self.ramses.host.normalizePath(self.ramses.host.publishFilePath("mov", ""))
                 except Exception:
                     pass
 
@@ -911,7 +909,7 @@ class RamsesFusionApp:
 
     def show_about_window(self, ev):
         win_id = "AboutWin"
-        logo_path = os.path.join(self.icon_dir, "overmind.png").replace("\\", "/")
+        logo_path = self.ramses.host.normalizePath(os.path.join(self.icon_dir, "overmind.png"))
         dlg = self.disp.AddWindow(
             {
                 "WindowTitle": "About Ramses-Fusion",
@@ -1540,7 +1538,7 @@ class RamsesFusionApp:
         if not res or not res["Name"]:
             return
 
-        name = re.sub(r"[^a-zA-Z0-9\-]", "", res["Name"])
+        name = re.sub(r"[^a-zA-Z0-9\- ]", "", res["Name"])
         nm = ram.RamFileInfo()
         nm.project = step.projectShortName()
         nm.ramType = ram.ItemType.GENERAL
