@@ -1002,6 +1002,10 @@ class RamsesFusionApp:
             self.log("No projects found in Ramses.", ram.LogLevel.Warning)
             return
 
+        # Pre-cache states for robust filtering
+        all_states = self.ramses.states()
+        state_cache = {str(s.uuid()): str(s.shortName()).upper() for s in all_states}
+
         # Cache for performance
         data_cache = {
             "projects": all_projects,
@@ -1078,23 +1082,32 @@ class RamsesFusionApp:
                 return
 
             selected_step = data_cache["steps"][state["step_idx"]]
-            step_uuid = selected_step.uuid()
+            step_uuid = str(selected_step.uuid())
 
             shots = data_cache["shots"]
             seq_map = data_cache["seq_map"]
 
             # Map statuses for the SELECTED step only
-            current_status_map = {
-                s.get("item"): s
-                for s in data_cache["status_map"].values()
-                if s.get("step") == step_uuid
-            }
+            # Ensure we use string keys for reliable lookups
+            current_status_map = {}
+            for s in data_cache["status_map"].values():
+                s_step = s.get("step")
+                if s_step and str(s_step) == step_uuid:
+                    s_item = s.get("item")
+                    if s_item:
+                        current_status_map[str(s_item)] = s
 
             valid_options = []
             for shot in shots:
-                status = current_status_map.get(shot.uuid())
-                if status and status.state().shortName() in ["NO", "STB"]:
-                    continue
+                shot_uuid = str(shot.uuid())
+                status = current_status_map.get(shot_uuid)
+                
+                # Robust Filtering: Exclude 'Nothing to do' and 'Standby'
+                if status:
+                    st_uuid = str(status.get("state"))
+                    st_short = state_cache.get(st_uuid, "")
+                    if st_short in ["NO", "STB"]:
+                        continue
 
                 expected_path = shot.stepFilePath(step=selected_step, extension="comp")
                 exists = bool(expected_path)
@@ -1224,26 +1237,29 @@ class RamsesFusionApp:
         def on_project_changed(ev):
             state["project_idx"] = int(itm["ProjCombo"].CurrentIndex)
             proj = data_cache["projects"][state["project_idx"]]
+            proj_uuid = str(proj.uuid())
 
-            proj_uuid = proj.uuid()
-
-            # Bulk fetch shots, seqs and statuses for this project
+            # 1. Fetch and filter shots for the project
             all_shots = self.ramses.daemonInterface().getObjects("RamShot")
-            data_cache["shots"] = [
-                s for s in all_shots if s.get("project") == proj_uuid
-            ]
+            project_shots = [s for s in all_shots if str(s.get("project")) == proj_uuid]
+            data_cache["shots"] = project_shots
+            shot_uuids = {str(s.uuid()) for s in project_shots}
 
+            # 2. Map sequences for the project
             all_seqs = self.ramses.daemonInterface().getObjects("RamSequence")
             data_cache["seq_map"] = {
-                s.uuid(): s.shortName()
+                str(s.uuid()): s.shortName()
                 for s in all_seqs
-                if s.get("project") == proj_uuid
+                if str(s.get("project")) == proj_uuid
             }
 
+            # 3. Fetch and filter statuses belonging to the project shots
             all_statuses = self.ramses.daemonInterface().getObjects("RamStatus")
-            # Cache all statuses for the project to filter by step in update_shots
+            # Filter by matching item UUIDs since Status objects don't reliably store a project key
             data_cache["status_map"] = {
-                s.uuid(): s for s in all_statuses if s.get("project") == proj_uuid
+                str(s.uuid()): s 
+                for s in all_statuses 
+                if str(s.get("item")) in shot_uuids
             }
 
             update_steps()
