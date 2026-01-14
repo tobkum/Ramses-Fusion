@@ -774,7 +774,16 @@ class RamsesFusionApp:
             if status and status.state().shortName() in ["NO", "STB"]:
                 continue
 
-            expected_path, filename = self._resolve_shot_path(shot, current_step)
+            # Official API way to predict/get the working file path
+            expected_path = shot.stepFilePath(step=current_step, extension="comp").replace("\\", "/")
+            
+            # If the file doesn't exist yet, we still need to know where it WOULD be
+            if not expected_path:
+                # Use resolve_shot_path as a fallback for 'EMPTY' shots only
+                expected_path, filename = self._resolve_shot_path(shot, current_step)
+            else:
+                filename = os.path.basename(expected_path)
+
             if not expected_path: continue
             
             exists = os.path.exists(expected_path)
@@ -911,13 +920,14 @@ class RamsesFusionApp:
 
     def on_save(self, ev):
         if not self._check_connection(): return
-        has_project = self.ramses.project() is not None
+        # Let the API decide if setup is needed based on project existence
+        has_project = self._get_project() is not None
         if self.ramses.host.save(setupFile=has_project):
             self.refresh_header()
 
     def on_incremental_save(self, ev):
         if not self._check_connection(): return
-        has_project = self.ramses.project() is not None
+        has_project = self._get_project() is not None
         if self.ramses.host.save(incremental=True, setupFile=has_project):
             self.refresh_header()
 

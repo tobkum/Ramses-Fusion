@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 import os
 import shutil
-from ramses import RamHost, RamItem, RamStep, RamStatus, RamFileInfo, LogLevel, ItemType, RAMSES, RAM_SETTINGS
+from ramses import RamHost, RamItem, RamStep, RamStatus, RamFileInfo, LogLevel, ItemType, RAMSES, RAM_SETTINGS, RamMetaDataManager
 
 class FusionHost(RamHost):
     """
@@ -274,9 +274,17 @@ class FusionHost(RamHost):
 
     def _restoreVersionUI(self, versionFiles:list) -> str:
         if not versionFiles: return ""
-        opts = {str(i): os.path.basename(f) for i, f in enumerate(versionFiles)}
+        
+        # Enrich options with comments from metadata
+        opts = {}
+        for i, f in enumerate(versionFiles):
+            comment = RamMetaDataManager.getComment(f)
+            basename = os.path.basename(f)
+            label = f"{basename} - [{comment}]" if comment else basename
+            opts[str(i)] = label
+            
         res = self._request_input("Restore Version", [
-            {'id': 'Idx', 'label': 'Version:', 'type': 'combo', 'options': opts}
+            {'id': 'Idx', 'label': 'Select Version:', 'type': 'combo', 'options': opts}
         ])
         return versionFiles[res['Idx']] if res else ""
 
