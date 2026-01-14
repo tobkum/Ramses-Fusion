@@ -38,22 +38,23 @@ class RamsesFusionApp:
 
         # Context Caching
         self._item_cache = None
+        self._item_path = ""
         self._step_cache = None
-        self._active_path = ""
+        self._step_path = ""
 
     @property
     def current_item(self):
         path = self.ramses.host.currentFilePath()
-        if path != self._active_path or not self._item_cache:
-            self._active_path = path
+        if path != self._item_path or not self._item_cache:
+            self._item_path = path
             self._item_cache = self.ramses.host.currentItem()
         return self._item_cache
 
     @property
     def current_step(self):
         path = self.ramses.host.currentFilePath()
-        if path != self._active_path or not self._step_cache:
-            self._active_path = path
+        if path != self._step_path or not self._step_cache:
+            self._step_path = path
             self._step_cache = self.ramses.host.currentStep()
         return self._step_cache
 
@@ -424,6 +425,14 @@ class RamsesFusionApp:
 
         if self.dlg:
             try:
+                # Force cache refresh for project and user
+                self._project_cache = None
+                self._user_name_cache = None
+                
+                # Clear item/step path trackers to force re-fetch from host
+                self._item_path = ""
+                self._step_path = ""
+
                 # Sync Savers before updating UI
                 self._sync_render_anchors()
 
@@ -436,8 +445,6 @@ class RamsesFusionApp:
                 pass
 
     def show_main_window(self):
-        self._active_path = self.ramses.host.currentFilePath()
-
         self.dlg = self.disp.AddWindow(
             {
                 "WindowTitle": "Ramses-Fusion",
@@ -1137,16 +1144,20 @@ class RamsesFusionApp:
             ],
         )
         if res and res["Comment"]:
+            host = self.ramses.host
             has_project = self.ramses.project() is not None
-            if self.ramses.host.save(comment=res["Comment"], setupFile=has_project):
+            
+            # Cache the status before save if possible (less network hit than currentStatus after save)
+            status = host.currentStatus()
+            
+            if host.save(comment=res["Comment"], setupFile=has_project):
                 # 1. Update Database Status
-                status = self.ramses.host.currentStatus()
                 if status:
                     status.setComment(res["Comment"])
-                    status.setVersion(self.ramses.host.currentVersion())
+                    status.setVersion(host.currentVersion())
                 
                 # 2. Sync Metadata to Version File (for 'Retrieve Version' list)
-                version_file = self.ramses.host.currentVersionFilePath()
+                version_file = host.currentVersionFilePath()
                 if version_file and os.path.isfile(version_file):
                     ram.RamMetaDataManager.setComment(version_file, res["Comment"])
                     

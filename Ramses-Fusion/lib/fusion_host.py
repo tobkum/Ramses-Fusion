@@ -274,6 +274,10 @@ class FusionHost(RamHost):
         try:
             # 4. Trigger Fusion Render
             if self.comp.Render(True):
+                # Save after render to ensure disarming state is captured and comp is clean
+                src = self.currentFilePath()
+                if src:
+                    self.comp.Save(src)
                 return [dst]
             return []
         except Exception as e:
@@ -390,12 +394,23 @@ class FusionHost(RamHost):
         nm = RamFileInfo()
         nm.setFilePath(path)
         
-        item = RamItem.fromPath(path, virtualIfNotFound=True)
-        step = RamStep.fromPath(path)
+        # Performance/Safety: Use correctly typed objects
+        from ramses import RamShot, RamAsset, RamItem
         
-        # Ensure we have valid Ramses objects
-        if not item: item = RamItem(data={'name': 'New', 'shortName': nm.shortName or 'New'}, create=False)
-        if not step: step = RamStep(data={'name': 'New', 'shortName': nm.step or 'New'}, create=False)
+        if nm.ramType == ItemType.SHOT:
+            item = RamShot.fromPath(path, virtualIfNotFound=True)
+            if not item: item = RamShot(data={'name': nm.shortName or 'New', 'shortName': nm.shortName or 'New'}, create=False)
+        elif nm.ramType == ItemType.ASSET:
+            item = RamAsset.fromPath(path, virtualIfNotFound=True)
+            if not item: item = RamAsset(data={'name': nm.shortName or 'New', 'shortName': nm.shortName or 'New'}, create=False)
+        else:
+            item = RamItem.fromPath(path, virtualIfNotFound=True)
+            if not item: item = RamItem(data={'name': nm.shortName or 'New', 'shortName': nm.shortName or 'New'}, create=False)
+            
+        step = RamStep.fromPath(path)
+        # Ensure we have a valid Ramses step
+        if not step: 
+            step = RamStep(data={'name': nm.step or 'New', 'shortName': nm.step or 'New'}, create=False)
         
         return {
             'item': item, 
