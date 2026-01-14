@@ -988,9 +988,20 @@ class RamsesFusionApp:
                     continue
                 
                 expected_path = shot.stepFilePath(step=selected_step, extension="comp")
-                if not expected_path: continue
+                exists = bool(expected_path)
                 
-                exists = os.path.exists(expected_path)
+                if not exists:
+                    # If stepFilePath is empty, the file doesn't exist yet. 
+                    # We construct what the path WOULD be to allow creation.
+                    folder = shot.stepFolderPath(selected_step)
+                    nm = ram.RamFileInfo()
+                    nm.project = shot.projectShortName()
+                    nm.ramType = ram.ItemType.SHOT
+                    nm.shortName = shot.shortName()
+                    nm.step = selected_step.shortName()
+                    nm.extension = "comp"
+                    expected_path = os.path.join(folder, nm.fileName())
+
                 seq_name = seq_map.get(shot.get("sequence", ""), "None")
                 
                 if exists:
