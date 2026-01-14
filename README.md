@@ -41,4 +41,4 @@ The tool acts as a gatekeeper to ensure only technically correct data moves down
 
 * **Configurable Codecs:** Currently, the output codecs for `_PREVIEW` (ProRes 422) and `_FINAL` (ProRes 4444) are hardcoded. Future updates will allow these to be configured via the **Ramses Project Settings** to ensure consistency across the entire pipeline.
 
-*Developed with ❤️ by [Overmind Studios](https://www.overmind-studios.de).*
+*Developed with ε> by [Overmind Studios](https://www.overmind-studios.de).*
