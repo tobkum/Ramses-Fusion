@@ -195,15 +195,17 @@ class RamsesFusionApp:
                         preview_info.state = ""
                         preview_info.resource = ""
                         preview_info.extension = "mov"
-                        preview_path = self.ramses.host.normalizePath(os.path.join(
-                            preview_folder, preview_info.fileName()
-                        ))
+                        preview_path = self.ramses.host.normalizePath(
+                            os.path.join(preview_folder, preview_info.fileName())
+                        )
                     except Exception:
-                        preview_path = self.ramses.host.normalizePath(os.path.join(
-                            preview_folder, "preview.mov"
-                        ))
+                        preview_path = self.ramses.host.normalizePath(
+                            os.path.join(preview_folder, "preview.mov")
+                        )
 
-                    publish_path = self.ramses.host.normalizePath(self.ramses.host.publishFilePath("mov", ""))
+                    publish_path = self.ramses.host.normalizePath(
+                        self.ramses.host.publishFilePath("mov", "")
+                    )
                 except Exception:
                     pass
 
@@ -465,7 +467,7 @@ class RamsesFusionApp:
             {
                 "WindowTitle": "Ramses-Fusion",
                 "ID": "MainWin",
-                "Geometry": [200, 200, 300, 800],
+                "Geometry": [200, 200, 280, 825],
             },
             [
                 self.ui.VGroup(
@@ -927,11 +929,12 @@ class RamsesFusionApp:
                                     {
                                         "ID": "Logo",
                                         "Icon": self._get_icon("overmind.png"),
-                                        "IconSize": [120, 120],
+                                        "IconSize": [128, 128],
                                         "Flat": True,
-                                        "Enabled": False,
-                                        "MinimumSize": [120, 120],
-                                        "MaximumSize": [120, 120],
+                                        "Enabled": True,
+                                        "StyleSheet": "border: none;",
+                                        "MaximumSize": [128, 128],
+                                        "MinimumSize": [128, 128],
                                     }
                                 ),
                                 self.ui.HGap(0, 1),
