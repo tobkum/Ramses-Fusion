@@ -298,15 +298,25 @@ class RamsesFusionApp:
             # 2. Update existing nodes
             preview_node = comp.FindTool("_PREVIEW")
             if preview_node:
-                preview_node.Clip[1] = preview_path
-                preview_node.SetInput("OutputFormat", "QuickTimeMovies", 0)
-                preview_node.SetInput("QuickTimeMovies.Compression", "Apple ProRes 422_apcn", 0)
+                if preview_node.Clip[1] != preview_path:
+                    preview_node.Clip[1] = preview_path
+                
+                if preview_node.GetInput("OutputFormat") != "QuickTimeMovies":
+                    preview_node.SetInput("OutputFormat", "QuickTimeMovies", 0)
+                
+                if preview_node.GetInput("QuickTimeMovies.Compression") != "Apple ProRes 422_apcn":
+                    preview_node.SetInput("QuickTimeMovies.Compression", "Apple ProRes 422_apcn", 0)
                 
             final_node = comp.FindTool("_FINAL")
             if final_node:
-                final_node.Clip[1] = final_path
-                final_node.SetInput("OutputFormat", "QuickTimeMovies", 0)
-                final_node.SetInput("QuickTimeMovies.Compression", "Apple ProRes 4444_ap4h", 0)
+                if final_node.Clip[1] != final_path:
+                    final_node.Clip[1] = final_path
+                
+                if final_node.GetInput("OutputFormat") != "QuickTimeMovies":
+                    final_node.SetInput("OutputFormat", "QuickTimeMovies", 0)
+                
+                if final_node.GetInput("QuickTimeMovies.Compression") != "Apple ProRes 4444_ap4h":
+                    final_node.SetInput("QuickTimeMovies.Compression", "Apple ProRes 4444_ap4h", 0)
         except:
             pass
 
@@ -935,6 +945,10 @@ class RamsesFusionApp:
 
     def on_save(self, ev):
         if not self._check_connection(): return
+        
+        # Ensure anchors are synced before saving
+        self._sync_render_anchors()
+
         # Let the API decide if setup is needed based on project existence
         has_project = self._get_project() is not None
         if self.ramses.host.save(setupFile=has_project):
@@ -942,6 +956,10 @@ class RamsesFusionApp:
 
     def on_incremental_save(self, ev):
         if not self._check_connection(): return
+        
+        # Ensure anchors are synced before saving
+        self._sync_render_anchors()
+
         has_project = self._get_project() is not None
         if self.ramses.host.save(incremental=True, setupFile=has_project):
             self.refresh_header()
