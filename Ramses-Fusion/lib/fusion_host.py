@@ -207,7 +207,6 @@ class FusionHost(RamHost):
     def _publish(self, publishInfo:RamFileInfo, publishOptions:dict) -> list:
         if not self.comp: return []
         
-        # Re-fetch path at the exact moment of publish to ensure we have the latest version
         src = self.currentFilePath()
         if not src:
             self.log("Cannot publish: current composition has no saved path.", LogLevel.Critical)
@@ -219,20 +218,37 @@ class FusionHost(RamHost):
         # Use the official API to get the correct publish path
         dst = self.publishFilePath(ext, "", publishInfo).replace("\\", "/")
         
-        # Log at INFO level to ensure it appears in console
         self.log(f"Publishing SRC: {src}", LogLevel.Info)
         self.log(f"Publishing DST: {dst}", LogLevel.Info)
         
         try:
-            # Using comp.Save instead of shutil.copy to avoid file locks
+            # 1. Perform Comp File Backup (standard Ramses publish)
             self.comp.Save(dst)
-            # Re-save to the original location to keep the working file active
             self.comp.Save(src)
+            self.log(f"Comp backup published to: {dst}", LogLevel.Info)
             
-            self.log(f"Successfully published comp to: {dst}", LogLevel.Info)
+            # 2. Automated Final Render
+            # Find the _FINAL anchor node
+            final_node = self.comp.FindTool("_FINAL")
+            if final_node:
+                self.log("Starting final master render...", LogLevel.Info)
+                # Enable the node
+                final_node.SetAttrs({"TOOLB_PassThrough": False})
+                try:
+                    # Execute render
+                    if self.comp.Render(True):
+                        self.log(f"Final render complete: {final_node.Clip[1]}", LogLevel.Info)
+                    else:
+                        self.log("Final render failed or was cancelled.", LogLevel.Warning)
+                finally:
+                    # Always disarm
+                    final_node.SetAttrs({"TOOLB_PassThrough": True})
+            else:
+                self.log("No _FINAL anchor found. Skipping final render.", LogLevel.Warning)
+
             return [dst]
         except Exception as e:
-            self.log(f"Publish failed during file save: {e}", LogLevel.Critical)
+            self.log(f"Publish failed during process: {e}", LogLevel.Critical)
             return []
 
     def _replace(self, filePaths:list, item:RamItem, step:RamStep, importOptions:list, forceShowImportUI:bool) -> bool:

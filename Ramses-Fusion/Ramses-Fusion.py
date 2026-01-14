@@ -191,25 +191,29 @@ class RamsesFusionApp:
         
         # 1. Check Frame Range
         if item.itemType() == ram.ItemType.SHOT:
-            db_duration = float(item.duration())
-            db_fps = float(project.framerate())
-            # For sequences, we should check sequence overrides if we wanted to be 100% thorough, 
-            # but usually master duration is at item level.
+            db_duration = float(item.duration() or 5.0)
+            db_fps = float(project.framerate() or 24.0)
             expected_frames = int(round(db_duration * db_fps))
             
             comp = self.ramses.host.comp
-            comp_start = comp.GetAttrs("COMPN_GlobalStart")
-            comp_end = comp.GetAttrs("COMPN_GlobalEnd")
+            # Query specific attributes directly for maximum reliability
+            comp_start = comp.GetAttrs("COMPN_GlobalStart") or 0
+            comp_end = comp.GetAttrs("COMPN_GlobalEnd") or 0
             actual_frames = int(comp_end - comp_start + 1)
             
             if actual_frames != expected_frames:
                 errors.append(f"• Frame Range Mismatch: DB expects {expected_frames} frames, Comp has {actual_frames}.")
 
         # 2. Check Resolution (Project Master)
-        db_w = int(project.width())
-        db_h = int(project.height())
-        comp_w = int(self.ramses.host.comp.GetAttrs("COMPN_Width"))
-        comp_h = int(self.ramses.host.comp.GetAttrs("COMPN_Height"))
+        db_w = int(project.width() or 1920)
+        db_h = int(project.height() or 1080)
+        
+        comp = self.ramses.host.comp
+        prefs = comp.GetPrefs()
+        frame_format = prefs.get('Comp', {}).get('FrameFormat', {})
+        
+        comp_w = int(frame_format.get('Width', 0))
+        comp_h = int(frame_format.get('Height', 0))
         
         if db_w != comp_w or db_h != comp_h:
             errors.append(f"• Resolution Mismatch: DB expects {db_w}x{db_h}, Comp is {comp_w}x{comp_h}.")
@@ -234,37 +238,56 @@ class RamsesFusionApp:
         return path, filename
 
     def _sync_render_anchors(self):
-        """Syncs existing _PREVIEW and _FINAL Saver paths with the current version."""
+        """Syncs existing _PREVIEW and _FINAL Saver paths with current version and project specs."""
         comp = self.ramses.host.comp
-        if not comp or not self._get_project():
+        project = self._get_project()
+        item = self.current_item
+        if not comp or not project or not item:
             return
 
         try:
             # 1. Resolve current Ramses paths
-            # Preview Logic
+            pub_info = self.ramses.host.publishInfo() 
+
+            # Preview: Official flat filename in the shot's _preview folder
+            # Pattern from RamHost.savePreview(): No version, no state, no resource
             preview_folder = self.ramses.host.previewPath()
-            pub_info = self.ramses.host.publishInfo() # Gets info for current version
+            preview_info = pub_info.copy()
+            preview_info.version = -1
+            preview_info.state = ""
+            preview_info.resource = ""
+            preview_info.extension = "mov"
+            preview_path = os.path.join(preview_folder, preview_info.fileName()).replace("\\", "/")
             
-            # Construct versioned filenames
-            # Preview (Switching to ProRes 422 .mov)
-            preview_filename = pub_info.fileName().replace(pub_info.extension, ".mov")
-            preview_path = os.path.join(preview_folder, preview_filename).replace("\\", "/")
-            
-            # Final (Switching to ProRes 4444 .mov)
-            final_path = self.ramses.host.publishFilePath("mov", "").replace("\\", "/")
+            # Final: Master ProRes 4444 in the project's flat Output (Export) folder
+            export_folder = project.exportPath().replace("\\", "/")
+            if export_folder:
+                # Ensure the folder exists on disk
+                if not os.path.isdir(export_folder):
+                    try: os.makedirs(export_folder)
+                    except: pass
+                
+                # Use API to generate the standard filename without version
+                final_info = pub_info.copy()
+                final_info.version = -1
+                final_info.extension = "mov"
+                final_filename = final_info.fileName()
+                
+                final_path = os.path.join(export_folder, final_filename).replace("\\", "/")
+            else:
+                # Fallback only if export path is totally undefined
+                final_path = self.ramses.host.publishFilePath("mov", "").replace("\\", "/")
 
             # 2. Update existing nodes
             preview_node = comp.FindTool("_PREVIEW")
             if preview_node:
                 preview_node.Clip[1] = preview_path
-                # Configure for ProRes 422 based on technical specs
                 preview_node.SetInput("OutputFormat", "QuickTimeMovies", 0)
                 preview_node.SetInput("QuickTimeMovies.Compression", "Apple ProRes 422_apcn", 0)
                 
             final_node = comp.FindTool("_FINAL")
             if final_node:
                 final_node.Clip[1] = final_path
-                # Configure for ProRes 4444 based on technical specs
                 final_node.SetInput("OutputFormat", "QuickTimeMovies", 0)
                 final_node.SetInput("QuickTimeMovies.Compression", "Apple ProRes 4444_ap4h", 0)
         except:
