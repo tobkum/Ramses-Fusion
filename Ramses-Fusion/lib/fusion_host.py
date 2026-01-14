@@ -89,7 +89,7 @@ class FusionHost(RamHost):
     def _saveAs(self, filePath:str, item:RamItem, step:RamStep, version:int, comment:str, incremented:bool) -> bool:
         if not self.comp: return False
         # Normalize path for Fusion
-        filePath = filePath.replace("\\", "/")
+        filePath = self.normalizePath(filePath)
         try:
             self.comp.Save(filePath)
             return True
@@ -100,13 +100,13 @@ class FusionHost(RamHost):
     def _open(self, filePath:str, item:RamItem, step:RamStep) -> bool:
         if os.path.exists(filePath):
             # Normalize path for Fusion
-            self.fusion.LoadComp(filePath.replace("\\", "/"))
+            self.fusion.LoadComp(self.normalizePath(filePath))
             return True
         return False
     
     def _setFileName(self, fileName:str ) -> bool:
         if not self.comp: return False
-        return self.comp.SetAttrs({'COMPS_FileName': fileName.replace("\\", "/")})
+        return self.comp.SetAttrs({'COMPS_FileName': self.normalizePath(fileName)})
 
     def save(self, incremental:bool=False, comment:str=None, setupFile:bool=True) -> bool:
         """
@@ -253,7 +253,7 @@ class FusionHost(RamHost):
             loader = self.comp.AddTool("Loader", -32768, -32768)
             if loader:
                 # Explicitly set the clip path with forward slashes for cross-platform safety
-                loader.Clip[1] = path.replace("\\", "/")
+                loader.Clip[1] = self.normalizePath(path)
                 
                 # Smart Naming with safety fallback
                 if item:
@@ -297,7 +297,7 @@ class FusionHost(RamHost):
         # 2. Construct the final path (Ramses provides the folder and basename)
         # Note: We use .mov as our standard preview format
         filename = previewFileBaseName if previewFileBaseName.lower().endswith(".mov") else previewFileBaseName + ".mov"
-        dst = os.path.join(previewFolderPath, filename).replace("\\", "/")
+        dst = self.normalizePath(os.path.join(previewFolderPath, filename))
         
         # 3. Armed for render
         self.log(f"Starting preview render to: {dst}", LogLevel.Info)
@@ -343,7 +343,7 @@ class FusionHost(RamHost):
         ext = os.path.splitext(src)[1].lstrip('.')
         
         # Use the official API to get the correct publish path
-        dst = self.publishFilePath(ext, "", publishInfo).replace("\\", "/")
+        dst = self.normalizePath(self.publishFilePath(ext, "", publishInfo))
         
         self.log(f"Publishing SRC: {src}", LogLevel.Info)
         self.log(f"Publishing DST: {dst}", LogLevel.Info)
@@ -389,7 +389,7 @@ class FusionHost(RamHost):
             return False
         
         if filePaths:
-            active.Clip[1] = filePaths[0].replace("\\", "/")
+            active.Clip[1] = self.normalizePath(filePaths[0])
             # Rename if it was a generic name
             if "Loader" in active.GetAttrs()["TOOLS_Name"]:
                 name = f"{item.shortName()}_{step.shortName()}" if step else item.shortName()
@@ -427,22 +427,13 @@ class FusionHost(RamHost):
         path = self.fusion.RequestFile()
         if not path: return None
         
-        # Use API to parse the selected path
+        # Use API to parse the selected path and instantiate the correctly typed object
+        item = RamItem.fromPath(path, virtualIfNotFound=True)
         nm = RamFileInfo()
         nm.setFilePath(path)
         
-        # Performance/Safety: Use correctly typed objects
-        from ramses import RamShot, RamAsset, RamItem
-        
-        if nm.ramType == ItemType.SHOT:
-            item = RamShot.fromPath(path, virtualIfNotFound=True)
-            if not item: item = RamShot(data={'name': nm.shortName or 'New', 'shortName': nm.shortName or 'New'}, create=False)
-        elif nm.ramType == ItemType.ASSET:
-            item = RamAsset.fromPath(path, virtualIfNotFound=True)
-            if not item: item = RamAsset(data={'name': nm.shortName or 'New', 'shortName': nm.shortName or 'New'}, create=False)
-        else:
-            item = RamItem.fromPath(path, virtualIfNotFound=True)
-            if not item: item = RamItem(data={'name': nm.shortName or 'New', 'shortName': nm.shortName or 'New'}, create=False)
+        if not item: 
+            item = RamItem(data={'name': nm.shortName or 'New', 'shortName': nm.shortName or 'New'}, create=False)
             
         step = RamStep.fromPath(path)
         # Ensure we have a valid Ramses step

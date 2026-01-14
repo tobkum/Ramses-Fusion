@@ -911,11 +911,12 @@ class RamsesFusionApp:
 
     def show_about_window(self, ev):
         win_id = "AboutWin"
+        logo_path = os.path.join(self.icon_dir, "overmind.png").replace("\\", "/")
         dlg = self.disp.AddWindow(
             {
                 "WindowTitle": "About Ramses-Fusion",
                 "ID": win_id,
-                "Geometry": [200, 200, 450, 150],
+                "Geometry": [200, 200, 450, 300],
             },
             [
                 self.ui.VGroup(
@@ -923,8 +924,16 @@ class RamsesFusionApp:
                     [
                         self.ui.Label(
                             {
+                                "ID": "Logo",
+                                "Text": f'<p align="center"><img src="{logo_path}" width="120" height="120"></p>',
+                                "Alignment": {"AlignHCenter": True, "AlignTop": True},
+                            }
+                        ),
+                        self.ui.VGap(10),
+                        self.ui.Label(
+                            {
                                 "ID": "Info",
-                                "Text": "Ramses-Fusion for Overmind Studios. <p>Copyright &copy; 2026 Overmind Studios.</p>",
+                                "Text": "<p align='center'>Ramses-Fusion for Overmind Studios. <br>Copyright &copy; 2026 Overmind Studios.</p>",
                                 "Alignment": [{"AlignHCenter": True, "AlignTop": True}],
                                 "WordWrap": True,
                                 "OpenExternalLinks": True,
@@ -933,7 +942,7 @@ class RamsesFusionApp:
                         self.ui.Label(
                             {
                                 "ID": "URL",
-                                "Text": 'Web: <a href="https://www.overmind-studios.de">Overmind Studios</a>',
+                                "Text": '<p align="center">Web: <a href="https://www.overmind-studios.de">Overmind Studios</a></p>',
                                 "Alignment": [{"AlignHCenter": True, "AlignTop": True}],
                                 "WordWrap": True,
                                 "OpenExternalLinks": True,
@@ -1421,11 +1430,6 @@ class RamsesFusionApp:
                 if status:
                     status.setComment(res["Comment"])
                     status.setVersion(host.currentVersion())
-
-                # 2. Sync Metadata to Version File (for 'Retrieve Version' list)
-                version_file = host.currentVersionFilePath()
-                if version_file and os.path.isfile(version_file):
-                    ram.RamMetaDataManager.setComment(version_file, res["Comment"])
 
                 self.refresh_header()
 
