@@ -423,15 +423,6 @@ class RamsesFusionApp:
 
         if self.dlg:
             try:
-                # Full cache invalidation
-                self._project_cache = None
-                self._user_name_cache = None
-                self._item_cache = None
-                self._step_cache = None
-                self._active_path = ""
-
-                self._active_path = self.ramses.host.currentFilePath()
-
                 # Sync Savers before updating UI
                 self._sync_render_anchors()
 
@@ -905,25 +896,29 @@ class RamsesFusionApp:
         # 1. Bulk fetch all relevant objects once for maximum performance
         self.log("Fetching shots and statuses...", ram.LogLevel.Info)
 
+        project = self._get_project()
+        project_uuid = project.uuid() if project else None
+
         # Use getObjects (Bulk with Data) instead of project.shots() (UUID only, leads to N+1 requests)
         all_shots = self.ramses.daemonInterface().getObjects("RamShot")
         all_seqs = self.ramses.daemonInterface().getObjects("RamSequence")
         all_statuses = self.ramses.daemonInterface().getObjects("RamStatus")
 
-        project = self._get_project()
+        # Performance Optimization: Filter by project UUID if available
+        # This prevents processing thousands of shots from other projects in a studio environment.
+        if project_uuid:
+            all_shots = [s for s in all_shots if s.get("project") == project_uuid]
+            all_seqs = [s for s in all_seqs if s.get("project") == project_uuid]
+            # Note: We don't filter all_statuses by project directly as the field might be missing in some Ramses versions.
+            # Filtering by step_uuid in the status_map construction below is sufficient and safer.
+
         seq_map = {s.uuid(): s.shortName() for s in all_seqs}
         step_uuid = current_step.uuid()
         status_map = {
             s.get("item"): s for s in all_statuses if s.get("step") == step_uuid
         }
 
-        # 2. Find templates for this step
-        template_files = []
-        tpl_folder = current_step.templatesFolderPath()
-        if os.path.isdir(tpl_folder):
-            template_files = [f for f in os.listdir(tpl_folder) if f.endswith(".comp")]
-
-        # 3. Map shots to options
+        # 2. Map shots to options
         shot_options = {}
         shot_data_map = {}  # label -> data
 
@@ -933,6 +928,10 @@ class RamsesFusionApp:
         )
 
         for shot in all_shots:
+            # Performance Optimization: Inject the already fetched project to avoid N+1 calls to DAEMON.getProject()
+            # inside shot.stepFilePath() and other methods.
+            shot._RamObject__project = project
+
             status = status_map.get(shot.uuid())
             # Skip shots that have "Nothing to do" (NO) or "Standby" (STB)
             if status and status.state().shortName() in ["NO", "STB"]:
