@@ -223,17 +223,21 @@ class RamsesFusionApp:
         return True, ""
 
     def _resolve_shot_path(self, shot, step):
-        """Standardizes how we predict a shot's composition path."""
-        project = self._get_project()
-        proj_sn = project.shortName() if project else "Unknown"
-        filename = f"{proj_sn}_S_{shot.shortName()}_{step.shortName()}.comp"
+        """Standardizes how we predict a shot's composition path using the API."""
+        nm = ram.RamFileInfo()
+        nm.project = shot.projectShortName()
+        nm.ramType = ram.ItemType.SHOT
+        nm.shortName = shot.shortName()
+        nm.step = step.shortName()
+        nm.extension = "comp"
+        filename = nm.fileName()
         
         # Use daemon directly to avoid auto-folder creation
         shot_root = self.ramses.daemonInterface().getPath(shot.uuid(), "RamShot")
         if not shot_root:
             return None, None
             
-        step_folder = os.path.splitext(filename)[0]
+        step_folder = filename.replace(".comp", "")
         path = os.path.join(shot_root, step_folder, filename).replace("\\", "/")
         return path, filename
 
