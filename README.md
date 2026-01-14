@@ -1,6 +1,6 @@
 # Ramses-Fusion
 
-**Ramses-Fusion** is the official bridge between the [Ramses](https://ramses.rxlab.guide/) pipeline ecosystem and Blackmagic Fusion. Developed by [**Overmind Studios**](https://www.overmind-studios.de), it transforms Fusion into a pipeline-aware environment, ensuring technical consistency and automated organization across the entire production.
+**Ramses-Fusion** is a bridge between the [Ramses](https://ramses.rxlab.guide/) pipeline ecosystem and Blackmagic Fusion. Developed by [**Overmind Studios**](https://www.overmind-studios.de), it transforms Fusion into a pipeline-aware environment, ensuring technical consistency and automated organization across the entire production.
 
 <img src="images/screenshot.png" alt="Ramses-Fusion Interface" width="25%">
 
