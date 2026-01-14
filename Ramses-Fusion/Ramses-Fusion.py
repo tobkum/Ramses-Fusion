@@ -123,7 +123,7 @@ class RamsesFusionApp:
         return f"<font color='#555'>User: {self._get_user_name()} | Ramses API {self.settings.version}</font>"
 
     def _create_render_anchors(self):
-        """Creates _PREVIEW and _FINAL anchor nodes at fixed origin coordinates."""
+        """Creates _PREVIEW and _FINAL Saver nodes at fixed origin coordinates."""
         comp = self.ramses.host.comp
         if not comp:
             return
@@ -134,16 +134,44 @@ class RamsesFusionApp:
             "_FINAL": {"color": {"R": 0.7, "G": 0.3, "B": 0.3}, "x": 1, "y": 0}
         }
 
+        # Pre-calculate paths if project is active
+        preview_path = ""
+        publish_path = ""
+        if self._get_project():
+            try:
+                # Get official Ramses paths
+                preview_folder = self.ramses.host.previewPath()
+                # construct a dummy preview filename (ProRes MOV)
+                preview_path = os.path.join(preview_folder, "preview.mov").replace("\\", "/")
+                
+                # Get publish info for the final saver
+                publish_path = self.ramses.host.publishFilePath("exr", "Final").replace("\\", "/")
+            except:
+                pass
+
         for name, cfg in anchors_config.items():
             node = comp.FindTool(name)
             if not node:
-                # Use fixed coordinates directly
-                node = comp.AddTool("BrightnessContrast", cfg["x"], cfg["y"])
+                # Create a Saver node directly
+                node = comp.AddTool("Saver", cfg["x"], cfg["y"])
                 if node:
-                    node.SetAttrs({"TOOLS_Name": name})
-                    node.Blend[0] = 0.0
-                    target_type = "preview" if name == "_PREVIEW" else "final"
-                    node.Comments[1] = f"Ramses {name} Anchor. Connect your {target_type} output here."
+                    # Set core attributes
+                    node.SetAttrs({
+                        "TOOLS_Name": name,
+                        "TOOLB_PassThrough": True # Create in PASSTHROUGH state
+                    })
+                    
+                    # Set the path and format based on type
+                    if name == "_PREVIEW":
+                        if preview_path: node.Clip[1] = preview_path
+                        # Configure for ProRes 422 based on technical specs
+                        node.SetInput("OutputFormat", "QuickTimeMovies", 0)
+                        node.SetInput("QuickTimeMovies.Compression", "Apple ProRes 422_apcn", 0)
+                    else:
+                        if publish_path: node.Clip[1] = publish_path
+                    
+                    target_type = "Preview" if name == "_PREVIEW" else "Final"
+                    node.Comments[1] = f"{target_type} renders will be saved here. Connect your output."
                     self.log(f"Created render anchor: {name}", ram.LogLevel.Info)
             
             if node:
@@ -202,6 +230,40 @@ class RamsesFusionApp:
         path = os.path.join(shot_root, step_folder, filename).replace("\\", "/")
         return path, filename
 
+    def _sync_render_anchors(self):
+        """Syncs existing _PREVIEW and _FINAL Saver paths with the current version."""
+        comp = self.ramses.host.comp
+        if not comp or not self._get_project():
+            return
+
+        try:
+            # 1. Resolve current Ramses paths
+            # Preview Logic
+            preview_folder = self.ramses.host.previewPath()
+            pub_info = self.ramses.host.publishInfo() # Gets info for current version
+            
+            # Construct versioned filenames
+            # Preview (Switching to ProRes 422 .mov)
+            preview_filename = pub_info.fileName().replace(pub_info.extension, ".mov")
+            preview_path = os.path.join(preview_folder, preview_filename).replace("\\", "/")
+            
+            # Final (typically EXR, resolved via official API)
+            final_path = self.ramses.host.publishFilePath("exr", "").replace("\\", "/")
+
+            # 2. Update existing nodes
+            preview_node = comp.FindTool("_PREVIEW")
+            if preview_node:
+                preview_node.Clip[1] = preview_path
+                # Configure for ProRes 422 based on technical specs
+                preview_node.SetInput("OutputFormat", "QuickTimeMovies", 0)
+                preview_node.SetInput("QuickTimeMovies.Compression", "Apple ProRes 422_apcn", 0)
+                
+            final_node = comp.FindTool("_FINAL")
+            if final_node:
+                final_node.Clip[1] = final_path
+        except:
+            pass
+
     def refresh_header(self):
         """Updates the context label and footer with current info."""
         if not self._check_connection():
@@ -217,6 +279,10 @@ class RamsesFusionApp:
                 self._active_path = ""
                 
                 self._active_path = self.ramses.host.currentFilePath()
+                
+                # Sync Savers before updating UI
+                self._sync_render_anchors()
+                
                 items = self.dlg.GetItems()
                 if "ContextLabel" in items:
                     items["ContextLabel"].Text = self._get_context_text()
@@ -870,7 +936,40 @@ class RamsesFusionApp:
 
     def on_preview(self, ev):
         if not self._check_connection(): return
-        self.ramses.host.savePreview()
+        
+        comp = self.ramses.host.comp
+        if not comp: return
+
+        # 1. Find the Preview Anchor
+        preview_node = comp.FindTool("_PREVIEW")
+        if not preview_node:
+            self.log("Preview anchor (_PREVIEW) not found in Flow. Run 'Setup Scene' or add one manually.", ram.LogLevel.Warning)
+            return
+
+        # 2. Sync paths to ensure we are on the latest version
+        self._sync_render_anchors()
+        
+        # 3. Armed for render
+        self.log("Starting preview render...", ram.LogLevel.Info)
+        preview_node.SetAttrs({"TOOLB_PassThrough": False})
+        
+        try:
+            # 4. Trigger Fusion Render
+            # True means wait for render to finish
+            success = comp.Render(True)
+            
+            if success:
+                self.log(f"Preview render complete: {preview_node.Clip[1]}", ram.LogLevel.Info)
+                # 5. Register in Ramses
+                # (This tells the client that a new preview exists for this version)
+                self.ramses.host.savePreview()
+            else:
+                self.log("Preview render failed or was cancelled.", ram.LogLevel.Critical)
+        except Exception as e:
+            self.log(f"Error during preview render: {e}", ram.LogLevel.Critical)
+        finally:
+            # 6. Disarm the node
+            preview_node.SetAttrs({"TOOLB_PassThrough": True})
 
     def on_publish_settings(self, ev):
         step = self._require_step()
