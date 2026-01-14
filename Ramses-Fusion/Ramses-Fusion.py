@@ -909,53 +909,136 @@ class RamsesFusionApp:
         self.ramses.showClient()
 
     def on_switch_shot(self, ev):
+        """Interactive one-page wizard for switching/creating shots with cascading dropdowns."""
         if not self._check_connection():
             return
-        
-        current_step = self.current_step
-        project = self._get_project()
 
-        # --- Context Setup Wizard (for Out-of-Context starts) ---
-        if not current_step:
-            self.log("Initializing context wizard...", ram.LogLevel.Info)
-            
-            # 1. Project Selection
-            all_projects = self.ramses.daemonInterface().getObjects("RamProject")
-            if not all_projects:
-                self.log("No projects found in Ramses.", ram.LogLevel.Warning)
-                return
-                
-            project_opts = {str(i): p.name() for i, p in enumerate(all_projects)}
-            res_p = self.ramses.host._request_input("Context Wizard: Select Project", [
-                {"id": "P", "label": "Project:", "type": "combo", "options": project_opts}
+        ui = self.ui
+        disp = self.disp
+        host = self.ramses.host
+        
+        # 1. Initial Data Fetch
+        all_projects = self.ramses.daemonInterface().getObjects("RamProject")
+        if not all_projects:
+            self.log("No projects found in Ramses.", ram.LogLevel.Warning)
+            return
+
+        # Cache for performance
+        data_cache = {
+            "projects": all_projects,
+            "steps": [], # Filtered by project
+            "shots": [], # Filtered by project
+            "seq_map": {},
+            "status_map": {},
+            "shot_options": [] # Data for the shot combo
+        }
+
+        # Determine initial selection
+        cur_project = self._get_project()
+        cur_step = self.current_step
+        cur_item = self.current_item
+
+        # UI State
+        state = {
+            "project_idx": 0,
+            "step_idx": 0,
+            "shot_idx": 0
+        }
+
+        # 2. Build UI
+        win_id = f"ShotWizard_{int(os.getpid())}"
+        dlg = disp.AddWindow(
+            {"WindowTitle": "Ramses: Switch Shot", "ID": win_id, "Geometry": [400, 400, 500, 180]},
+            ui.VGroup([
+                ui.VGroup({"Spacing": 5}, [
+                    ui.HGroup([ui.Label({"Text": "Project:", "Weight": 0.25}), ui.ComboBox({"ID": "ProjCombo", "Weight": 0.75})]),
+                    ui.HGroup([ui.Label({"Text": "Step:", "Weight": 0.25}), ui.ComboBox({"ID": "StepCombo", "Weight": 0.75})]),
+                    ui.HGroup([ui.Label({"Text": "Shot:", "Weight": 0.25}), ui.ComboBox({"ID": "ShotCombo", "Weight": 0.75})]),
+                ]),
+                ui.VGap(10),
+                ui.HGroup([
+                    ui.HGap(200),
+                    ui.Button({"ID": "OkBtn", "Text": "OK", "Weight": 0.1}),
+                    ui.Button({"ID": "CancelBtn", "Text": "Cancel", "Weight": 0.1})
+                ])
             ])
-            if not res_p: return
-            project = all_projects[res_p["P"]]
+        )
+        
+        itm = dlg.GetItems()
+        
+        # 3. Logic: Update Helpers
+        def update_shots():
+            itm["ShotCombo"].Clear()
+            data_cache["shot_options"] = []
             
-            # 2. Step Selection
-            # Get steps for the selected project. 
-            # We fetch all steps and filter by the 'project' field in their data.
+            if not data_cache["steps"]:
+                return
+
+            selected_step = data_cache["steps"][state["step_idx"]]
+            
+            shots = data_cache["shots"]
+            seq_map = data_cache["seq_map"]
+            status_map = data_cache["status_map"]
+            
+            valid_options = []
+            for shot in shots:
+                status = status_map.get(shot.uuid())
+                if status and status.state().shortName() in ["NO", "STB"]:
+                    continue
+                
+                expected_path = shot.stepFilePath(step=selected_step, extension="comp")
+                if not expected_path: continue
+                
+                exists = os.path.exists(expected_path)
+                seq_name = seq_map.get(shot.get("sequence", ""), "None")
+                
+                if exists:
+                    state_name = status.state().name() if status else "WIP"
+                    label = f"{seq_name} / {shot.shortName()} [{state_name}]"
+                else:
+                    label = f"{seq_name} / {shot.shortName()} [EMPTY - Create New]"
+                
+                valid_options.append({
+                    "label": label,
+                    "shot": shot,
+                    "path": expected_path,
+                    "exists": exists,
+                    "filename": os.path.basename(expected_path)
+                })
+            
+            data_cache["shot_options"] = valid_options
+            for opt in valid_options:
+                itm["ShotCombo"].AddItem(opt["label"])
+            
+            # Try to pre-select current shot
+            if cur_item and state["step_idx"] == state.get("initial_step_idx", -1):
+                cur_uuid = cur_item.uuid()
+                for i, opt in enumerate(valid_options):
+                    if opt["shot"].uuid() == cur_uuid:
+                        itm["ShotCombo"].CurrentIndex = i
+                        state["shot_idx"] = i
+                        break
+            else:
+                itm["ShotCombo"].CurrentIndex = 0
+                state["shot_idx"] = 0
+
+        def update_steps():
+            itm["StepCombo"].Clear()
+            project = data_cache["projects"][state["project_idx"]]
+            
+            # Fetch steps for this project
             all_steps = self.ramses.daemonInterface().getObjects("RamStep")
             project_uuid = project.uuid()
             
-            self.log(f"Filtering steps for project UUID: {project_uuid}", ram.LogLevel.Debug)
-            
             fusion_steps = []
             app_name_cache = {}
-
             for s in all_steps:
                 s_data = s.data()
-                
-                # 1. Project Filter
-                # In some daemon versions, the project UUID might be in 'project' or 'projectUuid'
                 s_proj = s_data.get("project") or s_data.get("projectUuid")
                 if s_proj and s_proj != project_uuid:
                     continue
                 
-                # 2. Application Filter
                 is_fusion = False
-                
-                # Check the 'applications' list (UUIDs)
                 apps = s_data.get("applications", [])
                 if isinstance(apps, list) and len(apps) > 0:
                     for app_uuid in apps:
@@ -963,26 +1046,18 @@ class RamsesFusionApp:
                             try:
                                 app_data = self.ramses.daemonInterface().getData(app_uuid, "RamApplication")
                                 app_name_cache[app_uuid] = str(app_data.get("name", "")).upper()
-                            except Exception:
-                                app_name_cache[app_uuid] = ""
-                        
+                            except: app_name_cache[app_uuid] = ""
                         if "FUSION" in app_name_cache[app_uuid]:
                             is_fusion = True
                             break
                 
-                # Fallbacks
                 if not is_fusion:
-                    # Check other possible keys
                     for key in ["application", "software", "app", "dcc"]:
                         if "FUSION" in str(s_data.get(key, "")).upper():
                             is_fusion = True
                             break
-                    
-                    # Check shortName
                     if not is_fusion and "FUSION" in s.shortName().upper():
                         is_fusion = True
-
-                    # Check YAML settings
                     if not is_fusion:
                         settings = s.generalSettings("yaml")
                         if isinstance(settings, dict) and "application" in settings:
@@ -993,200 +1068,142 @@ class RamsesFusionApp:
                     fusion_steps.append(s)
             
             if not fusion_steps:
-                self.log(f"No FUSION-specific steps found for project '{project.name()}'. Showing all project steps as fallback.", ram.LogLevel.Warning)
                 fusion_steps = [s for s in all_steps if (s.get("project") or s.get("projectUuid")) == project_uuid]
-                
-            if not fusion_steps:
-                self.log(f"No steps found for project '{project.name()}'.", ram.LogLevel.Error)
-                return
-                
-            step_opts = {str(i): s.name() for i, s in enumerate(fusion_steps)}
-            res_s = self.ramses.host._request_input("Context Wizard: Select Step", [
-                {"id": "S", "label": "Step:", "type": "combo", "options": step_opts}
-            ])
-            if not res_s: return
-            current_step = fusion_steps[res_s["S"]]
-        # --- End of Wizard ---
-
-        # 1. Bulk fetch all relevant objects once for maximum performance
-        self.log("Fetching shots and statuses...", ram.LogLevel.Info)
-
-        project_uuid = project.uuid() if project else None
-
-        # Use getObjects (Bulk with Data) instead of project.shots() (UUID only, leads to N+1 requests)
-        all_shots = self.ramses.daemonInterface().getObjects("RamShot")
-        all_seqs = self.ramses.daemonInterface().getObjects("RamSequence")
-        all_statuses = self.ramses.daemonInterface().getObjects("RamStatus")
-
-        # Performance Optimization: Filter by project UUID if available
-        # This prevents processing thousands of shots from other projects in a studio environment.
-        if project_uuid:
-            all_shots = [s for s in all_shots if s.get("project") == project_uuid]
-            all_seqs = [s for s in all_seqs if s.get("project") == project_uuid]
-            # Note: We don't filter all_statuses by project directly as the field might be missing in some Ramses versions.
-            # Filtering by step_uuid in the status_map construction below is sufficient and safer.
-
-        seq_map = {s.uuid(): s.shortName() for s in all_seqs}
-        step_uuid = current_step.uuid()
-        status_map = {
-            s.get("item"): s for s in all_statuses if s.get("step") == step_uuid
-        }
-
-        # 2. Map shots to options
-        shot_options = {}
-        shot_data_map = {}  # label -> data
-
-        # Sort shots by sequence then name
-        all_shots.sort(
-            key=lambda s: (seq_map.get(s.get("sequence", ""), ""), s.shortName())
-        )
-
-        for shot in all_shots:
-            # Performance Optimization: Inject the already fetched project to avoid N+1 calls to DAEMON.getProject()
-            # inside shot.stepFilePath() and other methods.
-            shot._RamObject__project = project
-
-            status = status_map.get(shot.uuid())
-            # Skip shots that have "Nothing to do" (NO) or "Standby" (STB)
-            if status and status.state().shortName() in ["NO", "STB"]:
-                continue
-
-            # Official API way to predict/get the working file path
-            expected_path = shot.stepFilePath(step=current_step, extension="comp")
-
-            if not expected_path:
-                continue
-
-            filename = os.path.basename(expected_path)
-            exists = os.path.exists(expected_path)
-            seq_name = seq_map.get(shot.get("sequence", ""), "None")
-
-            if exists:
-                state_name = status.state().name() if status else "WIP"
-                label = f"{seq_name} / {shot.shortName()} [{state_name}]"
+            
+            data_cache["steps"] = fusion_steps
+            for s in fusion_steps:
+                itm["StepCombo"].AddItem(s.name())
+            
+            # Try to pre-select current step
+            if cur_step and cur_project and project.uuid() == cur_project.uuid():
+                cur_step_uuid = cur_step.uuid()
+                for i, s in enumerate(fusion_steps):
+                    if s.uuid() == cur_step_uuid:
+                        itm["StepCombo"].CurrentIndex = i
+                        state["step_idx"] = i
+                        state["initial_step_idx"] = i
+                        break
             else:
-                label = f"{seq_name} / {shot.shortName()} [EMPTY - Create New]"
+                itm["StepCombo"].CurrentIndex = 0
+                state["step_idx"] = 0
+            
+            update_shots()
 
-            idx = str(len(shot_options))
-            shot_options[idx] = label
-            shot_data_map[label] = {
-                "shot": shot,
-                "path": expected_path,
-                "exists": exists,
-                "filename": filename,
-            }
+        def on_project_changed(ev):
+            state["project_idx"] = int(itm["ProjCombo"].CurrentIndex)
+            proj = data_cache["projects"][state["project_idx"]]
+            self.log(f"Fetching data for project: {proj.name()}", ram.LogLevel.Info)
+            
+            proj_uuid = proj.uuid()
+            all_shots = self.ramses.daemonInterface().getObjects("RamShot")
+            data_cache["shots"] = [s for s in all_shots if s.get("project") == proj_uuid]
+            
+            all_seqs = self.ramses.daemonInterface().getObjects("RamSequence")
+            data_cache["seq_map"] = {s.uuid(): s.shortName() for s in all_seqs if s.get("project") == proj_uuid}
+            
+            all_statuses = self.ramses.daemonInterface().getObjects("RamStatus")
+            data_cache["status_map"] = {s.get("item"): s for s in all_statuses if s.get("step") == proj_uuid} # Wait, this should be step filtering in status?
+            # Re-fetch statuses filtered by current step will happen in update_shots
+            data_cache["status_map"] = {s.get("item"): s for s in all_statuses} # Global for project
+            
+            update_steps()
 
-        if not shot_options:
-            self.log("No shots found in project.", ram.LogLevel.Info)
-            return
+        def on_step_changed(ev):
+            state["step_idx"] = int(itm["StepCombo"].CurrentIndex)
+            update_shots()
 
-        # 4. Show selection dialog
-        res = self.ramses.host._request_input(
-            "Switch / Create Shot",
-            [
-                {
-                    "id": "Shot",
-                    "label": "Select Shot:",
-                    "type": "combo",
-                    "options": shot_options,
-                }
-            ],
-        )
+        def on_shot_changed(ev):
+            state["shot_idx"] = int(itm["ShotCombo"].CurrentIndex)
 
-        if res:
-            selected_label = shot_options[str(res["Shot"])]
-            data = shot_data_map[selected_label]
-            shot_obj = data["shot"]
+        # 4. Event Binding
+        dlg.On.ProjCombo.CurrentIndexChanged = on_project_changed
+        dlg.On.StepCombo.CurrentIndexChanged = on_step_changed
+        dlg.On.ShotCombo.CurrentIndexChanged = on_shot_changed
+        
+        results = {"confirmed": False}
+        def on_ok(ev):
+            results["confirmed"] = True
+            disp.ExitLoop()
+        def on_cancel(ev):
+            disp.ExitLoop()
+            
+        dlg.On.OkBtn.Clicked = on_ok
+        dlg.On.CancelBtn.Clicked = on_cancel
+        dlg.On[win_id].Close = on_cancel
 
-            # 5. Handle Creation from Template
-            if not data["exists"]:
-                # Use official API to resolve and create folders
-                step_folder = shot_obj.stepFolderPath(current_step)
-                selected_path = os.path.join(step_folder, data["filename"])
+        # 5. Initialization
+        for p in data_cache["projects"]:
+            itm["ProjCombo"].AddItem(p.name())
+        
+        # Pre-select project
+        initial_proj_idx = 0
+        if cur_project:
+            cur_p_uuid = cur_project.uuid()
+            for i, p in enumerate(data_cache["projects"]):
+                if p.uuid() == cur_p_uuid:
+                    initial_proj_idx = i
+                    break
+        
+        itm["ProjCombo"].CurrentIndex = initial_proj_idx
+        state["project_idx"] = initial_proj_idx
+        on_project_changed(None)
 
+        # 6. Show Dialog (Modal)
+        self.dlg.Enabled = False
+        try:
+            dlg.Show()
+            disp.RunLoop()
+        finally:
+            dlg.Hide()
+            self.dlg.Enabled = True
+
+        # 7. Execution
+        if results["confirmed"] and data_cache["shot_options"]:
+            shot_data = data_cache["shot_options"][state["shot_idx"]]
+            selected_step = data_cache["steps"][state["step_idx"]]
+            shot_obj = shot_data["shot"]
+            
+            if not shot_data["exists"]:
+                selected_path = shot_data["path"]
                 use_template = None
-
-                # Fetch templates for this step
-                tpl_folder = current_step.templatesFolderPath()
+                tpl_folder = selected_step.templatesFolderPath()
                 template_files = []
                 if tpl_folder and os.path.isdir(tpl_folder):
-                    template_files = [
-                        f for f in os.listdir(tpl_folder) if f.endswith(".comp")
-                    ]
+                    template_files = [f for f in os.listdir(tpl_folder) if f.endswith(".comp")]
 
                 if template_files:
-                    # Add "Empty" as the first option
                     tpl_opts = {"0": "None - Empty Composition"}
-                    for i, f in enumerate(template_files):
-                        tpl_opts[str(i + 1)] = f
-
-                    tpl_res = self.ramses.host._request_input(
-                        "Select Template",
-                        [
-                            {
-                                "id": "Tpl",
-                                "label": "Template:",
-                                "type": "combo",
-                                "options": tpl_opts,
-                            }
-                        ],
-                    )
-
+                    for i, f in enumerate(template_files): tpl_opts[str(i + 1)] = f
+                    tpl_res = host._request_input("Select Template", [
+                        {"id": "Tpl", "label": "Template:", "type": "combo", "options": tpl_opts}
+                    ])
                     if tpl_res:
                         idx = int(tpl_res["Tpl"])
-                        if idx > 0:  # Selected a file
-                            use_template = os.path.join(
-                                tpl_folder, template_files[idx - 1]
-                            )
-                        else:  # Selected "None - Empty"
-                            self.ramses.host.fusion.NewComp()
-                    else:
-                        return  # Cancelled
+                        if idx > 0: use_template = os.path.join(tpl_folder, template_files[idx - 1])
+                        else: host.fusion.NewComp()
+                    else: return
 
                 if use_template:
-                    self.log(
-                        f"Creating shot from template: {use_template}",
-                        ram.LogLevel.Info,
-                    )
-                    if self.ramses.host.open(use_template):
-                        self.ramses.host.comp.Save(self.ramses.host.normalizePath(selected_path))
-                elif not template_files:  # Fallback if no templates existed at all
-                    init_res = self.ramses.host._request_input(
-                        "Initialize Shot",
-                        [
-                            {
-                                "id": "Mode",
-                                "label": "No template found. Use:",
-                                "type": "combo",
-                                "options": {
-                                    "0": "Empty Composition",
-                                    "1": "Current Composition as base",
-                                },
-                            }
-                        ],
-                    )
-                    if not init_res:
-                        return
-                    if init_res["Mode"] == 0:
-                        self.ramses.host.fusion.NewComp()
-                    self.ramses.host.comp.Save(self.ramses.host.normalizePath(selected_path))
-                else:  # User selected "None - Empty" in the list
-                    self.ramses.host.comp.Save(self.ramses.host.normalizePath(selected_path))
+                    self.log(f"Creating shot from template: {use_template}", ram.LogLevel.Info)
+                    if host.open(use_template):
+                        host.comp.Save(host.normalizePath(selected_path))
+                elif not template_files:
+                    init_res = host._request_input("Initialize Shot", [
+                        {"id": "Mode", "label": "No template found. Use:", "type": "combo", 
+                         "options": {"0": "Empty Composition", "1": "Current Composition as base"}}
+                    ])
+                    if not init_res: return
+                    if init_res["Mode"] == 0: host.fusion.NewComp()
+                    host.comp.Save(host.normalizePath(selected_path))
+                else:
+                    host.comp.Save(host.normalizePath(selected_path))
 
-                # 6. Initialize Ramses Versioning idiomaticly
-                # Only attempt setup if a project is active
-                has_project = project is not None
-                if self.ramses.host.save(
-                    comment="Initial creation", setupFile=has_project
-                ):
+                # Initialize Versioning
+                if host.save(comment="Initial creation", setupFile=True):
                     self.refresh_header()
-                    self.log(
-                        f"New shot initialized: {selected_path}", ram.LogLevel.Info
-                    )
-
-            # 7. Standard Open
+                    self.log(f"New shot initialized: {selected_path}", ram.LogLevel.Info)
             else:
-                if self.ramses.host.open(data["path"]):
+                if host.open(shot_data["path"]):
                     self.refresh_header()
 
     def on_import(self, ev):
