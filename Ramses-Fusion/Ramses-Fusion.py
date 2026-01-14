@@ -909,7 +909,6 @@ class RamsesFusionApp:
 
     def show_about_window(self, ev):
         win_id = "AboutWin"
-        logo_path = self.ramses.host.normalizePath(os.path.join(self.icon_dir, "overmind.png"))
         dlg = self.disp.AddWindow(
             {
                 "WindowTitle": "About Ramses-Fusion",
@@ -920,12 +919,23 @@ class RamsesFusionApp:
                 self.ui.VGroup(
                     {"Spacing": 0},
                     [
-                        self.ui.Label(
-                            {
-                                "ID": "Logo",
-                                "Text": f'<p align="center"><img src="{logo_path}" width="120" height="120"></p>',
-                                "Alignment": {"AlignHCenter": True, "AlignTop": True},
-                            }
+                        self.ui.HGroup(
+                            {"Weight": 0},
+                            [
+                                self.ui.HGap(0, 1),
+                                self.ui.Button(
+                                    {
+                                        "ID": "Logo",
+                                        "Icon": self._get_icon("overmind.png"),
+                                        "IconSize": [120, 120],
+                                        "Flat": True,
+                                        "Enabled": False,
+                                        "MinimumSize": [120, 120],
+                                        "MaximumSize": [120, 120],
+                                    }
+                                ),
+                                self.ui.HGap(0, 1),
+                            ],
                         ),
                         self.ui.VGap(10),
                         self.ui.Label(
