@@ -65,8 +65,7 @@ class FusionHost(RamHost):
             "height": int(project.height() or 1080),
             "framerate": float(project.framerate() or 24.0),
             "duration": 0.0,
-            "pixelAspectRatio": float(project.pixelAspectRatio() or 1.0),
-            "aspectRatio": float(project.aspectRatio() or 1.0)
+            "pixelAspectRatio": float(project.pixelAspectRatio() or 1.0)
         }
 
         if item and item.itemType() == ItemType.SHOT:
@@ -80,7 +79,6 @@ class FusionHost(RamHost):
                 settings['height'] = int(seq.height())
                 settings['framerate'] = float(seq.framerate())
                 settings['pixelAspectRatio'] = float(seq.pixelAspectRatio())
-                settings['aspectRatio'] = float(seq.aspectRatio())
 
         return settings
 
@@ -482,7 +480,6 @@ class FusionHost(RamHost):
         width = setupOptions.get("width", 1920)
         height = setupOptions.get("height", 1080)
         pa = setupOptions.get("pixelAspectRatio", 1.0)
-        ar = setupOptions.get("aspectRatio", 1.777)
         
         # Apply Frame Format Rate via Prefs (required for FPS)
         self.comp.SetPrefs("Comp.FrameFormat.Width", int(width))
@@ -493,8 +490,6 @@ class FusionHost(RamHost):
         self.comp.SetAttrs({
             "COMPN_Width": int(width),
             "COMPN_Height": int(height),
-            "COMPN_AspectX": float(ar),
-            "COMPN_AspectY": 1.0,
             "COMPN_PixelAspectX": float(pa),
             "COMPN_PixelAspectY": 1.0,
             "COMPN_GlobalStart": float(start), 
