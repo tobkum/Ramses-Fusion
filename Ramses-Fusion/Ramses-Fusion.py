@@ -1020,6 +1020,15 @@ class RamsesFusionApp:
                 )
 
                 use_template = None
+
+                # Fetch templates for this step
+                tpl_folder = current_step.templatesFolderPath()
+                template_files = []
+                if tpl_folder and os.path.isdir(tpl_folder):
+                    template_files = [
+                        f for f in os.listdir(tpl_folder) if f.endswith(".comp")
+                    ]
+
                 if template_files:
                     # Add "Empty" as the first option
                     tpl_opts = {"0": "None - Empty Composition"}
