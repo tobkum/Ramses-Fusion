@@ -1,26 +1,37 @@
 # Ramses-Fusion
 
-**Ramses-Fusion** is the official bridge between the [Ramses](https://ramses.rxlab.guide/) pipeline ecosystem and Blackmagic Fusion. Developed by [**Overmind Studios**](https://www.overmind-studios.de), it transforms Fusion into a pipeline-aware environment, allowing compositors to focus on their creative work while the technical organization is handled automatically.
+**Ramses-Fusion** is the official bridge between the [Ramses](https://ramses.rxlab.guide/) pipeline ecosystem and Blackmagic Fusion. Developed by [**Overmind Studios**](https://www.overmind-studios.de), it transforms Fusion into a pipeline-aware environment, ensuring technical consistency and automated organization across the entire production.
 
 <img src="images/screenshot.png" alt="Ramses-Fusion Interface" width="25%">
 
 ## 🌟 Overview
 
-In modern production, staying organized across hundreds of shots and assets is a major challenge. Ramses-Fusion solves this by integrating the production database directly into the Fusion interface. It ensures that every composition follows project standards, every version is tracked, and every render goes exactly where it needs to be.
+Ramses-Fusion integrates the production database directly into the Fusion interface. It removes the need for manual file system management by enforcing project standards at the software level. Every composition is synchronized with the database, ensuring that versions are tracked, technical specifications are met, and renders are delivered to the correct locations automatically.
 
 ## 🚀 Key Capabilities
 
-### 🔗 Pipeline Connectivity
-Stop digging through folders. Ramses-Fusion allows you to browse your entire project, jump between shots, and initialize new compositions from standardized templates instantly.
+### 🔗 Pipeline Integration & Browsing
+The tool provides a centralized interface to browse projects, sequences, and shots. 
+* **Shot Switching:** Quickly jump between shots or initialize new compositions using standardized templates.
+* **Context Awareness:** The UI dynamically tracks your current Project, Shot, and Step (task), providing relevant shortcuts for your specific context.
 
-### 📐 Intelligent Scene Setup
-One click aligns your composition with the project's technical specifications. Resolution, frame ranges, framerates, and aspect ratios are pulled directly from the Ramses database, eliminating manual setup errors.
+### 📐 Automated Scene Configuration
+Standardize your working environment with a single click. The **Setup Scene** function pulls technical specifications directly from the Ramses database to configure:
+* **Format:** Resolution, Pixel Aspect Ratio, and Framerate.
+* **Frame Range:** Global and Render ranges are automatically aligned with shot durations.
+* **Render Anchors:** Automatically generates managed `_PREVIEW` and `_FINAL` Saver nodes. These anchors are pre-configured with the correct server paths and codecs (ProRes), so you never have to manually name a render file.
 
-### 📦 Smart Asset Management
-Bring the rest of the pipeline into your Flow. Easily import published renders, assets, or cameras from other departments, and swap versions with a single click while maintaining your node connections.
+### 📦 Asset & Version Management
+Manage the flow of data into your composition without browsing folders.
+* **Smart Importing:** Bring in published renders or assets with automated node naming and frame-start alignment.
+* **Version Swapping:** Replace existing Loader nodes with new versions or different assets while maintaining all downstream node connections.
+* **Retrieval:** Instantly access and restore previous versions of your composition directly from the versioning archive.
 
-### 🏁 Managed Iteration & Publishing
-Handle the entire lifecycle of a shot from WIP to Final. The tool manages incremental versioning, metadata tagging, and automated master renders, ensuring your exports are always standardized and ready for review.
+### 🏁 Technical Validation & Publishing
+The tool acts as a gatekeeper to ensure only technically correct data moves down the pipeline.
+* **Mismatch Detection:** Before publishing, the tool validates your composition's resolution, FPS, and frame range against the database, warning you of any discrepancies.
+* **Automated Publishing:** Handles the archival of the `.comp` file and the rendering of master files in one step.
+* **Metadata Logging:** Every save and publish can be accompanied by comments that are logged directly into the Ramses database for production tracking.
 
 ---
 
