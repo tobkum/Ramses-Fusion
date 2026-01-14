@@ -122,7 +122,7 @@ class RamsesFusionApp:
         project_name = project.name() if project else item.projectShortName()
         item_name = item.shortName()
         step_name = step.name() if step else "No Step"
-        return f"<font color='#555'>{project_name} / </font><b>{item_name}</b><br><font color='#999'>{step_name}</font>"
+        return f"<font color='#555'>{project_name} / </font><b><font color='#BBB'>{item_name}</font></b><br><font color='#999'>{step_name}</font>"
 
     def log(self, message, level=ram.LogLevel.Info):
         """Directly logs to the Fusion console bypassing API filtering."""
@@ -441,7 +441,7 @@ class RamsesFusionApp:
             {
                 "WindowTitle": "Ramses-Fusion",
                 "ID": "MainWin",
-                "Geometry": [200, 200, 380, 800],
+                "Geometry": [200, 200, 300, 800],
             },
             [
                 self.ui.VGroup(
