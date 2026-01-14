@@ -420,8 +420,10 @@ class RamsesFusionApp:
                 self._project_cache = None
                 self._user_name_cache = None
                 
-                # Clear item/step path trackers to force re-fetch from host
+                # Clear item/step caches and path trackers to force re-fetch from host
+                self._item_cache = None
                 self._item_path = ""
+                self._step_cache = None
                 self._step_path = ""
 
                 # Sync Savers before updating UI
