@@ -224,7 +224,7 @@ class RamsesFusionApp:
         finally:
             comp.Unlock()
 
-    def _validate_publish(self):
+    def _validate_publish(self, check_preview=True, check_final=True):
         """Validates comp settings against Ramses database before publishing."""
         item = self.current_item
         project = self._get_project()
@@ -232,40 +232,71 @@ class RamsesFusionApp:
             return True, ""
 
         errors = []
-
+        comp = self.ramses.host.comp
+        
         # 1. Check Frame Range
         if item.itemType() == ram.ItemType.SHOT:
-            # Calculate frames manually using round() to match Fusion setup and GUI behavior,
-            # bypassing the API's item.frames() which truncates.
             framerate = project.framerate() if project else 24.0
             expected_frames = int(round(item.duration() * framerate))
 
-            comp = self.ramses.host.comp
-            # Query specific attributes directly for maximum reliability
-            comp_start = comp.GetAttrs("COMPN_GlobalStart") or 0
-            comp_end = comp.GetAttrs("COMPN_GlobalEnd") or 0
+            # Check Render Range
+            comp_start = comp.GetAttrs("COMPN_RenderStart") or 0
+            comp_end = comp.GetAttrs("COMPN_RenderEnd") or 0
             actual_frames = int(comp_end - comp_start + 1)
 
             if actual_frames != expected_frames:
                 errors.append(
-                    f"• Frame Range Mismatch: DB expects {expected_frames} frames, Comp has {actual_frames}."
+                    f"• Frame Range Mismatch: DB expects {expected_frames} frames, Comp is set to render {actual_frames}."
                 )
 
         # 2. Check Resolution (Project Master)
         db_w = int(project.width() or 1920)
         db_h = int(project.height() or 1080)
-
-        comp = self.ramses.host.comp
+        
         prefs = comp.GetPrefs()
         frame_format = prefs.get("Comp", {}).get("FrameFormat", {})
-
+        
         comp_w = int(frame_format.get("Width", 0))
         comp_h = int(frame_format.get("Height", 0))
-
+        
         if db_w != comp_w or db_h != comp_h:
             errors.append(
                 f"• Resolution Mismatch: DB expects {db_w}x{db_h}, Comp is {comp_w}x{comp_h}."
             )
+
+        # 3. Check Framerate
+        db_fps = float(project.framerate() or 24.0)
+        comp_fps = float(frame_format.get("Rate", 24.0))
+        
+        if abs(db_fps - comp_fps) > 0.001:
+            errors.append(
+                f"• Framerate Mismatch: DB expects {db_fps} fps, Comp is set to {comp_fps} fps."
+            )
+
+        # 4. Check Saver Connections
+        def check_anchor(tool_name):
+            node = comp.FindTool(tool_name)
+            if not node:
+                return f"• Missing Anchor: '{tool_name}' node not found. Run 'Setup Scene' to create it."
+            
+            inp = node.FindMainInput(1)
+            if not inp or inp.GetConnectedOutput() is None:
+                return f"• Disconnected Anchor: '{tool_name}' node has no input connection."
+            return None
+
+        if check_preview:
+            err_preview = check_anchor("_PREVIEW")
+            if err_preview:
+                errors.append(err_preview)
+        
+        if check_final:
+            err_final = check_anchor("_FINAL")
+            if err_final:
+                errors.append(err_final)
+
+        if errors:
+            return False, "\n".join(errors)
+        return True, ""
 
         if errors:
             return False, "\n".join(errors)
@@ -1098,7 +1129,7 @@ class RamsesFusionApp:
             return
 
         # Pre-publish Validation
-        is_valid, msg = self._validate_publish()
+        is_valid, msg = self._validate_publish(check_preview=False, check_final=True)
         if not is_valid:
             res = self.ramses.host._request_input(
                 "Validation Warning",
@@ -1130,6 +1161,34 @@ class RamsesFusionApp:
     def on_preview(self, ev):
         if not self._check_connection():
             return
+
+        # Pre-Preview Validation
+        is_valid, msg = self._validate_publish(check_preview=True, check_final=False)
+        if not is_valid:
+            res = self.ramses.host._request_input(
+                "Validation Warning",
+                [
+                    {
+                        "id": "W",
+                        "label": "Technical Mismatches found:",
+                        "type": "text",
+                        "default": msg,
+                        "lines": 4,
+                    },
+                    {
+                        "id": "Mode",
+                        "label": "Action:",
+                        "type": "combo",
+                        "options": {
+                            "0": "Continue anyway (Force)",
+                            "1": "Abort and fix settings",
+                        },
+                    },
+                ],
+            )
+            if not res or res["Mode"] == 1:
+                return
+
         self.ramses.host.savePreview()
 
     def on_publish_settings(self, ev):
