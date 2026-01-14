@@ -35,7 +35,7 @@ class RamsesFusionApp:
         self.dlg = None
         self._project_cache = None
         self._user_name_cache = None
-        
+
         # Context Caching
         self._item_cache = None
         self._step_cache = None
@@ -96,9 +96,18 @@ class RamsesFusionApp:
             self.ramses.connect()
 
         if not self.ramses.online():
-            self.ramses.host._request_input("Ramses Connection Error", [
-                {'id': 'E', 'label': '', 'type': 'text', 'default': 'Could not reach the Ramses Client. \n\nPlease make sure Ramses is running and you are logged in.', 'lines': 3}
-            ])
+            self.ramses.host._request_input(
+                "Ramses Connection Error",
+                [
+                    {
+                        "id": "E",
+                        "label": "",
+                        "type": "text",
+                        "default": "Could not reach the Ramses Client. \n\nPlease make sure Ramses is running and you are logged in.",
+                        "lines": 3,
+                    }
+                ],
+            )
             return False
         return True
 
@@ -131,7 +140,7 @@ class RamsesFusionApp:
         # Fixed absolute coordinates
         anchors_config = {
             "_PREVIEW": {"color": {"R": 0.3, "G": 0.7, "B": 0.3}, "x": 0, "y": 0},
-            "_FINAL": {"color": {"R": 0.7, "G": 0.3, "B": 0.3}, "x": 1, "y": 0}
+            "_FINAL": {"color": {"R": 0.7, "G": 0.3, "B": 0.3}, "x": 1, "y": 0},
         }
 
         # Pre-calculate paths if project is active
@@ -141,7 +150,7 @@ class RamsesFusionApp:
             try:
                 # Get official Ramses paths
                 preview_folder = self.ramses.host.previewPath()
-                
+
                 # Try to construct a proper filename if context is available
                 try:
                     pub_info = self.ramses.host.publishInfo()
@@ -150,13 +159,19 @@ class RamsesFusionApp:
                     preview_info.state = ""
                     preview_info.resource = ""
                     preview_info.extension = "mov"
-                    preview_path = os.path.join(preview_folder, preview_info.fileName()).replace("\\", "/")
+                    preview_path = os.path.join(
+                        preview_folder, preview_info.fileName()
+                    ).replace("\\", "/")
                 except:
                     # Fallback to simple name if info not available yet
-                    preview_path = os.path.join(preview_folder, "preview.mov").replace("\\", "/")
-                
+                    preview_path = os.path.join(preview_folder, "preview.mov").replace(
+                        "\\", "/"
+                    )
+
                 # Get publish info for the final saver (ProRes 4444 MOV)
-                publish_path = self.ramses.host.publishFilePath("mov", "").replace("\\", "/")
+                publish_path = self.ramses.host.publishFilePath("mov", "").replace(
+                    "\\", "/"
+                )
             except:
                 pass
 
@@ -167,27 +182,37 @@ class RamsesFusionApp:
                 node = comp.AddTool("Saver", cfg["x"], cfg["y"])
                 if node:
                     # Set core attributes
-                    node.SetAttrs({
-                        "TOOLS_Name": name,
-                        "TOOLB_PassThrough": True # Create in PASSTHROUGH state
-                    })
-                    
+                    node.SetAttrs(
+                        {
+                            "TOOLS_Name": name,
+                            "TOOLB_PassThrough": True,  # Create in PASSTHROUGH state
+                        }
+                    )
+
                     # Set the path and format based on type
                     if name == "_PREVIEW":
-                        if preview_path: node.Clip[1] = preview_path
+                        if preview_path:
+                            node.Clip[1] = preview_path
                         # Configure for ProRes 422 based on technical specs
                         node.SetInput("OutputFormat", "QuickTimeMovies", 0)
-                        node.SetInput("QuickTimeMovies.Compression", "Apple ProRes 422_apcn", 0)
+                        node.SetInput(
+                            "QuickTimeMovies.Compression", "Apple ProRes 422_apcn", 0
+                        )
                     else:
-                        if publish_path: node.Clip[1] = publish_path
+                        if publish_path:
+                            node.Clip[1] = publish_path
                         # Configure for ProRes 4444 based on technical specs
                         node.SetInput("OutputFormat", "QuickTimeMovies", 0)
-                        node.SetInput("QuickTimeMovies.Compression", "Apple ProRes 4444_ap4h", 0)
-                    
+                        node.SetInput(
+                            "QuickTimeMovies.Compression", "Apple ProRes 4444_ap4h", 0
+                        )
+
                     target_type = "Preview" if name == "_PREVIEW" else "Final"
-                    node.Comments[1] = f"{target_type} renders will be saved here. Connect your output."
+                    node.Comments[1] = (
+                        f"{target_type} renders will be saved here. Connect your output."
+                    )
                     self.log(f"Created render anchor: {name}", ram.LogLevel.Info)
-            
+
             if node:
                 node.TileColor = cfg["color"]
 
@@ -199,36 +224,40 @@ class RamsesFusionApp:
             return True, ""
 
         errors = []
-        
+
         # 1. Check Frame Range
         if item.itemType() == ram.ItemType.SHOT:
             # Calculate frames manually using round() to match Fusion setup and GUI behavior,
             # bypassing the API's item.frames() which truncates.
             framerate = project.framerate() if project else 24.0
             expected_frames = int(round(item.duration() * framerate))
-            
+
             comp = self.ramses.host.comp
             # Query specific attributes directly for maximum reliability
             comp_start = comp.GetAttrs("COMPN_GlobalStart") or 0
             comp_end = comp.GetAttrs("COMPN_GlobalEnd") or 0
             actual_frames = int(comp_end - comp_start + 1)
-            
+
             if actual_frames != expected_frames:
-                errors.append(f"• Frame Range Mismatch: DB expects {expected_frames} frames, Comp has {actual_frames}.")
+                errors.append(
+                    f"• Frame Range Mismatch: DB expects {expected_frames} frames, Comp has {actual_frames}."
+                )
 
         # 2. Check Resolution (Project Master)
         db_w = int(project.width() or 1920)
         db_h = int(project.height() or 1080)
-        
+
         comp = self.ramses.host.comp
         prefs = comp.GetPrefs()
-        frame_format = prefs.get('Comp', {}).get('FrameFormat', {})
-        
-        comp_w = int(frame_format.get('Width', 0))
-        comp_h = int(frame_format.get('Height', 0))
-        
+        frame_format = prefs.get("Comp", {}).get("FrameFormat", {})
+
+        comp_w = int(frame_format.get("Width", 0))
+        comp_h = int(frame_format.get("Height", 0))
+
         if db_w != comp_w or db_h != comp_h:
-            errors.append(f"• Resolution Mismatch: DB expects {db_w}x{db_h}, Comp is {comp_w}x{comp_h}.")
+            errors.append(
+                f"• Resolution Mismatch: DB expects {db_w}x{db_h}, Comp is {comp_w}x{comp_h}."
+            )
 
         if errors:
             return False, "\n".join(errors)
@@ -243,12 +272,12 @@ class RamsesFusionApp:
         nm.step = step.shortName()
         nm.extension = "comp"
         filename = nm.fileName()
-        
+
         # Use API to get the folder path (this ensures correct structure)
         step_folder = shot.stepFolderPath(step)
         if not step_folder:
             return None, None
-            
+
         path = os.path.join(step_folder, filename).replace("\\", "/")
         return path, filename
 
@@ -262,7 +291,7 @@ class RamsesFusionApp:
 
         try:
             # 1. Resolve current Ramses paths
-            pub_info = self.ramses.host.publishInfo() 
+            pub_info = self.ramses.host.publishInfo()
 
             # Preview: Official flat filename in the shot's _preview folder
             # Pattern from RamHost.savePreview(): No version, no state, no resource
@@ -272,16 +301,20 @@ class RamsesFusionApp:
             preview_info.state = ""
             preview_info.resource = ""
             preview_info.extension = "mov"
-            preview_path = os.path.join(preview_folder, preview_info.fileName()).replace("\\", "/")
-            
+            preview_path = os.path.join(
+                preview_folder, preview_info.fileName()
+            ).replace("\\", "/")
+
             # Final: Master ProRes 4444 in the project's flat Output (Export) folder
             export_folder = project.exportPath().replace("\\", "/")
             if export_folder:
                 # Ensure the folder exists on disk
                 if not os.path.isdir(export_folder):
-                    try: os.makedirs(export_folder)
-                    except: pass
-                
+                    try:
+                        os.makedirs(export_folder)
+                    except:
+                        pass
+
                 # Use API to generate the standard filename without version
                 final_info = pub_info.copy()
                 final_info.version = -1
@@ -289,34 +322,48 @@ class RamsesFusionApp:
                 final_info.resource = ""
                 final_info.extension = "mov"
                 final_filename = final_info.fileName()
-                
-                final_path = os.path.join(export_folder, final_filename).replace("\\", "/")
+
+                final_path = os.path.join(export_folder, final_filename).replace(
+                    "\\", "/"
+                )
             else:
                 # Fallback only if export path is totally undefined
-                final_path = self.ramses.host.publishFilePath("mov", "").replace("\\", "/")
+                final_path = self.ramses.host.publishFilePath("mov", "").replace(
+                    "\\", "/"
+                )
 
             # 2. Update existing nodes
             preview_node = comp.FindTool("_PREVIEW")
             if preview_node:
                 if preview_node.Clip[1] != preview_path:
                     preview_node.Clip[1] = preview_path
-                
+
                 if preview_node.GetInput("OutputFormat") != "QuickTimeMovies":
                     preview_node.SetInput("OutputFormat", "QuickTimeMovies", 0)
-                
-                if preview_node.GetInput("QuickTimeMovies.Compression") != "Apple ProRes 422_apcn":
-                    preview_node.SetInput("QuickTimeMovies.Compression", "Apple ProRes 422_apcn", 0)
-                
+
+                if (
+                    preview_node.GetInput("QuickTimeMovies.Compression")
+                    != "Apple ProRes 422_apcn"
+                ):
+                    preview_node.SetInput(
+                        "QuickTimeMovies.Compression", "Apple ProRes 422_apcn", 0
+                    )
+
             final_node = comp.FindTool("_FINAL")
             if final_node:
                 if final_node.Clip[1] != final_path:
                     final_node.Clip[1] = final_path
-                
+
                 if final_node.GetInput("OutputFormat") != "QuickTimeMovies":
                     final_node.SetInput("OutputFormat", "QuickTimeMovies", 0)
-                
-                if final_node.GetInput("QuickTimeMovies.Compression") != "Apple ProRes 4444_ap4h":
-                    final_node.SetInput("QuickTimeMovies.Compression", "Apple ProRes 4444_ap4h", 0)
+
+                if (
+                    final_node.GetInput("QuickTimeMovies.Compression")
+                    != "Apple ProRes 4444_ap4h"
+                ):
+                    final_node.SetInput(
+                        "QuickTimeMovies.Compression", "Apple ProRes 4444_ap4h", 0
+                    )
         except:
             pass
 
@@ -324,7 +371,7 @@ class RamsesFusionApp:
         """Updates the context label and footer with current info."""
         if not self._check_connection():
             return
-            
+
         if self.dlg:
             try:
                 # Full cache invalidation
@@ -333,12 +380,12 @@ class RamsesFusionApp:
                 self._item_cache = None
                 self._step_cache = None
                 self._active_path = ""
-                
+
                 self._active_path = self.ramses.host.currentFilePath()
-                
+
                 # Sync Savers before updating UI
                 self._sync_render_anchors()
-                
+
                 items = self.dlg.GetItems()
                 if "ContextLabel" in items:
                     items["ContextLabel"].Text = self._get_context_text()
@@ -357,61 +404,87 @@ class RamsesFusionApp:
                 "Geometry": [200, 200, 380, 800],
             },
             [
-                self.ui.VGroup({"Spacing": 0, "Weight": 1}, [
-                    self.ui.VGap(15),
-                    self.ui.HGroup({"Weight": 1}, [
-                        self.ui.HGap(15),
-                        self.ui.VGroup({"Spacing": 4, "Weight": 1}, [
-                            # Context Header
-                            self.ui.HGroup({"Weight": 0}, [
-                                self.ui.Label({
-                                    "ID": "ContextLabel",
-                                    "Text": self._get_context_text(),
-                                    "Alignment": {"AlignHCenter": True, "AlignTop": True},
-                                    "WordWrap": True,
-                                    "Weight": 1,
-                                }),
-                                self.ui.Button({
-                                    "ID": "RefreshButton",
-                                    "Text": "",
-                                    "Weight": 0,
-                                    "MinimumSize": [48, 48],
-                                    "MaximumSize": [48, 48],
-                                    "IconSize": [32, 32],
-                                    "Flat": True,
-                                    "ToolTip": "Manually refresh the context header.",
-                                    "Icon": self.ui.Icon({"File": os.path.join(self.script_dir, "icons", "ramupdate.png")}),
-                                })
-                            ]),
-                            self.ui.VGap(10),
-
-                            # Groups
-                            self._build_project_group(),
-                            self.ui.VGap(8),
-                            self._build_pipeline_group(),
-                            self.ui.VGap(8),
-                            self._build_working_group(),
-                            self.ui.VGap(8),
-                            self._build_publish_group(),
-                            self.ui.VGap(8),
-                            self._build_settings_group(),
-                            
-                            # Spacer to push everything up
-                            self.ui.VGap(0, 1),
-
-                            # Footer Version
-                            self.ui.Label({
-                                "ID": "RamsesVersion",
-                                "Text": self._get_footer_text(),
-                                "Alignment": {"AlignHCenter": True},
-                                "Weight": 0,
-                            }),
-                        ]),
-                        self.ui.HGap(15),
-                    ]),
-                    self.ui.VGap(15),
-                ])
-            ]
+                self.ui.VGroup(
+                    {"Spacing": 0, "Weight": 1},
+                    [
+                        self.ui.VGap(15),
+                        self.ui.HGroup(
+                            {"Weight": 1},
+                            [
+                                self.ui.HGap(15),
+                                self.ui.VGroup(
+                                    {"Spacing": 4, "Weight": 1},
+                                    [
+                                        # Context Header
+                                        self.ui.HGroup(
+                                            {"Weight": 0},
+                                            [
+                                                self.ui.Label(
+                                                    {
+                                                        "ID": "ContextLabel",
+                                                        "Text": self._get_context_text(),
+                                                        "Alignment": {
+                                                            "AlignHCenter": True,
+                                                            "AlignTop": True,
+                                                        },
+                                                        "WordWrap": True,
+                                                        "Weight": 1,
+                                                    }
+                                                ),
+                                                self.ui.Button(
+                                                    {
+                                                        "ID": "RefreshButton",
+                                                        "Text": "",
+                                                        "Weight": 0,
+                                                        "MinimumSize": [48, 48],
+                                                        "MaximumSize": [48, 48],
+                                                        "IconSize": [32, 32],
+                                                        "Flat": True,
+                                                        "ToolTip": "Manually refresh the context header.",
+                                                        "Icon": self.ui.Icon(
+                                                            {
+                                                                "File": os.path.join(
+                                                                    self.script_dir,
+                                                                    "icons",
+                                                                    "ramupdate.png",
+                                                                )
+                                                            }
+                                                        ),
+                                                    }
+                                                ),
+                                            ],
+                                        ),
+                                        self.ui.VGap(10),
+                                        # Groups
+                                        self._build_project_group(),
+                                        self.ui.VGap(8),
+                                        self._build_pipeline_group(),
+                                        self.ui.VGap(8),
+                                        self._build_working_group(),
+                                        self.ui.VGap(8),
+                                        self._build_publish_group(),
+                                        self.ui.VGap(8),
+                                        self._build_settings_group(),
+                                        # Spacer to push everything up
+                                        self.ui.VGap(0, 1),
+                                        # Footer Version
+                                        self.ui.Label(
+                                            {
+                                                "ID": "RamsesVersion",
+                                                "Text": self._get_footer_text(),
+                                                "Alignment": {"AlignHCenter": True},
+                                                "Weight": 0,
+                                            }
+                                        ),
+                                    ],
+                                ),
+                                self.ui.HGap(15),
+                            ],
+                        ),
+                        self.ui.VGap(15),
+                    ],
+                )
+            ],
         )
 
         # Bind Events
@@ -599,11 +672,20 @@ class RamsesFusionApp:
             ]
         )
 
-    def create_button(self, id_name, text, icon_name, weight=0, tooltip="", min_size=None, max_size=None):
+    def create_button(
+        self,
+        id_name,
+        text,
+        icon_name,
+        weight=0,
+        tooltip="",
+        min_size=None,
+        max_size=None,
+    ):
         if icon_name not in self._icon_cache:
             icon_path = os.path.join(self.icon_dir, icon_name)
             self._icon_cache[icon_name] = self.ui.Icon({"File": icon_path})
-            
+
         return self.ui.Button(
             {
                 "ID": id_name,
@@ -728,7 +810,7 @@ class RamsesFusionApp:
                         self.ui.Label(
                             {
                                 "ID": "Info",
-                                "Text": "Ramses-Fusion for Overmind Studios. <p>Copyright &copy; 2025 Overmind Studios.</p>",
+                                "Text": "Ramses-Fusion for Overmind Studios. <p>Copyright &copy; 2026 Overmind Studios.</p>",
                                 "Alignment": [{"AlignHCenter": True, "AlignTop": True}],
                                 "WordWrap": True,
                                 "OpenExternalLinks": True,
@@ -761,24 +843,30 @@ class RamsesFusionApp:
         self.ramses.showClient()
 
     def on_switch_shot(self, ev):
-        if not self._check_connection(): return
+        if not self._check_connection():
+            return
         current_step = self.current_step
         if not current_step:
-            self.log("Open a valid Ramses file first to set the context.", ram.LogLevel.Warning)
+            self.log(
+                "Open a valid Ramses file first to set the context.",
+                ram.LogLevel.Warning,
+            )
             return
 
         # 1. Bulk fetch all relevant objects once for maximum performance
         self.log("Fetching shots and statuses...", ram.LogLevel.Info)
-        
+
         # Use getObjects (Bulk with Data) instead of project.shots() (UUID only, leads to N+1 requests)
         all_shots = self.ramses.daemonInterface().getObjects("RamShot")
         all_seqs = self.ramses.daemonInterface().getObjects("RamSequence")
         all_statuses = self.ramses.daemonInterface().getObjects("RamStatus")
-        
+
         project = self._get_project()
         seq_map = {s.uuid(): s.shortName() for s in all_seqs}
         step_uuid = current_step.uuid()
-        status_map = {s.get("item"): s for s in all_statuses if s.get("step") == step_uuid}
+        status_map = {
+            s.get("item"): s for s in all_statuses if s.get("step") == step_uuid
+        }
 
         # 2. Find templates for this step
         template_files = []
@@ -789,9 +877,11 @@ class RamsesFusionApp:
         # 3. Map shots to options
         shot_options = {}
         shot_data_map = {}  # label -> data
-        
+
         # Sort shots by sequence then name
-        all_shots.sort(key=lambda s: (seq_map.get(s.get("sequence", ""), ""), s.shortName()))
+        all_shots.sort(
+            key=lambda s: (seq_map.get(s.get("sequence", ""), ""), s.shortName())
+        )
 
         for shot in all_shots:
             status = status_map.get(shot.uuid())
@@ -800,8 +890,10 @@ class RamsesFusionApp:
                 continue
 
             # Official API way to predict/get the working file path
-            expected_path = shot.stepFilePath(step=current_step, extension="comp").replace("\\", "/")
-            
+            expected_path = shot.stepFilePath(
+                step=current_step, extension="comp"
+            ).replace("\\", "/")
+
             # If the file doesn't exist yet, we still need to know where it WOULD be
             if not expected_path:
                 # Use resolve_shot_path as a fallback for 'EMPTY' shots only
@@ -809,8 +901,9 @@ class RamsesFusionApp:
             else:
                 filename = os.path.basename(expected_path)
 
-            if not expected_path: continue
-            
+            if not expected_path:
+                continue
+
             exists = os.path.exists(expected_path)
             seq_name = seq_map.get(shot.get("sequence", ""), "None")
 
@@ -936,16 +1029,19 @@ class RamsesFusionApp:
                     self.refresh_header()
 
     def on_import(self, ev):
-        if not self._check_connection(): return
+        if not self._check_connection():
+            return
         self.ramses.host.importItem()
 
     def on_replace(self, ev):
-        if not self._check_connection(): return
+        if not self._check_connection():
+            return
         self.ramses.host.replaceItem()
 
     def on_save(self, ev):
-        if not self._check_connection(): return
-        
+        if not self._check_connection():
+            return
+
         # Ensure anchors are synced before saving
         self._sync_render_anchors()
 
@@ -955,8 +1051,9 @@ class RamsesFusionApp:
             self.refresh_header()
 
     def on_incremental_save(self, ev):
-        if not self._check_connection(): return
-        
+        if not self._check_connection():
+            return
+
         # Ensure anchors are synced before saving
         self._sync_render_anchors()
 
@@ -965,7 +1062,8 @@ class RamsesFusionApp:
             self.refresh_header()
 
     def on_comment(self, ev):
-        if not self._check_connection(): return
+        if not self._check_connection():
+            return
         res = self.ramses.host._request_input(
             "Add Comment",
             [
@@ -988,26 +1086,42 @@ class RamsesFusionApp:
                 self.refresh_header()
 
     def on_update_status(self, ev):
-        if not self._check_connection(): return
-        
+        if not self._check_connection():
+            return
+
         # Pre-publish Validation
         is_valid, msg = self._validate_publish()
         if not is_valid:
-            res = self.ramses.host._request_input("Validation Warning", [
-                {'id': 'W', 'label': 'Technical Mismatches found:', 'type': 'text', 'default': msg, 'lines': 4},
-                {'id': 'Mode', 'label': 'Action:', 'type': 'combo', 'options': {
-                    '0': 'Continue anyway (Force)',
-                    '1': 'Abort and fix settings'
-                }}
-            ])
-            if not res or res['Mode'] == 1:
+            res = self.ramses.host._request_input(
+                "Validation Warning",
+                [
+                    {
+                        "id": "W",
+                        "label": "Technical Mismatches found:",
+                        "type": "text",
+                        "default": msg,
+                        "lines": 4,
+                    },
+                    {
+                        "id": "Mode",
+                        "label": "Action:",
+                        "type": "combo",
+                        "options": {
+                            "0": "Continue anyway (Force)",
+                            "1": "Abort and fix settings",
+                        },
+                    },
+                ],
+            )
+            if not res or res["Mode"] == 1:
                 return
 
         if self.ramses.host.updateStatus():
             self.refresh_header()
 
     def on_preview(self, ev):
-        if not self._check_connection(): return
+        if not self._check_connection():
+            return
         self.ramses.host.savePreview()
 
     def on_publish_settings(self, ev):
@@ -1065,8 +1179,9 @@ class RamsesFusionApp:
             self.log(f"Template '{name}' saved to {path}", ram.LogLevel.Info)
 
     def on_setup_scene(self, ev):
-        if not self._check_connection(): return
-        
+        if not self._check_connection():
+            return
+
         project = self._get_project()
         if not project:
             self.log("No active Ramses project found.", ram.LogLevel.Warning)
@@ -1074,11 +1189,11 @@ class RamsesFusionApp:
 
         item = self.current_item
         step = self.current_step
-        
+
         # Determine tech spec provider (Hierarchy: Sequence > Project)
         spec_provider = project
         duration = 5.0
-        
+
         if item and item.itemType() == ram.ItemType.SHOT:
             duration = item.duration()
             seq = item.sequence()
@@ -1092,9 +1207,9 @@ class RamsesFusionApp:
             "framerate": float(spec_provider.framerate()),
             "duration": float(duration),
             "pixelAspectRatio": float(project.pixelAspectRatio()),
-            "aspectRatio": float(spec_provider.aspectRatio())
+            "aspectRatio": float(spec_provider.aspectRatio()),
         }
-            
+
         # 4. Apply directly and refresh UI
         # Note: _setupCurrentFile may return None or True depending on API version
         self.ramses.host._setupCurrentFile(item, step, settings)
