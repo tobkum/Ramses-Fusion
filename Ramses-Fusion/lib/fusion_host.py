@@ -132,6 +132,14 @@ class FusionHost(RamHost):
         # Use a more unique ID to avoid dispatcher conflicts
         win_id = f"RamsesDlg_{int(os.getpid())}_{id(fields)}"
         
+        # Modal behavior: Disable main window if it exists
+        main_win = None
+        if hasattr(self, "app") and hasattr(self.app, "dlg"):
+            main_win = self.app.dlg
+            
+        if main_win:
+            main_win.Enabled = False
+        
         rows = []
         total_height = 80 # Buttons + Margins
         
@@ -166,25 +174,33 @@ class FusionHost(RamHost):
                 elif f['type'] == 'slider': results[f['id']] = int(ctrl.Value)
                 elif f['type'] == 'checkbox': results[f['id']] = bool(ctrl.Checked)
             
-            # Cleanup handlers before exiting
-            dlg.On[win_id].Close = None
-            dlg.On.OkBtn.Clicked = None
-            dlg.On.CancelBtn.Clicked = None
+            # Stop the loop
             disp.ExitLoop()
             
         def on_cancel(ev):
-            dlg.On[win_id].Close = None
-            dlg.On.OkBtn.Clicked = None
-            dlg.On.CancelBtn.Clicked = None
             disp.ExitLoop()
             
+        # Bind handlers
         dlg.On.OkBtn.Clicked = on_ok
         dlg.On.CancelBtn.Clicked = on_cancel
         dlg.On[win_id].Close = on_cancel
         
-        dlg.Show()
-        disp.RunLoop()
-        dlg.Hide()
+        try:
+            dlg.Show()
+            disp.RunLoop()
+        finally:
+            # Cleanup handlers safely
+            try:
+                dlg.On.OkBtn.Clicked = None
+                dlg.On.CancelBtn.Clicked = None
+                dlg.On[win_id].Close = None
+            except Exception:
+                pass
+                
+            dlg.Hide()
+            # Re-enable main window
+            if main_win:
+                main_win.Enabled = True
         
         return results if results else None
 
@@ -349,13 +365,14 @@ class FusionHost(RamHost):
                 self.log("No _FINAL anchor found. Skipping final render.", LogLevel.Warning)
 
             # 2. Perform Comp File Backup (standard Ramses publish)
-            # We save to DST first (the backup)
-            self.comp.Save(dst)
-            # Then save to SRC (the working file) to ensure it's marked clean
-            self.comp.Save(src)
-            self.log(f"Comp backup published to: {dst}", LogLevel.Info)
-
-            return [dst]
+            # The base class publish() already saves the working file (src) before and after.
+            # We only need to save the backup copy (dst) here.
+            # Using _saveAs ensures consistent path handling.
+            if self._saveAs(dst, None, None, -1, "", False):
+                self.log(f"Comp backup published to: {dst}", LogLevel.Info)
+                return [dst]
+            
+            return []
         except Exception as e:
             self.log(f"Publish failed during process: {e}", LogLevel.Critical)
             return []

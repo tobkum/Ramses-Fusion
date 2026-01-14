@@ -26,6 +26,7 @@ class RamsesFusionApp:
 
         # Initialize Host with global fusion object
         self.ramses.host = fusion_host.FusionHost(fusion)
+        self.ramses.host.app = self
 
         self.ui = fu.UIManager
         self.disp = bmd.UIDispatcher(self.ui)
@@ -843,9 +844,13 @@ class RamsesFusionApp:
         dlg.On.CloseSettingsButton.Clicked = close_settings
         dlg.On.SaveSettingsButton.Clicked = save_settings
 
-        dlg.Show()
-        self.disp.RunLoop()
-        dlg.Hide()
+        self.dlg.Enabled = False
+        try:
+            dlg.Show()
+            self.disp.RunLoop()
+        finally:
+            dlg.Hide()
+            self.dlg.Enabled = True
 
     def show_about_window(self, ev):
         win_id = "AboutWin"
@@ -886,14 +891,19 @@ class RamsesFusionApp:
 
         def on_close(ev):
             dlg.On.AboutCloseButton.Clicked = None
-            dlg.On[win_id].Close = None
+            dlg.On[win_id].Close = on_close
             self.disp.ExitLoop()
 
         dlg.On.AboutCloseButton.Clicked = on_close
         dlg.On[win_id].Close = on_close
-        dlg.Show()
-        self.disp.RunLoop()
-        dlg.Hide()
+        
+        self.dlg.Enabled = False
+        try:
+            dlg.Show()
+            self.disp.RunLoop()
+        finally:
+            dlg.Hide()
+            self.dlg.Enabled = True
 
     # --- Handlers ---
 
