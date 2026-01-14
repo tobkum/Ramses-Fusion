@@ -141,8 +141,19 @@ class RamsesFusionApp:
             try:
                 # Get official Ramses paths
                 preview_folder = self.ramses.host.previewPath()
-                # construct a dummy preview filename (ProRes MOV)
-                preview_path = os.path.join(preview_folder, "preview.mov").replace("\\", "/")
+                
+                # Try to construct a proper filename if context is available
+                try:
+                    pub_info = self.ramses.host.publishInfo()
+                    preview_info = pub_info.copy()
+                    preview_info.version = -1
+                    preview_info.state = ""
+                    preview_info.resource = ""
+                    preview_info.extension = "mov"
+                    preview_path = os.path.join(preview_folder, preview_info.fileName()).replace("\\", "/")
+                except:
+                    # Fallback to simple name if info not available yet
+                    preview_path = os.path.join(preview_folder, "preview.mov").replace("\\", "/")
                 
                 # Get publish info for the final saver (ProRes 4444 MOV)
                 publish_path = self.ramses.host.publishFilePath("mov", "").replace("\\", "/")
@@ -231,13 +242,12 @@ class RamsesFusionApp:
         nm.extension = "comp"
         filename = nm.fileName()
         
-        # Use daemon directly to avoid auto-folder creation
-        shot_root = self.ramses.daemonInterface().getPath(shot.uuid(), "RamShot")
-        if not shot_root:
+        # Use API to get the folder path (this ensures correct structure)
+        step_folder = shot.stepFolderPath(step)
+        if not step_folder:
             return None, None
             
-        step_folder = filename.replace(".comp", "")
-        path = os.path.join(shot_root, step_folder, filename).replace("\\", "/")
+        path = os.path.join(step_folder, filename).replace("\\", "/")
         return path, filename
 
     def _sync_render_anchors(self):
@@ -748,11 +758,12 @@ class RamsesFusionApp:
         # 1. Bulk fetch all relevant objects once for maximum performance
         self.log("Fetching shots and statuses...", ram.LogLevel.Info)
         
-        project = self._get_project()
-        all_shots = project.shots() if project else []
-        all_seqs = project.sequences() if project else []
+        # Use getObjects (Bulk with Data) instead of project.shots() (UUID only, leads to N+1 requests)
+        all_shots = self.ramses.daemonInterface().getObjects("RamShot")
+        all_seqs = self.ramses.daemonInterface().getObjects("RamSequence")
         all_statuses = self.ramses.daemonInterface().getObjects("RamStatus")
         
+        project = self._get_project()
         seq_map = {s.uuid(): s.shortName() for s in all_seqs}
         step_uuid = current_step.uuid()
         status_map = {s.get("item"): s for s in all_statuses if s.get("step") == step_uuid}

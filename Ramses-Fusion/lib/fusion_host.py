@@ -204,7 +204,8 @@ class FusionHost(RamHost):
 
         # 2. Construct the final path (Ramses provides the folder and basename)
         # Note: We use .mov as our standard preview format
-        dst = os.path.join(previewFolderPath, previewFileBaseName + ".mov").replace("\\", "/")
+        filename = previewFileBaseName if previewFileBaseName.lower().endswith(".mov") else previewFileBaseName + ".mov"
+        dst = os.path.join(previewFolderPath, filename).replace("\\", "/")
         
         # 3. Armed for render
         self.log(f"Starting preview render to: {dst}", LogLevel.Info)
