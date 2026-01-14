@@ -128,7 +128,10 @@ class RamsesFusionApp:
         item = self.current_item
         step = self.current_step
 
-        if not item:
+        if not item or not item.uuid():
+            path = self.ramses.host.currentFilePath()
+            if path:
+                return "<font color='#cc9900'>External Composition</font><br><font color='#777'>Not in a Ramses Project</font>"
             return "<font color='#777'>No Active Ramses Item</font>"
 
         project = self._get_project()
@@ -431,6 +434,22 @@ class RamsesFusionApp:
                     items["ContextLabel"].Text = self._get_context_text()
                 if "RamsesVersion" in items:
                     items["RamsesVersion"].Text = self._get_footer_text()
+
+                # Toggle Pipeline Buttons
+                item = self.current_item
+                is_pipeline = item is not None and bool(item.uuid())
+                
+                pipeline_buttons = [
+                    "SetupSceneButton", "ImportButton", "ReplaceButton", 
+                    "TemplateButton", "IncrementalSaveButton", "SaveButton", 
+                    "RetrieveButton", "CommentButton", "PreviewButton", 
+                    "UpdateStatusButton", "PubSettingsButton"
+                ]
+                
+                for btn_id in pipeline_buttons:
+                    if btn_id in items:
+                        items[btn_id].Enabled = is_pipeline
+
             except Exception as e:
                 self.log(f"UI Refresh failed: {e}", ram.LogLevel.Debug)
 
@@ -537,6 +556,7 @@ class RamsesFusionApp:
         self.dlg.On.AboutButton.Clicked = self.show_about_window
         self.dlg.On.MainWin.Close = self.on_close
 
+        self.refresh_header()
         self.dlg.Show()
         self.disp.RunLoop()
         self.dlg.Hide()
