@@ -16,7 +16,11 @@ This list tracks planned improvements to elevate the Ramses-Fusion plugin for pr
 - [ ] **Atomic File Operations**
     - Implement transaction-like saves: write to temp file first, then rename to ensure no corruption on crash.
 - [ ] **File Locking / Conflict Detection**
-    - Check if another user has the shot open before saving using Ramses lock API.
+    - [ ] **Mechanism**: "Soft Locking" via hidden sidecar files (`.~filename.comp.lock`) containing User/Machine info.
+    - [ ] **Hooks**:
+        - `on_open`: Check for lock. If exists -> Prompt (Read-Only / Console / Steal).
+        - `on_close`: Release lock.
+    - [ ] **UX**: Visual indicator (🔓/🔒) in header. Heartbeat to prevent stale locks.
 - [ ] **Write Permission Validation**
     - Pre-check write permissions on target directories before attempting render/save/publish actions.
 - [ ] **Internal Metadata Persistence**
@@ -42,6 +46,10 @@ This list tracks planned improvements to elevate the Ramses-Fusion plugin for pr
     - Generator tool for `Text+` node populated with live metadata (Shot, Version, Artist, Date).
 - [ ] **Loader Version Control**
     - Context menu or buttons to "Version Up/Down" selected Loader nodes.
+- [ ] **Notification Webhooks (ChatOps)**
+    - Send "High Signal" events (Publish, Status Change, Render Fail) to Google Chat/Slack.
+    - Use async fire-and-forget to prevent UI lag.
+    - **Goal**: replace "email storms" with targeted channel notifications.
 
 ## Production Compliance
 - [ ] **User Role Permissions**
