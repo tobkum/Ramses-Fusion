@@ -702,7 +702,8 @@ class FusionHost(RamHost):
         if duration <= 0 and item and item.itemType() == ItemType.SHOT:
             try:
                 duration = float(item.duration())
-            except:
+            except (ValueError, TypeError, AttributeError):
+                # Duration may be None or invalid, use default
                 duration = 5.0
 
         # Fallback to a default if still 0

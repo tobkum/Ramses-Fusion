@@ -154,8 +154,9 @@ class RamsesFusionApp:
             for btn_id in self.DB_BUTTONS:
                 if btn_id in items:
                     items[btn_id].Enabled = is_online
-        except Exception:
-            pass
+        except (AttributeError, KeyError) as e:
+            # UI elements may not exist during window transitions
+            self.log(f"UI state update skipped: {e}", ram.LogLevel.Debug)
 
     def _check_connection(self, silent=False):
         """Checks if Ramses Daemon is online and shows a dialog if not."""
@@ -237,15 +238,15 @@ class RamsesFusionApp:
             path = shot.stepFilePath(step=step, extension="comp")
             if path and os.path.exists(path):
                 return path, True
-        except Exception:
-            pass
+        except (AttributeError, TypeError) as e:
+            self.log(f"Could not resolve existing path for shot: {e}", ram.LogLevel.Debug)
             
         # 2. Predict path
         folder = ""
         try:
             folder = shot.stepFolderPath(step)
-        except Exception:
-            pass
+        except (AttributeError, TypeError) as e:
+            self.log(f"Could not resolve step folder: {e}", ram.LogLevel.Debug)
 
         if not folder:
             return "", False
@@ -453,8 +454,8 @@ class RamsesFusionApp:
                 self._last_synced_path = current_path
             finally:
                 comp.Unlock()
-        except Exception:
-            pass
+        except (AttributeError, RuntimeError) as e:
+            self.log(f"Render anchor sync failed: {e}", ram.LogLevel.Debug)
 
     def refresh_header(self, force_full=False):
         """Updates the context label and footer with current info."""
@@ -478,8 +479,8 @@ class RamsesFusionApp:
 
                 # Sync Savers before updating UI (Optimized with path gating)
                 self._sync_render_anchors()
-            except Exception:
-                pass
+            except (AttributeError, RuntimeError) as e:
+                self.log(f"Header refresh error: {e}", ram.LogLevel.Debug)
 
         # Update UI based on the determined status
         self._update_ui_state(is_online)
@@ -998,7 +999,7 @@ class RamsesFusionApp:
 
         def on_close(ev):
             dlg.On.AboutCloseButton.Clicked = None
-            dlg.On[win_id].Close = on_close
+            dlg.On[win_id].Close = None
             self.disp.ExitLoop()
 
         dlg.On.AboutCloseButton.Clicked = on_close
@@ -1169,7 +1170,7 @@ class RamsesFusionApp:
                     )
 
                     if exists:
-                        state_name = status.state().name() if status else "WIP"
+                        state_name = status.state().name() if status and status.state() else "WIP"
                         label = f"{seq_name} / {shot.shortName()} [{state_name}]"
                     else:
                         label = f"{seq_name} / {shot.shortName()} [EMPTY - Create New]"
