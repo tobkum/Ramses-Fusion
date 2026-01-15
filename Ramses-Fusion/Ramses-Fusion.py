@@ -211,6 +211,34 @@ class RamsesFusionApp:
     def _get_footer_text(self):
         return f"<font color='#555'>User: {self._get_user_name()} | Ramses API {self.settings.version}</font>"
 
+    def _resolve_shot_path(self, shot, step):
+        """
+        Returns the path to the shot's comp file.
+        If it exists, returns the actual path.
+        If not, predicts the path based on naming conventions.
+        
+        Returns: (path, exists)
+        """
+        # 1. Try existing file
+        path = shot.stepFilePath(step=step, extension="comp")
+        if path:
+            return path, True
+            
+        # 2. Predict path
+        folder = shot.stepFolderPath(step)
+        if not folder:
+            return "", False
+            
+        fn_info = ram.RamFileInfo()
+        fn_info.project = shot.projectShortName()
+        fn_info.ramType = ram.ItemType.SHOT
+        fn_info.shortName = shot.shortName()
+        fn_info.step = step.shortName()
+        fn_info.extension = "comp"
+        
+        predicted_path = os.path.join(folder, fn_info.fileName())
+        return predicted_path, False
+
     def _create_render_anchors(self):
         """Creates _PREVIEW and _FINAL Saver nodes at calculated grid coordinates."""
         comp = self.ramses.host.comp
@@ -1101,21 +1129,12 @@ class RamsesFusionApp:
                         if state_map.get(st_uuid) in ["NO", "STB"]:
                             continue
 
-                    # Resolve expected path
-                    expected_path = shot.stepFilePath(
-                        step=selected_step, extension="comp"
-                    )
-                    exists = bool(expected_path)
-                    if not exists:
-                        # Construct a virtual path for non-existent files
-                        folder = shot.stepFolderPath(selected_step)
-                        fn_info = ram.RamFileInfo()
-                        fn_info.project = shot.projectShortName()
-                        fn_info.ramType = ram.ItemType.SHOT
-                        fn_info.shortName = shot.shortName()
-                        fn_info.step = selected_step.shortName()
-                        fn_info.extension = "comp"
-                        expected_path = os.path.join(folder, fn_info.fileName())
+                    # Resolve expected path using helper
+                    try:
+                        expected_path, exists = self._resolve_shot_path(shot, selected_step)
+                    except Exception as e:
+                        print(f"Error resolving path for shot {shot.name()}: {e}")
+                        continue
 
                     seq_name = seq_map.get(
                         str(ram.RamObject.getUuid(shot.get("sequence"))), "None"
