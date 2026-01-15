@@ -81,10 +81,15 @@ class FusionHost(RamHost):
         }
 
         if item and item.itemType() == ItemType.SHOT:
-            settings['duration'] = float(item.duration())
             # Use the sequence object to benefit from API override logic
             from ramses import RamShot
             shot = item if isinstance(item, RamShot) else RamShot(item.uuid())
+            
+            settings['duration'] = float(shot.duration())
+            # Store the actual frame count from Ramses (calculated with Project FPS)
+            # to avoid rounding errors or shifts when Sequence FPS overrides Project FPS.
+            settings['frames'] = int(shot.frames())
+
             seq = shot.sequence()
             if seq:
                 settings['width'] = int(seq.width())
@@ -523,7 +528,13 @@ class FusionHost(RamHost):
         if duration <= 0:
             duration = 5.0
             
-        total_frames = int(round(duration * fps))
+        # If we have an explicit frame count from Ramses, use it.
+        # Otherwise calculate from duration and (potentially overridden) FPS.
+        if setupOptions.get("frames", 0) > 0:
+            total_frames = int(setupOptions["frames"])
+        else:
+            total_frames = int(round(duration * fps))
+
         start = RAM_SETTINGS.userSettings.get("compStartFrame", 1001)
         end = start + total_frames - 1
         
