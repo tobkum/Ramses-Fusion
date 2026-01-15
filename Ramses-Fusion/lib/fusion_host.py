@@ -86,9 +86,9 @@ class FusionHost(RamHost):
             shot = item if isinstance(item, RamShot) else RamShot(item.uuid())
             
             settings['duration'] = float(shot.duration())
-            # Store the actual frame count from Ramses (calculated with Project FPS)
-            # to avoid rounding errors or shifts when Sequence FPS overrides Project FPS.
-            settings['frames'] = int(shot.frames())
+            # Calculate frames manually using Project FPS (currently in settings['framerate'])
+            # We use round() to avoid truncation errors present in the API's shot.frames() which uses int()
+            settings['frames'] = int(round(settings['duration'] * settings['framerate']))
 
             seq = shot.sequence()
             if seq:
