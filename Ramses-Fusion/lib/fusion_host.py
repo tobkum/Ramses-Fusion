@@ -400,8 +400,7 @@ class FusionHost(RamHost):
         self.log(f"Starting preview render to: {dst}", LogLevel.Info)
         preview_node.Clip[1] = dst
         # Ensure ProRes 422 settings
-        preview_node.SetInput("OutputFormat", "QuickTimeMovies", 0)
-        preview_node.SetInput("QuickTimeMovies.Compression", "Apple ProRes 422_apcn", 0)
+        self.apply_render_preset(preview_node, "preview")
         preview_node.SetAttrs({"TOOLB_PassThrough": False})
 
         try:
@@ -689,6 +688,20 @@ class FusionHost(RamHost):
         if not res: return "cancel"
         modes = {0: "save", 1: "discard", 2: "cancel"}
         return modes.get(res['Mode'], "cancel")
+
+    def apply_render_preset(self, node, preset_name: str = "preview") -> None:
+        """
+        Applies standard pipeline settings (codec, format) to a Saver node.
+        Centralizes the logic so it can be changed in one place.
+        """
+        # Future: This will fetch config from self.ramses.settings
+        node.SetInput("OutputFormat", "QuickTimeMovies", 0)
+        
+        if preset_name == "preview":
+            node.SetInput("QuickTimeMovies.Compression", "Apple ProRes 422_apcn", 0)
+        else:
+            # Final / default
+            node.SetInput("QuickTimeMovies.Compression", "Apple ProRes 4444_ap4h", 0)
 
     def _setupCurrentFile(self, item: RamItem, step: RamStep, setupOptions: dict) -> bool:
         if not self.comp:

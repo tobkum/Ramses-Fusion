@@ -326,24 +326,14 @@ class RamsesFusionApp:
                     if name == "_PREVIEW":
                         if preview_path:
                             node.Clip[1] = preview_path
-                        node.SetInput("OutputFormat", "QuickTimeMovies", 0)
-                        node.SetInput(
-                            "QuickTimeMovies.Compression",
-                            "Apple ProRes 422_apcn",
-                            0,
-                        )
+                        self.ramses.host.apply_render_preset(node, "preview")
                         node.Comments[1] = (
                             "Preview renders will be saved here. Connect your output."
                         )
                     else:
                         if publish_path:
                             node.Clip[1] = publish_path
-                        node.SetInput("OutputFormat", "QuickTimeMovies", 0)
-                        node.SetInput(
-                            "QuickTimeMovies.Compression",
-                            "Apple ProRes 4444_ap4h",
-                            0,
-                        )
+                        self.ramses.host.apply_render_preset(node, "final")
                         node.Comments[1] = (
                             "Final renders will be saved here. Connect your output."
                         )
@@ -451,19 +441,13 @@ class RamsesFusionApp:
                 if preview_node:
                     if preview_node.Clip[1] != preview_path:
                         preview_node.Clip[1] = preview_path
-                    preview_node.SetInput("OutputFormat", "QuickTimeMovies", 0)
-                    preview_node.SetInput(
-                        "QuickTimeMovies.Compression", "Apple ProRes 422_apcn", 0
-                    )
+                    self.ramses.host.apply_render_preset(preview_node, "preview")
 
                 final_node = comp.FindTool("_FINAL")
                 if final_node:
                     if final_node.Clip[1] != final_path:
                         final_node.Clip[1] = final_path
-                    final_node.SetInput("OutputFormat", "QuickTimeMovies", 0)
-                    final_node.SetInput(
-                        "QuickTimeMovies.Compression", "Apple ProRes 4444_ap4h", 0
-                    )
+                    self.ramses.host.apply_render_preset(final_node, "final")
 
                 self._last_synced_path = current_path
             finally:
