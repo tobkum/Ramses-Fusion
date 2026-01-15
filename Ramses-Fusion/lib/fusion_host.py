@@ -298,9 +298,25 @@ class FusionHost(RamHost):
         
         # Get start frame for alignment
         start_frame = RAM_SETTINGS.userSettings.get("compStartFrame", 1001)
-        
-        for path in filePaths:
-            loader = self.comp.AddTool("Loader", -32768, -32768)
+
+        # Determine Reference Position (Grid Units)
+        flow = self.comp.CurrentFrame.FlowView
+        start_x, start_y = 0, 0
+
+        active = self.comp.ActiveTool
+        if active and flow:
+            pos = flow.GetPosTable(active)
+            # Fusion returns {1.0: x, 2.0: y} in Grid Units
+            if pos:
+                start_x = pos[1]
+                start_y = pos[2] + 1 # Start one unit below active tool
+
+        for i, path in enumerate(filePaths):
+            # Stagger horizontally
+            target_x = start_x + i
+            target_y = start_y
+            
+            loader = self.comp.AddTool("Loader", target_x, target_y)
             if loader:
                 # Explicitly set the clip path with forward slashes for cross-platform safety
                 loader.Clip[1] = self.normalizePath(path)
