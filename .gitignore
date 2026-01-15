@@ -1,2 +1,39 @@
-/.fusion_typings
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.manifest
+.env
+venv/
+env/
+
+# --- Fusion / VFX ---
+*.autosave
+*.last
+*.settings
+.fusion_typings
+Ramses-Fusion/icons/cache/
+_versions/
+_preview/
+_render/
+
+# --- IDEs ---
+.idea/
+.vscode/
+*.sublime-project
+*.sublime-workspace
+
+# --- OS ---
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# --- Documentation ---
+site/
+mkdocs.yml
+
+# --- Temporary / User Specific ---
+*.log
+*.tmp
 **/examples
