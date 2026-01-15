@@ -51,6 +51,18 @@ class FusionHost(RamHost):
         prefix = self.LOG_PREFIXES.get(level, "LOG")
         print(f"[Ramses][{prefix}] {str(message)}")
 
+    @staticmethod
+    def _sanitizeNodeName(name: str) -> str:
+        """Ensures a string is a valid Fusion node name (alphanumeric, starts with letter)."""
+        if not name:
+            return ""
+        # Remove invalid chars (keep only alphanumeric and underscore)
+        safe_name = "".join([c if c.isalnum() else "_" for c in name])
+        # Fusion nodes cannot start with a digit
+        if safe_name and safe_name[0].isdigit():
+            safe_name = "R_" + safe_name
+        return safe_name
+
     def collectItemSettings(self, item: RamItem) -> dict:
         """
         Optimized version of base class __collectItemSettings.
@@ -290,16 +302,12 @@ class FusionHost(RamHost):
                 
                 # Smart Naming with safety fallback
                 if item:
-                    name = f"{item.shortName()}_{step.shortName()}" if step else item.shortName()
+                    raw_name = f"{item.shortName()}_{step.shortName()}" if step else item.shortName()
                 else:
                     # Fallback to sanitized base filename
-                    base = os.path.splitext(os.path.basename(path))[0]
-                    # Sanitize: Fusion node names can't have spaces or dots
-                    name = "".join([c if c.isalnum() else "_" for c in base])
+                    raw_name = os.path.splitext(os.path.basename(path))[0]
                 
-                # Pipeline Safety: Ensure node name starts with a letter to avoid expression bugs
-                if name and name[0].isdigit():
-                    name = "R_" + name
+                name = self._sanitizeNodeName(raw_name)
 
                 if name:
                     loader.SetAttrs({"TOOLS_Name": name})
@@ -433,11 +441,8 @@ class FusionHost(RamHost):
             active.Clip[1] = self.normalizePath(filePaths[0])
             # Rename if it was a generic name
             if "Loader" in active.GetAttrs()["TOOLS_Name"]:
-                name = f"{item.shortName()}_{step.shortName()}" if step else item.shortName()
-                
-                # Pipeline Safety: Ensure node name starts with a letter
-                if name and name[0].isdigit():
-                    name = "R_" + name
+                raw_name = f"{item.shortName()}_{step.shortName()}" if step else item.shortName()
+                name = self._sanitizeNodeName(raw_name)
                     
                 active.SetAttrs({"TOOLS_Name": name})
             return True

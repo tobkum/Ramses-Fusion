@@ -21,6 +21,23 @@ import fusion_host
 
 
 class RamsesFusionApp:
+    # Button Groups for UI State Management
+    PIPELINE_BUTTONS = [
+        "SetupSceneButton",
+        "ImportButton",
+        "ReplaceButton",
+        "TemplateButton",
+        "IncrementalSaveButton",
+        "SaveButton",
+        "RetrieveButton",
+        "CommentButton",
+        "PreviewButton",
+        "UpdateStatusButton",
+        "PubSettingsButton",
+    ]
+    
+    DB_BUTTONS = ["SwitchShotButton", "OpenButton"]
+
     def __init__(self):
         self.ramses = ram.Ramses.instance()
         self.settings = ram.RamSettings.instance()
@@ -129,26 +146,12 @@ class RamsesFusionApp:
             is_pipeline = item is not None and bool(item.uuid())
 
             # Group 1: Pipeline Buttons (Require Connection AND valid Ramses Item)
-            pipeline_buttons = [
-                "SetupSceneButton",
-                "ImportButton",
-                "ReplaceButton",
-                "TemplateButton",
-                "IncrementalSaveButton",
-                "SaveButton",
-                "RetrieveButton",
-                "CommentButton",
-                "PreviewButton",
-                "UpdateStatusButton",
-                "PubSettingsButton",
-            ]
-            for btn_id in pipeline_buttons:
+            for btn_id in self.PIPELINE_BUTTONS:
                 if btn_id in items:
                     items[btn_id].Enabled = is_online and is_pipeline
 
             # Group 2: DB Buttons (Require Connection, but not necessarily an Item)
-            db_buttons = ["SwitchShotButton", "OpenButton"]
-            for btn_id in db_buttons:
+            for btn_id in self.DB_BUTTONS:
                 if btn_id in items:
                     items[btn_id].Enabled = is_online
         except Exception:
@@ -1302,7 +1305,7 @@ class RamsesFusionApp:
         dlg.On.StepCombo.CurrentIndexChanged = (
             update_shots  # Changing step refreshes shots
         )
-        # dlg.On.ShotCombo.CurrentIndexChanged = None # Unbound to prevent loop during population
+        # Unbound to prevent loop during population
 
         results = {"confirmed": False}
 
