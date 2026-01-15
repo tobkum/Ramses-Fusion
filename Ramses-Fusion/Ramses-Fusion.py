@@ -156,9 +156,16 @@ class RamsesFusionApp:
 
     def _check_connection(self, silent=False):
         """Checks if Ramses Daemon is online and shows a dialog if not."""
-        # Force a real ping to check status (bypass cached flag)
-        if not self.ramses.daemonInterface().online():
+        # Check if the daemon is actually responding
+        is_responding = self.ramses.daemonInterface().online()
+
+        if not is_responding:
+            # Daemon is definitely down. Reset state and try to start/connect.
             self.ramses.disconnect()
+            self.ramses.connect()
+        elif not self.ramses.online():
+            # Daemon is up, but we are marked offline.
+            # Call connect() to verify user and update the internal flag.
             self.ramses.connect()
 
         if not self.ramses.online():
