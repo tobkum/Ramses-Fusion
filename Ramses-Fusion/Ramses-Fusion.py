@@ -465,10 +465,17 @@ class RamsesFusionApp:
         self._update_ui_state(is_online)
 
     def show_main_window(self):
+        # 1. Check for existing window to prevent duplicates
+        existing = self.ui.FindWindow("RamsesFusionMainWin")
+        if existing:
+            existing.Show()
+            existing.Raise()
+            return
+
         self.dlg = self.disp.AddWindow(
             {
                 "WindowTitle": "Ramses-Fusion",
-                "ID": "MainWin",
+                "ID": "RamsesFusionMainWin",
                 "Geometry": [200, 200, 280, 825],
             },
             [
@@ -567,12 +574,13 @@ class RamsesFusionApp:
         self.dlg.On.PubSettingsButton.Clicked = self.on_publish_settings
         self.dlg.On.SettingsButton.Clicked = self.show_settings_window
         self.dlg.On.AboutButton.Clicked = self.show_about_window
-        self.dlg.On.MainWin.Close = self.on_close
+        self.dlg.On.RamsesFusionMainWin.Close = self.on_close
 
         self.refresh_header()
         self.dlg.Show()
         self.disp.RunLoop()
         self.dlg.Hide()
+        self.dlg = None # Cleanup reference after exit
 
     def _build_project_group(self):
         bg_color = "#2a3442"  # Very Dark Desaturated Blue
