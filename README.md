@@ -23,7 +23,7 @@ Standardize your working environment with a single click. The **Setup Scene** fu
 
 ### 📦 Asset & Version Management
 Manage the flow of data into your composition without browsing folders.
-* **Smart Importing:** Bring in published renders or assets with automated node naming and frame-start alignment.
+* **Smart Importing:** Bring in published renders or assets with collision-safe node naming and automated frame-start alignment.
 * **Version Swapping:** Replace existing Loader nodes with new versions or different assets while maintaining all downstream node connections.
 * **Retrieval:** Instantly access and restore previous versions of your composition directly from the versioning archive.
 
@@ -31,9 +31,9 @@ Manage the flow of data into your composition without browsing folders.
 
 The tool acts as a gatekeeper to ensure only technically correct data moves down the pipeline.
 
-* **Mismatch Detection:** Before publishing, the tool validates your composition's resolution, FPS, and frame range against the database, warning you of any discrepancies.
+* **Mismatch Detection:** Before publishing, the tool validates your composition's resolution, FPS, and frame range against the database, including any sequence-level overrides, warning you of any discrepancies.
 
-* **Automated Publishing:** Handles the archival of the `.comp` file and the rendering of master files in one step.
+* **Automated Publishing:** Orchestrates the archival of the `.comp` file and the rendering of master files. The process is atomic: if a render fails or is cancelled, the publish is aborted to ensure the database and the server stay perfectly in sync.
 
 * **Metadata Logging:** Every save and publish can be accompanied by comments that are logged directly into the Ramses database for production tracking.
 
