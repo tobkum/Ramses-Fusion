@@ -81,11 +81,13 @@ class RamsesFusionApp:
 
     @property
     def current_item(self) -> Optional[ram.RamItem]:
+        """Returns the current Ramses item from the active composition."""
         self._update_context()
         return self._item_cache
 
     @property
     def current_step(self) -> Optional[ram.RamStep]:
+        """Returns the current pipeline step from the active composition."""
         self._update_context()
         return self._step_cache
 
@@ -203,6 +205,7 @@ class RamsesFusionApp:
         return True
 
     def _get_context_text(self) -> str:
+        """Builds HTML-formatted context string for the UI header."""
         item = self.current_item
         step = self.current_step
 
@@ -223,6 +226,7 @@ class RamsesFusionApp:
         self.ramses.host._log(message, level)
 
     def _get_footer_text(self) -> str:
+        """Builds HTML-formatted footer string with user and version info."""
         return f"<font color='#555'>User: {self._get_user_name()} | Ramses API {self.settings.version}</font>"
 
     def _build_file_info(self, item_type: int, step: ram.RamStep, short_name: str, extension: str) -> ram.RamFileInfo:
@@ -495,7 +499,8 @@ class RamsesFusionApp:
         # Update UI based on the determined status
         self._update_ui_state(is_online)
 
-    def show_main_window(self):
+    def show_main_window(self) -> None:
+        """Creates and displays the main Ramses-Fusion UI window."""
         # 1. Check for existing window to prevent duplicates
         existing = self.ui.FindWindow("RamsesFusionMainWin")
         if existing:
@@ -614,6 +619,7 @@ class RamsesFusionApp:
         self.dlg = None # Cleanup reference after exit
 
     def _build_project_group(self):
+        """Builds the 'Project & Scene' button group for the UI."""
         bg_color = "#2a3442"  # Very Dark Desaturated Blue
         return self.ui.VGroup(
             [
@@ -656,6 +662,7 @@ class RamsesFusionApp:
         )
 
     def _build_pipeline_group(self):
+        """Builds the 'Assets & Tools' button group for the UI."""
         bg_color = "#342a42"  # Very Dark Desaturated Purple
         return self.ui.VGroup(
             [
@@ -691,6 +698,7 @@ class RamsesFusionApp:
         )
 
     def _build_working_group(self):
+        """Builds the 'Saving & Iteration' button group for the UI."""
         bg_color = "#2a423d"  # Very Dark Desaturated Teal
         return self.ui.VGroup(
             [
@@ -733,6 +741,7 @@ class RamsesFusionApp:
         )
 
     def _build_publish_group(self):
+        """Builds the 'Review & Publish' button group for the UI."""
         bg_color = "#2a422a"  # Very Dark Desaturated Green
         return self.ui.VGroup(
             [
@@ -761,6 +770,7 @@ class RamsesFusionApp:
         )
 
     def _build_settings_group(self):
+        """Builds the 'Settings & Info' button group for the UI."""
         bg_color = "#333333"  # Dark Grey
         return self.ui.VGroup(
             [
@@ -845,7 +855,8 @@ class RamsesFusionApp:
             }
         )
 
-    def show_settings_window(self, ev):
+    def show_settings_window(self, ev) -> None:
+        """Opens the plugin settings dialog for configuring Ramses paths and ports."""
         win_id = "SettingsWin"
         dlg = self.disp.AddWindow(
             {
@@ -950,7 +961,8 @@ class RamsesFusionApp:
             dlg.Hide()
             self.dlg.Enabled = True
 
-    def show_about_window(self, ev):
+    def show_about_window(self, ev) -> None:
+        """Opens the About dialog with plugin and developer information."""
         win_id = "AboutWin"
         dlg = self.disp.AddWindow(
             {
@@ -1025,7 +1037,8 @@ class RamsesFusionApp:
 
     # --- Handlers ---
 
-    def on_run_ramses(self, ev):
+    def on_run_ramses(self, ev) -> None:
+        """Launches the Ramses Client application."""
         self.ramses.showClient()
 
     @requires_connection
@@ -1452,15 +1465,18 @@ class RamsesFusionApp:
                         self.refresh_header()
 
     @requires_connection
-    def on_import(self, ev):
+    def on_import(self, ev) -> None:
+        """Opens the asset import dialog to add Loaders to the composition."""
         self.ramses.host.importItem()
 
     @requires_connection
-    def on_replace(self, ev):
+    def on_replace(self, ev) -> None:
+        """Replaces the selected Loader node with a different asset or version."""
         self.ramses.host.replaceItem()
 
     @requires_connection
-    def on_save(self, ev):
+    def on_save(self, ev) -> None:
+        """Saves the current composition, syncing render anchors first."""
         # Ensure anchors are synced before saving
         self._sync_render_anchors()
 
@@ -1470,8 +1486,8 @@ class RamsesFusionApp:
             self.refresh_header()
 
     @requires_connection
-    def on_incremental_save(self, ev):
-        # Ensure anchors are synced before saving
+    def on_incremental_save(self, ev) -> None:
+        """Creates a new version of the composition (e.g., v001 -> v002)."""
         self._sync_render_anchors()
 
         has_project = self._get_project() is not None
@@ -1479,7 +1495,8 @@ class RamsesFusionApp:
             self.refresh_header()
 
     @requires_connection
-    def on_comment(self, ev):
+    def on_comment(self, ev) -> None:
+        """Opens dialog to add a comment to the current version in the database."""
         res = self.ramses.host._request_input(
             "Add Comment",
             [
@@ -1508,8 +1525,8 @@ class RamsesFusionApp:
                 self.refresh_header()
 
     @requires_connection
-    def on_update_status(self, ev):
-        # Pre-publish Validation
+    def on_update_status(self, ev) -> None:
+        """Opens the status update dialog with optional publish workflow."""
         is_valid, msg = self._validate_publish(check_preview=False, check_final=True)
         if not is_valid:
             res = self.ramses.host._request_input(
@@ -1540,8 +1557,8 @@ class RamsesFusionApp:
             self.refresh_header()
 
     @requires_connection
-    def on_preview(self, ev):
-        # Pre-Preview Validation
+    def on_preview(self, ev) -> None:
+        """Renders a preview using the _PREVIEW Saver anchor."""
         is_valid, msg = self._validate_publish(check_preview=True, check_final=False)
         if not is_valid:
             res = self.ramses.host._request_input(
@@ -1570,7 +1587,8 @@ class RamsesFusionApp:
 
         self.ramses.host.savePreview()
 
-    def on_publish_settings(self, ev):
+    def on_publish_settings(self, ev) -> None:
+        """Opens editor for the step's YAML publish configuration."""
         step = self._require_step()
         if not step:
             return
@@ -1592,7 +1610,8 @@ class RamsesFusionApp:
             step.setPublishSettings(res["YAML"])
 
     @requires_connection
-    def on_save_template(self, ev):
+    def on_save_template(self, ev) -> None:
+        """Saves the current composition as a reusable template for this step."""
         step = self._require_step()
         if not step:
             return
@@ -1630,7 +1649,8 @@ class RamsesFusionApp:
             self.log(f"Template '{name}' saved to {path}", ram.LogLevel.Info)
 
     @requires_connection
-    def on_setup_scene(self, ev):
+    def on_setup_scene(self, ev) -> None:
+        """Configures comp resolution, FPS, and frame range from Ramses database."""
         item = self.current_item
         step = self.current_step
 
@@ -1649,15 +1669,18 @@ class RamsesFusionApp:
         self.refresh_header()
 
     @requires_connection
-    def on_open(self, ev):
+    def on_open(self, ev) -> None:
+        """Opens a Ramses composition via file browser."""
         if self.ramses.host.open():
             self.refresh_header()
 
-    def on_retrieve(self, ev):
+    def on_retrieve(self, ev) -> None:
+        """Opens a previous version of the composition from the versions folder."""
         if self.ramses.host.restoreVersion():
             self.refresh_header()
 
-    def on_close(self, ev):
+    def on_close(self, ev) -> None:
+        """Closes the main Ramses-Fusion window."""
         self.disp.ExitLoop()
 
 
