@@ -104,25 +104,80 @@ class RamsesFusionApp:
             return None
         return step
 
-    def _check_connection(self):
+    def _update_ui_state(self, is_online):
+        """Updates the UI elements (Header, Buttons) based on connection status."""
+        if not self.dlg:
+            return
+
+        try:
+            items = self.dlg.GetItems()
+            
+            # 1. Update Context Header
+            if "ContextLabel" in items:
+                if is_online:
+                    items["ContextLabel"].Text = self._get_context_text()
+                else:
+                    items["ContextLabel"].Text = "<font color='#ff4444'><b>CONNECTION ERROR</b></font><br><font color='#999'>Ramses Client is offline</font>"
+            
+            if "RamsesVersion" in items:
+                items["RamsesVersion"].Text = self._get_footer_text()
+
+            # 2. Toggle Buttons
+            # We need to re-fetch the item ONLY if online to determine pipeline status
+            # If offline, item is None, so pipeline buttons are disabled anyway.
+            item = self.current_item if is_online else None
+            is_pipeline = item is not None and bool(item.uuid())
+
+            # Group 1: Pipeline Buttons (Require Connection AND valid Ramses Item)
+            pipeline_buttons = [
+                "SetupSceneButton",
+                "ImportButton",
+                "ReplaceButton",
+                "TemplateButton",
+                "IncrementalSaveButton",
+                "SaveButton",
+                "RetrieveButton",
+                "CommentButton",
+                "PreviewButton",
+                "UpdateStatusButton",
+                "PubSettingsButton",
+            ]
+            for btn_id in pipeline_buttons:
+                if btn_id in items:
+                    items[btn_id].Enabled = is_online and is_pipeline
+
+            # Group 2: DB Buttons (Require Connection, but not necessarily an Item)
+            db_buttons = ["SwitchShotButton", "OpenButton"]
+            for btn_id in db_buttons:
+                if btn_id in items:
+                    items[btn_id].Enabled = is_online
+        except Exception:
+            pass
+
+    def _check_connection(self, silent=False):
         """Checks if Ramses Daemon is online and shows a dialog if not."""
-        # If marked offline, try to reconnect first
-        if not self.ramses.online():
+        # Force a real ping to check status (bypass cached flag)
+        if not self.ramses.daemonInterface().online():
+            self.ramses.disconnect()
             self.ramses.connect()
 
         if not self.ramses.online():
-            self.ramses.host._request_input(
-                "Ramses Connection Error",
-                [
-                    {
-                        "id": "E",
-                        "label": "",
-                        "type": "text",
-                        "default": "Could not reach the Ramses Client. \n\nPlease make sure Ramses is running and you are logged in.",
-                        "lines": 3,
-                    }
-                ],
-            )
+            # Force UI update to offline state immediately
+            self._update_ui_state(False)
+
+            if not silent:
+                self.ramses.host._request_input(
+                    "Ramses Connection Error",
+                    [
+                        {
+                            "id": "E",
+                            "label": "",
+                            "type": "text",
+                            "default": "Could not reach the Ramses Client. \n\nPlease make sure Ramses is running and you are logged in.",
+                            "lines": 3,
+                        }
+                    ],
+                )
             return False
         return True
 
@@ -348,10 +403,9 @@ class RamsesFusionApp:
 
     def refresh_header(self, force_full=False):
         """Updates the context label and footer with current info."""
-        if not self._check_connection():
-            return
+        is_online = self._check_connection(silent=True)
 
-        if self.dlg:
+        if is_online:
             try:
                 # Force cache refresh for project and user only if requested
                 if force_full:
@@ -369,37 +423,11 @@ class RamsesFusionApp:
 
                 # Sync Savers before updating UI (Optimized with path gating)
                 self._sync_render_anchors()
-
-                items = self.dlg.GetItems()
-                if "ContextLabel" in items:
-                    items["ContextLabel"].Text = self._get_context_text()
-                if "RamsesVersion" in items:
-                    items["RamsesVersion"].Text = self._get_footer_text()
-
-                # Toggle Pipeline Buttons
-                item = self.current_item
-                is_pipeline = item is not None and bool(item.uuid())
-
-                pipeline_buttons = [
-                    "SetupSceneButton",
-                    "ImportButton",
-                    "ReplaceButton",
-                    "TemplateButton",
-                    "IncrementalSaveButton",
-                    "SaveButton",
-                    "RetrieveButton",
-                    "CommentButton",
-                    "PreviewButton",
-                    "UpdateStatusButton",
-                    "PubSettingsButton",
-                ]
-
-                for btn_id in pipeline_buttons:
-                    if btn_id in items:
-                        items[btn_id].Enabled = is_pipeline
-
             except Exception:
                 pass
+
+        # Update UI based on the determined status
+        self._update_ui_state(is_online)
 
     def show_main_window(self):
         self.dlg = self.disp.AddWindow(
