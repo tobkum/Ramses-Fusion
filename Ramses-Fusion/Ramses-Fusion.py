@@ -20,6 +20,15 @@ import ramses as ram
 import fusion_host
 
 
+def requires_connection(func):
+    """Decorator that ensures Ramses connection before handler execution."""
+    def wrapper(self, ev):
+        if not self._check_connection():
+            return
+        return func(self, ev)
+    return wrapper
+
+
 class RamsesFusionApp:
     # Button Groups for UI State Management
     PIPELINE_BUTTONS = [
@@ -1018,11 +1027,9 @@ class RamsesFusionApp:
     def on_run_ramses(self, ev):
         self.ramses.showClient()
 
+    @requires_connection
     def on_switch_shot(self, ev):
         """Interactive one-page wizard for switching/creating shots with cascading dropdowns."""
-        if not self._check_connection():
-            return
-
         ui = self.ui
         disp = self.disp
         host = self.ramses.host
@@ -1443,20 +1450,16 @@ class RamsesFusionApp:
                     if host.open(shot_data["path"]):
                         self.refresh_header()
 
+    @requires_connection
     def on_import(self, ev):
-        if not self._check_connection():
-            return
         self.ramses.host.importItem()
 
+    @requires_connection
     def on_replace(self, ev):
-        if not self._check_connection():
-            return
         self.ramses.host.replaceItem()
 
+    @requires_connection
     def on_save(self, ev):
-        if not self._check_connection():
-            return
-
         # Ensure anchors are synced before saving
         self._sync_render_anchors()
 
@@ -1465,10 +1468,8 @@ class RamsesFusionApp:
         if self.ramses.host.save(setupFile=has_project):
             self.refresh_header()
 
+    @requires_connection
     def on_incremental_save(self, ev):
-        if not self._check_connection():
-            return
-
         # Ensure anchors are synced before saving
         self._sync_render_anchors()
 
@@ -1476,9 +1477,8 @@ class RamsesFusionApp:
         if self.ramses.host.save(incremental=True, setupFile=has_project):
             self.refresh_header()
 
+    @requires_connection
     def on_comment(self, ev):
-        if not self._check_connection():
-            return
         res = self.ramses.host._request_input(
             "Add Comment",
             [
@@ -1506,10 +1506,8 @@ class RamsesFusionApp:
 
                 self.refresh_header()
 
+    @requires_connection
     def on_update_status(self, ev):
-        if not self._check_connection():
-            return
-
         # Pre-publish Validation
         is_valid, msg = self._validate_publish(check_preview=False, check_final=True)
         if not is_valid:
@@ -1540,10 +1538,8 @@ class RamsesFusionApp:
         if self.ramses.host.updateStatus():
             self.refresh_header()
 
+    @requires_connection
     def on_preview(self, ev):
-        if not self._check_connection():
-            return
-
         # Pre-Preview Validation
         is_valid, msg = self._validate_publish(check_preview=True, check_final=False)
         if not is_valid:
@@ -1594,10 +1590,8 @@ class RamsesFusionApp:
         if res:
             step.setPublishSettings(res["YAML"])
 
+    @requires_connection
     def on_save_template(self, ev):
-        if not self._check_connection():
-            return
-            
         step = self._require_step()
         if not step:
             return
@@ -1634,10 +1628,8 @@ class RamsesFusionApp:
             comp.Save(self.ramses.host.normalizePath(path))
             self.log(f"Template '{name}' saved to {path}", ram.LogLevel.Info)
 
+    @requires_connection
     def on_setup_scene(self, ev):
-        if not self._check_connection():
-            return
-
         item = self.current_item
         step = self.current_step
 
@@ -1655,9 +1647,8 @@ class RamsesFusionApp:
         self._create_render_anchors()
         self.refresh_header()
 
+    @requires_connection
     def on_open(self, ev):
-        if not self._check_connection():
-            return
         if self.ramses.host.open():
             self.refresh_header()
 
