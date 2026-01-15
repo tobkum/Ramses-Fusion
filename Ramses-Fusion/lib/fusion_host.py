@@ -68,7 +68,21 @@ class FusionHost(RamHost):
         Optimized version of base class __collectItemSettings.
         Uses API methods to handle overrides correctly while benefiting from DAEMON caching.
         """
-        project = RAMSES.project()
+        if not item:
+            return {}
+
+        # Try to get the project from the item itself to avoid using the Daemon's active project
+        project = item.project()
+        p_uuid = item.get("project", "")
+        if p_uuid:
+            if not project or project.uuid() != p_uuid:
+                from ramses import RamProject
+
+                project = RamProject(p_uuid)
+
+        if not project:
+            project = RAMSES.project()
+
         if not project:
             return {}
 
@@ -77,25 +91,26 @@ class FusionHost(RamHost):
             "height": int(project.height() or 1080),
             "framerate": float(project.framerate() or 24.0),
             "duration": 0.0,
-            "pixelAspectRatio": float(project.pixelAspectRatio() or 1.0)
+            "pixelAspectRatio": float(project.pixelAspectRatio() or 1.0),
         }
 
         if item and item.itemType() == ItemType.SHOT:
             # Use the sequence object to benefit from API override logic
             from ramses import RamShot
+
             shot = item if isinstance(item, RamShot) else RamShot(item.uuid())
-            
-            settings['duration'] = float(shot.duration())
+
+            settings["duration"] = float(shot.duration())
             # Calculate frames manually using Project FPS (currently in settings['framerate'])
             # We use round() to avoid truncation errors present in the API's shot.frames() which uses int()
-            settings['frames'] = int(round(settings['duration'] * settings['framerate']))
+            settings["frames"] = int(round(settings["duration"] * settings["framerate"]))
 
             seq = shot.sequence()
             if seq:
-                settings['width'] = int(seq.width())
-                settings['height'] = int(seq.height())
-                settings['framerate'] = float(seq.framerate())
-                settings['pixelAspectRatio'] = float(seq.pixelAspectRatio())
+                settings["width"] = int(seq.width())
+                settings["height"] = int(seq.height())
+                settings["framerate"] = float(seq.framerate())
+                settings["pixelAspectRatio"] = float(seq.pixelAspectRatio())
 
         return settings
 
@@ -656,24 +671,25 @@ class FusionHost(RamHost):
         modes = {0: "save", 1: "discard", 2: "cancel"}
         return modes.get(res['Mode'], "cancel")
 
-    def _setupCurrentFile(self, item:RamItem, step:RamStep, setupOptions:dict) -> bool:
-        if not self.comp: return False
-        
+    def _setupCurrentFile(self, item: RamItem, step: RamStep, setupOptions: dict) -> bool:
+        if not self.comp:
+            return False
+
         # Get duration from options or fallback to item
         fps = setupOptions.get("framerate", 24.0)
         duration = setupOptions.get("duration", 0.0)
-        
+
         # If duration is 0, try to get it directly from item if it's a shot
         if duration <= 0 and item and item.itemType() == ItemType.SHOT:
             try:
                 duration = float(item.duration())
             except:
                 duration = 5.0
-            
+
         # Fallback to a default if still 0
         if duration <= 0:
             duration = 5.0
-            
+
         # If we have an explicit frame count from Ramses, use it.
         # Otherwise calculate from duration and (potentially overridden) FPS.
         if setupOptions.get("frames", 0) > 0:
@@ -683,38 +699,35 @@ class FusionHost(RamHost):
 
         start = RAM_SETTINGS.userSettings.get("compStartFrame", 1001)
         end = start + total_frames - 1
-        
+
         width = setupOptions.get("width", 1920)
         height = setupOptions.get("height", 1080)
         pa = setupOptions.get("pixelAspectRatio", 1.0)
-        
+
         # Check if changes are actually needed (avoid dirtying the comp)
         curr_prefs = self.comp.GetPrefs("Comp.FrameFormat") or {}
         curr_w = int(curr_prefs.get("Width", 0))
         curr_h = int(curr_prefs.get("Height", 0))
         curr_fps = float(curr_prefs.get("Rate", 24.0))
-        
-        # Apply Frame Format Rate via Prefs (required for FPS)
+        curr_pa_x = float(curr_prefs.get("AspectX", 1.0))
+        curr_pa_y = float(curr_prefs.get("AspectY", 1.0))
+
+        # Apply Resolution, Rate and Aspect Ratio via Prefs as requested
         if curr_w != int(width):
             self.comp.SetPrefs("Comp.FrameFormat.Width", int(width))
         if curr_h != int(height):
             self.comp.SetPrefs("Comp.FrameFormat.Height", int(height))
         if abs(curr_fps - float(fps)) > 0.001:
             self.comp.SetPrefs("Comp.FrameFormat.Rate", float(fps))
-        
-        # Apply Resolution and Aspect Ratio via Attrs (Immediate and more reliable)
+        if abs(curr_pa_x - float(pa)) > 0.001:
+            self.comp.SetPrefs("Comp.FrameFormat.AspectX", float(pa))
+        if abs(curr_pa_y - 1.0) > 0.001:
+            self.comp.SetPrefs("Comp.FrameFormat.AspectY", 1.0)
+
+        # Apply Timeline Ranges via Attrs (Immediate and more reliable)
         attrs = self.comp.GetAttrs()
         new_attrs = {}
-        
-        if attrs.get("COMPN_Width") != int(width):
-            new_attrs["COMPN_Width"] = int(width)
-        if attrs.get("COMPN_Height") != int(height):
-            new_attrs["COMPN_Height"] = int(height)
-        if attrs.get("COMPN_PixelAspectX") != float(pa):
-            new_attrs["COMPN_PixelAspectX"] = float(pa)
-        if attrs.get("COMPN_PixelAspectY") != 1.0:
-            new_attrs["COMPN_PixelAspectY"] = 1.0
-            
+
         if attrs.get("COMPN_GlobalStart") != float(start):
             new_attrs["COMPN_GlobalStart"] = float(start)
         if attrs.get("COMPN_GlobalEnd") != float(end):
@@ -723,10 +736,10 @@ class FusionHost(RamHost):
             new_attrs["COMPN_RenderStart"] = float(start)
         if attrs.get("COMPN_RenderEnd") != float(end):
             new_attrs["COMPN_RenderEnd"] = float(end)
-            
+
         if new_attrs:
             self.comp.SetAttrs(new_attrs)
-        
+
         return True
 
     def _statusUI(self, currentStatus:RamStatus = None) -> dict:

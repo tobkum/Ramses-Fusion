@@ -330,8 +330,12 @@ class RamsesFusionApp:
     def _validate_publish(self, check_preview=True, check_final=True):
         """Validates comp settings against Ramses database before publishing."""
         item = self.current_item
-        project = self._get_project()
-        if not item or not project:
+        if not item:
+            return True, ""
+
+        # Use the optimized host implementation to collect settings (respects sequence overrides)
+        settings = self.ramses.host.collectItemSettings(item)
+        if not settings:
             return True, ""
 
         errors = []
@@ -339,8 +343,7 @@ class RamsesFusionApp:
 
         # 1. Check Frame Range
         if item.itemType() == ram.ItemType.SHOT:
-            framerate = project.framerate() if project else 24.0
-            expected_frames = int(round(item.duration() * framerate))
+            expected_frames = settings.get("frames", 0)
 
             # Check Render Range
             attrs = comp.GetAttrs()
@@ -353,9 +356,9 @@ class RamsesFusionApp:
                     f"• Frame Range Mismatch: DB expects {expected_frames} frames, Comp is set to render {actual_frames}."
                 )
 
-        # 2. Check Resolution (Project Master)
-        db_w = int(project.width() or 1920)
-        db_h = int(project.height() or 1080)
+        # 2. Check Resolution (Respects Overrides)
+        db_w = int(settings.get("width", 1920))
+        db_h = int(settings.get("height", 1080))
 
         prefs = comp.GetPrefs()
         frame_format = prefs.get("Comp", {}).get("FrameFormat", {})
@@ -368,8 +371,8 @@ class RamsesFusionApp:
                 f"• Resolution Mismatch: DB expects {db_w}x{db_h}, Comp is {comp_w}x{comp_h}."
             )
 
-        # 3. Check Framerate
-        db_fps = float(project.framerate() or 24.0)
+        # 3. Check Framerate (Respects Overrides)
+        db_fps = float(settings.get("framerate", 24.0))
         comp_fps = float(frame_format.get("Rate", 24.0))
 
         if abs(db_fps - comp_fps) > 0.001:
