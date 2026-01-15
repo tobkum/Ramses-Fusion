@@ -2,6 +2,7 @@ import sys
 import os
 import re
 import concurrent.futures
+from typing import Optional
 
 # Add the 'lib' directory to Python's search path
 try:
@@ -71,7 +72,7 @@ class RamsesFusionApp:
         self._step_path = ""
         self._last_synced_path = None
 
-    def _get_icon(self, icon_name):
+    def _get_icon(self, icon_name: str):
         """Lazy-loading icon cache."""
         if icon_name not in self._icon_cache:
             icon_path = os.path.join(self.icon_dir, icon_name)
@@ -79,16 +80,16 @@ class RamsesFusionApp:
         return self._icon_cache[icon_name]
 
     @property
-    def current_item(self):
+    def current_item(self) -> Optional[ram.RamItem]:
         self._update_context()
         return self._item_cache
 
     @property
-    def current_step(self):
+    def current_step(self) -> Optional[ram.RamStep]:
         self._update_context()
         return self._step_cache
 
-    def _update_context(self):
+    def _update_context(self) -> str:
         """Internal helper to sync item and step from the host once per access cycle."""
         path = self.ramses.host.currentFilePath()
         if path != self._item_path or not self._item_cache or not self._step_cache:
@@ -98,20 +99,20 @@ class RamsesFusionApp:
             self._step_cache = self.ramses.host.currentStep()
         return path
 
-    def _get_project(self):
+    def _get_project(self) -> Optional[ram.RamProject]:
         """Cached access to the current project."""
         if not self._project_cache:
             self._project_cache = self.ramses.project()
         return self._project_cache
 
-    def _get_user_name(self):
+    def _get_user_name(self) -> str:
         """Cached access to the user name."""
         if not self._user_name_cache:
             user = self.ramses.user()
             self._user_name_cache = user.name() if user else "Not Logged In"
         return self._user_name_cache
 
-    def _require_step(self):
+    def _require_step(self) -> Optional[ram.RamStep]:
         """Validates that a step is active before proceeding."""
         step = self.current_step
         if not step:
@@ -130,7 +131,7 @@ class RamsesFusionApp:
             return None
         return step
 
-    def _update_ui_state(self, is_online):
+    def _update_ui_state(self, is_online: bool) -> None:
         """Updates the UI elements (Header, Buttons) based on connection status."""
         if not self.dlg:
             return
@@ -167,7 +168,7 @@ class RamsesFusionApp:
             # UI elements may not exist during window transitions
             self.log(f"UI state update skipped: {e}", ram.LogLevel.Debug)
 
-    def _check_connection(self, silent=False):
+    def _check_connection(self, silent: bool = False) -> bool:
         """Checks if Ramses Daemon is online and shows a dialog if not."""
         # Check if the daemon is actually responding
         is_responding = self.ramses.daemonInterface().online()
@@ -201,7 +202,7 @@ class RamsesFusionApp:
             return False
         return True
 
-    def _get_context_text(self):
+    def _get_context_text(self) -> str:
         item = self.current_item
         step = self.current_step
 
@@ -217,14 +218,14 @@ class RamsesFusionApp:
         step_name = step.name() if step else "No Step"
         return f"<font color='#555'>{project_name} / </font><b><font color='#BBB'>{item_name}</font></b><br><font color='#999'>{step_name}</font>"
 
-    def log(self, message, level=ram.LogLevel.Info):
+    def log(self, message: str, level: int = ram.LogLevel.Info) -> None:
         """Directly logs to the Fusion console bypassing API filtering."""
         self.ramses.host._log(message, level)
 
-    def _get_footer_text(self):
+    def _get_footer_text(self) -> str:
         return f"<font color='#555'>User: {self._get_user_name()} | Ramses API {self.settings.version}</font>"
 
-    def _build_file_info(self, item_type, step, short_name, extension):
+    def _build_file_info(self, item_type: int, step: ram.RamStep, short_name: str, extension: str) -> ram.RamFileInfo:
         """Constructs a RamFileInfo object following Ramses conventions."""
         nm = ram.RamFileInfo()
         nm.project = step.projectShortName()
@@ -234,7 +235,7 @@ class RamsesFusionApp:
         nm.extension = extension
         return nm
 
-    def _resolve_shot_path(self, shot, step):
+    def _resolve_shot_path(self, shot: ram.RamShot, step: ram.RamStep) -> tuple[str, bool]:
         """
         Returns the path to the shot's comp file.
         If it exists, returns the actual path.
@@ -264,7 +265,7 @@ class RamsesFusionApp:
         predicted_path = os.path.join(folder, fn_info.fileName())
         return predicted_path, False
 
-    def _create_render_anchors(self):
+    def _create_render_anchors(self) -> None:
         """Creates _PREVIEW and _FINAL Saver nodes at calculated grid coordinates."""
         comp = self.ramses.host.comp
         if not comp:
@@ -345,7 +346,7 @@ class RamsesFusionApp:
         finally:
             comp.Unlock()
 
-    def _validate_publish(self, check_preview=True, check_final=True):
+    def _validate_publish(self, check_preview: bool = True, check_final: bool = True) -> tuple[bool, str]:
         """Validates comp settings against Ramses database before publishing."""
         item = self.current_item
         if not item:
@@ -423,7 +424,7 @@ class RamsesFusionApp:
             return False, "\n".join(errors)
         return True, ""
 
-    def _sync_render_anchors(self):
+    def _sync_render_anchors(self) -> None:
         """Syncs existing _PREVIEW and _FINAL Saver paths with current project specs."""
         comp = self.ramses.host.comp
         if not comp:
@@ -466,7 +467,7 @@ class RamsesFusionApp:
         except (AttributeError, RuntimeError) as e:
             self.log(f"Render anchor sync failed: {e}", ram.LogLevel.Debug)
 
-    def refresh_header(self, force_full=False):
+    def refresh_header(self, force_full: bool = False) -> None:
         """Updates the context label and footer with current info."""
         is_online = self._check_connection(silent=True)
 
