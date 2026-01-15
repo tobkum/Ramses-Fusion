@@ -346,16 +346,17 @@ class RamsesFusionApp:
         except Exception:
             pass
 
-    def refresh_header(self):
+    def refresh_header(self, force_full=False):
         """Updates the context label and footer with current info."""
         if not self._check_connection():
             return
 
         if self.dlg:
             try:
-                # Force cache refresh for project and user
-                self._project_cache = None
-                self._user_name_cache = None
+                # Force cache refresh for project and user only if requested
+                if force_full:
+                    self._project_cache = None
+                    self._user_name_cache = None
 
                 # Clear item/step caches and path trackers to force re-fetch from host
                 self._item_cache = None
@@ -486,7 +487,7 @@ class RamsesFusionApp:
         )
 
         # Bind Events
-        self.dlg.On.RefreshButton.Clicked = lambda ev: self.refresh_header()
+        self.dlg.On.RefreshButton.Clicked = lambda ev: self.refresh_header(force_full=True)
         self.dlg.On.RamsesButton.Clicked = self.on_run_ramses
         self.dlg.On.SwitchShotButton.Clicked = self.on_switch_shot
         self.dlg.On.ImportButton.Clicked = self.on_import
