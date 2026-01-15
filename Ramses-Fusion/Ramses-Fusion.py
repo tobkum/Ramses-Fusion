@@ -292,36 +292,38 @@ class RamsesFusionApp:
                 if not node:
                     node = comp.AddTool("Saver", cfg["target_x"], cfg["target_y"])
                     if node:
-                        node.SetAttrs({"TOOLS_Name": name, "TOOLB_PassThrough": True})
+                        node.SetAttrs({"TOOLS_Name": name})
 
-                        if name == "_PREVIEW":
-                            if preview_path:
-                                node.Clip[1] = preview_path
-                            node.SetInput("OutputFormat", "QuickTimeMovies", 0)
-                            node.SetInput(
-                                "QuickTimeMovies.Compression",
-                                "Apple ProRes 422_apcn",
-                                0,
-                            )
-                            node.Comments[1] = (
-                                "Preview renders will be saved here. Connect your output."
-                            )
-                        else:
-                            if publish_path:
-                                node.Clip[1] = publish_path
-                            node.SetInput("OutputFormat", "QuickTimeMovies", 0)
-                            node.SetInput(
-                                "QuickTimeMovies.Compression",
-                                "Apple ProRes 4444_ap4h",
-                                0,
-                            )
-                            node.Comments[1] = (
-                                "Final renders will be saved here. Connect your output."
-                            )
-
-                # Ensure color is correct (even if existing)
+                # Always enforce critical pipeline settings (even if node existed)
                 if node:
                     node.TileColor = cfg["color"]
+                    # Always disable for safety (PassThrough = True)
+                    node.SetAttrs({"TOOLB_PassThrough": True})
+
+                    if name == "_PREVIEW":
+                        if preview_path:
+                            node.Clip[1] = preview_path
+                        node.SetInput("OutputFormat", "QuickTimeMovies", 0)
+                        node.SetInput(
+                            "QuickTimeMovies.Compression",
+                            "Apple ProRes 422_apcn",
+                            0,
+                        )
+                        node.Comments[1] = (
+                            "Preview renders will be saved here. Connect your output."
+                        )
+                    else:
+                        if publish_path:
+                            node.Clip[1] = publish_path
+                        node.SetInput("OutputFormat", "QuickTimeMovies", 0)
+                        node.SetInput(
+                            "QuickTimeMovies.Compression",
+                            "Apple ProRes 4444_ap4h",
+                            0,
+                        )
+                        node.Comments[1] = (
+                            "Final renders will be saved here. Connect your output."
+                        )
         finally:
             comp.Unlock()
 
