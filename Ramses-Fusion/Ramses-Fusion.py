@@ -211,6 +211,16 @@ class RamsesFusionApp:
     def _get_footer_text(self):
         return f"<font color='#555'>User: {self._get_user_name()} | Ramses API {self.settings.version}</font>"
 
+    def _build_file_info(self, item_type, step, short_name, extension):
+        """Constructs a RamFileInfo object following Ramses conventions."""
+        nm = ram.RamFileInfo()
+        nm.project = step.projectShortName()
+        nm.ramType = item_type
+        nm.shortName = short_name
+        nm.step = step.shortName()
+        nm.extension = extension
+        return nm
+
     def _resolve_shot_path(self, shot, step):
         """
         Returns the path to the shot's comp file.
@@ -229,13 +239,7 @@ class RamsesFusionApp:
         if not folder:
             return "", False
             
-        fn_info = ram.RamFileInfo()
-        fn_info.project = shot.projectShortName()
-        fn_info.ramType = ram.ItemType.SHOT
-        fn_info.shortName = shot.shortName()
-        fn_info.step = step.shortName()
-        fn_info.extension = "comp"
-        
+        fn_info = self._build_file_info(ram.ItemType.SHOT, step, shot.shortName(), "comp")
         predicted_path = os.path.join(folder, fn_info.fileName())
         return predicted_path, False
 
@@ -1593,17 +1597,17 @@ class RamsesFusionApp:
             return
 
         name = re.sub(r"[^a-zA-Z0-9\- ]", "", res["Name"])
-        nm = ram.RamFileInfo()
-        nm.project = step.projectShortName()
-        nm.ramType = ram.ItemType.GENERAL
-        nm.shortName = name
-        nm.step = step.shortName()
-        nm.extension = "comp"
-
+        
         tpl_folder = step.templatesFolderPath()
         if not tpl_folder:
             self.log(
                 "Step does not have a valid templates folder.", ram.LogLevel.Warning
+            )
+            return
+
+        # Use build helper for naming consistency
+        nm = self._build_file_info(ram.ItemType.GENERAL, step, name, "comp")
+        path = os.path.join(tpl_folder, nm.fileName())
             )
             return
 
