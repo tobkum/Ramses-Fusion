@@ -1,6 +1,7 @@
 import sys
 import os
 import re
+import concurrent.futures
 
 # Add the 'lib' directory to Python's search path
 try:
@@ -248,7 +249,7 @@ class RamsesFusionApp:
             comp_end = attrs.get("COMPN_RenderEnd", 0)
             actual_frames = int(comp_end - comp_start + 1)
 
-            if actual_frames != expected_frames:
+            if expected_frames > 0 and actual_frames != expected_frames:
                 errors.append(
                     f"• Frame Range Mismatch: DB expects {expected_frames} frames, Comp is set to render {actual_frames}."
                 )
@@ -1028,21 +1029,37 @@ class RamsesFusionApp:
                 shots = session_cache["current_shots"]
                 seq_map = session_cache["current_seq_map"]
 
+                # 1. Identify missing statuses in cache
+                missing_keys = []
+                for shot in shots:
+                    cache_key = (str(shot.uuid()), step_uuid)
+                    if cache_key not in session_cache["status_cache"]:
+                        missing_keys.append((shot, selected_step))
+
+                # 2. Parallel Fetch (ThreadPoolExecutor)
+                if missing_keys:
+                    def fetch_status_task(args):
+                        s_obj, s_stp = args
+                        try:
+                            # Return ((key), result)
+                            return (str(s_obj.uuid()), str(s_stp.uuid())), s_obj.currentStatus(s_stp)
+                        except Exception:
+                            return (str(s_obj.uuid()), str(s_stp.uuid())), None
+
+                    # Use max_workers=20 to speed up I/O bound socket calls
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
+                        results = executor.map(fetch_status_task, missing_keys)
+                        for key, status in results:
+                            session_cache["status_cache"][key] = status
+
+                # 3. Populate UI from cache
                 valid_options = []
                 for shot in shots:
                     shot_uuid = str(shot.uuid())
-
-                    # Fetch status lazily with error handling
+                    
                     cache_key = (shot_uuid, step_uuid)
-                    if cache_key not in session_cache["status_cache"]:
-                        try:
-                            session_cache["status_cache"][cache_key] = (
-                                shot.currentStatus(selected_step)
-                            )
-                        except Exception:
-                            session_cache["status_cache"][cache_key] = None
+                    status = session_cache["status_cache"].get(cache_key)
 
-                    status = session_cache["status_cache"][cache_key]
                     if status:
                         st_uuid = str(ram.RamObject.getUuid(status.get("state")))
                         if state_map.get(st_uuid) in ["NO", "STB"]:
@@ -1196,16 +1213,7 @@ class RamsesFusionApp:
                             seen_uuids.add(u)
 
                     # 2. Steps: Fetch only project-relevant steps
-                    all_steps_studio = daemon.getObjects("RamStep")
-                    steps = [
-                        s
-                        for s in all_steps_studio
-                        if str(ram.RamObject.getUuid(s.get("project"))) == proj_uuid
-                        and s.stepType() == ram.StepType.SHOT_PRODUCTION
-                    ]
-
-                    if not steps:
-                        steps = proj.steps(ram.StepType.SHOT_PRODUCTION)
+                    steps = proj.steps(ram.StepType.SHOT_PRODUCTION)
 
                     session_cache["project_data"][proj_uuid] = {
                         "shots": unique_shots,
