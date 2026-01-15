@@ -343,7 +343,10 @@ class FusionHost(RamHost):
         try:
             # 4. Trigger Fusion Render
             if self.comp.Render(True):
-                # Save after render to ensure disarming state is captured and comp is clean
+                # 5. Disarm immediately after render
+                preview_node.SetAttrs({"TOOLB_PassThrough": True})
+                
+                # Save after render to ensure comp is clean and context is preserved
                 src = self.currentFilePath()
                 if src:
                     self.comp.Save(src)
@@ -353,8 +356,9 @@ class FusionHost(RamHost):
             self.log(f"Preview render failed: {e}", LogLevel.Critical)
             return []
         finally:
-            # 5. Always disarm
-            preview_node.SetAttrs({"TOOLB_PassThrough": True})
+            # 6. Always disarm (redundant safety)
+            if preview_node:
+                preview_node.SetAttrs({"TOOLB_PassThrough": True})
 
     def _publishOptions(self, proposedOptions:dict, showPublishUI:bool=False) -> dict:
         # If the UI is forced, we could show a dialog here. 
@@ -381,6 +385,8 @@ class FusionHost(RamHost):
         self.log(f"Publishing SRC: {src}", LogLevel.Info)
         self.log(f"Publishing DST: {dst}", LogLevel.Info)
         
+        published_files = []
+        
         try:
             # 1. Automated Final Render
             # Find the _FINAL anchor node
@@ -392,7 +398,9 @@ class FusionHost(RamHost):
                 try:
                     # Execute render
                     if self.comp.Render(True):
-                        self.log(f"Final render complete: {final_node.Clip[1]}", LogLevel.Info)
+                        render_path = self.normalizePath(final_node.Clip[1])
+                        self.log(f"Final render complete: {render_path}", LogLevel.Info)
+                        published_files.append(render_path)
                     else:
                         self.log("Final render failed or was cancelled.", LogLevel.Warning)
                 finally:
@@ -407,9 +415,9 @@ class FusionHost(RamHost):
             # Using _saveAs ensures consistent path handling.
             if self._saveAs(dst, None, None, -1, "", False):
                 self.log(f"Comp backup published to: {dst}", LogLevel.Info)
-                return [dst]
+                published_files.append(dst)
             
-            return []
+            return published_files
         except Exception as e:
             self.log(f"Publish failed during process: {e}", LogLevel.Critical)
             return []
@@ -518,22 +526,44 @@ class FusionHost(RamHost):
         height = setupOptions.get("height", 1080)
         pa = setupOptions.get("pixelAspectRatio", 1.0)
         
+        # Check if changes are actually needed (avoid dirtying the comp)
+        curr_prefs = self.comp.GetPrefs("Comp.FrameFormat") or {}
+        curr_w = int(curr_prefs.get("Width", 0))
+        curr_h = int(curr_prefs.get("Height", 0))
+        curr_fps = float(curr_prefs.get("Rate", 24.0))
+        
         # Apply Frame Format Rate via Prefs (required for FPS)
-        self.comp.SetPrefs("Comp.FrameFormat.Width", int(width))
-        self.comp.SetPrefs("Comp.FrameFormat.Height", int(height))
-        self.comp.SetPrefs("Comp.FrameFormat.Rate", float(fps))
+        if curr_w != int(width):
+            self.comp.SetPrefs("Comp.FrameFormat.Width", int(width))
+        if curr_h != int(height):
+            self.comp.SetPrefs("Comp.FrameFormat.Height", int(height))
+        if abs(curr_fps - float(fps)) > 0.001:
+            self.comp.SetPrefs("Comp.FrameFormat.Rate", float(fps))
         
         # Apply Resolution and Aspect Ratio via Attrs (Immediate and more reliable)
-        self.comp.SetAttrs({
-            "COMPN_Width": int(width),
-            "COMPN_Height": int(height),
-            "COMPN_PixelAspectX": float(pa),
-            "COMPN_PixelAspectY": 1.0,
-            "COMPN_GlobalStart": float(start), 
-            "COMPN_GlobalEnd": float(end), 
-            "COMPN_RenderStart": float(start), 
-            "COMPN_RenderEnd": float(end)
-        })
+        attrs = self.comp.GetAttrs()
+        new_attrs = {}
+        
+        if attrs.get("COMPN_Width") != int(width):
+            new_attrs["COMPN_Width"] = int(width)
+        if attrs.get("COMPN_Height") != int(height):
+            new_attrs["COMPN_Height"] = int(height)
+        if attrs.get("COMPN_PixelAspectX") != float(pa):
+            new_attrs["COMPN_PixelAspectX"] = float(pa)
+        if attrs.get("COMPN_PixelAspectY") != 1.0:
+            new_attrs["COMPN_PixelAspectY"] = 1.0
+            
+        if attrs.get("COMPN_GlobalStart") != float(start):
+            new_attrs["COMPN_GlobalStart"] = float(start)
+        if attrs.get("COMPN_GlobalEnd") != float(end):
+            new_attrs["COMPN_GlobalEnd"] = float(end)
+        if attrs.get("COMPN_RenderStart") != float(start):
+            new_attrs["COMPN_RenderStart"] = float(start)
+        if attrs.get("COMPN_RenderEnd") != float(end):
+            new_attrs["COMPN_RenderEnd"] = float(end)
+            
+        if new_attrs:
+            self.comp.SetAttrs(new_attrs)
         
         return True
 
