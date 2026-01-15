@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 import os
-from ramses import RamHost, RamItem, RamStep, RamStatus, RamFileInfo, LogLevel, ItemType, RAMSES, RAM_SETTINGS, RamMetaDataManager
+from ramses import RamHost, RamItem, RamStep, RamStatus, RamFileInfo, LogLevel, ItemType, RAMSES, RAM_SETTINGS, RamMetaDataManager, RamState
 
 class FusionHost(RamHost):
     """
@@ -347,20 +347,34 @@ class FusionHost(RamHost):
         path = self.fusion.RequestFile()
         return {'filePath': path} if path else None
 
-    def _preview(self, previewFolderPath:str, previewFileBaseName:str, item:RamItem, step:RamStep) -> list:
-        if not self.comp: return []
-        
+    def _preview(
+        self,
+        previewFolderPath: str,
+        previewFileBaseName: str,
+        item: RamItem,
+        step: RamStep,
+    ) -> list:
+        if not self.comp:
+            return []
+
         # 1. Find the Preview Anchor
         preview_node = self.comp.FindTool("_PREVIEW")
         if not preview_node:
-            self.log("Preview anchor (_PREVIEW) not found in Flow. Use 'Setup Scene' to add one.", LogLevel.Warning)
+            self.log(
+                "Preview anchor (_PREVIEW) not found in Flow. Use 'Setup Scene' to add one.",
+                LogLevel.Warning,
+            )
             return []
 
         # 2. Construct the final path (Ramses provides the folder and basename)
         # Note: We use .mov as our standard preview format
-        filename = previewFileBaseName if previewFileBaseName.lower().endswith(".mov") else previewFileBaseName + ".mov"
+        filename = (
+            previewFileBaseName
+            if previewFileBaseName.lower().endswith(".mov")
+            else previewFileBaseName + ".mov"
+        )
         dst = self.normalizePath(os.path.join(previewFolderPath, filename))
-        
+
         # 3. Armed for render
         self.log(f"Starting preview render to: {dst}", LogLevel.Info)
         preview_node.Clip[1] = dst
@@ -368,18 +382,25 @@ class FusionHost(RamHost):
         preview_node.SetInput("OutputFormat", "QuickTimeMovies", 0)
         preview_node.SetInput("QuickTimeMovies.Compression", "Apple ProRes 422_apcn", 0)
         preview_node.SetAttrs({"TOOLB_PassThrough": False})
-        
+
         try:
             # 4. Trigger Fusion Render
             if self.comp.Render(True):
-                # 5. Disarm immediately after render
-                preview_node.SetAttrs({"TOOLB_PassThrough": True})
-                
-                # Save after render to ensure comp is clean and context is preserved
-                src = self.currentFilePath()
-                if src:
-                    self.comp.Save(src)
-                return [dst]
+                # 5. Verify the output
+                if self._verify_render_output(dst):
+                    # Disarm immediately after render
+                    preview_node.SetAttrs({"TOOLB_PassThrough": True})
+
+                    # Save after render to ensure comp is clean and context is preserved
+                    src = self.currentFilePath()
+                    if src:
+                        self.comp.Save(src)
+                    return [dst]
+                else:
+                    self.log(
+                        f"Preview render produced an invalid file: {dst}",
+                        LogLevel.Critical,
+                    )
             return []
         except Exception as e:
             self.log(f"Preview render failed: {e}", LogLevel.Critical)
@@ -389,33 +410,118 @@ class FusionHost(RamHost):
             if preview_node:
                 preview_node.SetAttrs({"TOOLB_PassThrough": True})
 
-    def _publishOptions(self, proposedOptions:dict, showPublishUI:bool=False) -> dict:
-        # If the UI is forced, we could show a dialog here. 
+    def _publishOptions(self, proposedOptions: dict, showPublishUI: bool = False) -> dict:
+        # If the UI is forced, we could show a dialog here.
         # For now, we return the options to ensure the process continues.
         return proposedOptions or {}
 
-    def _prePublish(self, publishInfo:RamFileInfo, publishOptions:dict) -> dict:
+    def _prePublish(self, publishInfo: RamFileInfo, publishOptions: dict) -> dict:
         return publishOptions or {}
 
-    def _publish(self, publishInfo:RamFileInfo, publishOptions:dict) -> list:
-        if not self.comp: return []
-        
+    def _verify_render_output(self, path: str) -> bool:
+        """Verifies that a render output exists and is not a 0-byte file."""
+        if not path:
+            return False
+        if not os.path.exists(path):
+            return False
+        # Check for 0-byte files which often indicate a failed or interrupted render
+        if os.path.getsize(path) == 0:
+            return False
+        return True
+
+    def updateStatus(
+        self,
+        state: RamState = None,
+        comment: str = "",
+        completionRatio: int = 50,
+        savePreview: bool = False,
+        publish: bool = False,
+        showPublishUI: bool = False,
+    ) -> bool:
+        """
+        Overridden to ensure status update and publish are atomic.
+        We rearrange the base class logic so the DB update only happens if the publish succeeds.
+        """
+        # 1. Basic checks
+        if not self.testDaemonConnection():
+            return False
+
+        # Ensure we are saved at least once as a Ramses item
+        if not self.currentItem() and not self.save():
+            return False
+
+        # 2. Collect user input if parameters are missing
+        if state is None:
+            newStatusDict = self._statusUI(self.currentStatus())
+            if not newStatusDict:
+                return False
+
+            publish = newStatusDict.get("publish", False)
+            savePreview = newStatusDict.get("savePreview", False)
+            comment = newStatusDict.get("comment", "")
+            completionRatio = newStatusDict.get("completionRatio", 50)
+            state = newStatusDict.get("state", RAMSES.defaultState)
+            showPublishUI = newStatusDict.get("showPublishUI", False)
+
+        # 3. Step 1 of Transaction: Save and Increment Version
+        # This creates the physical version on disk that we will either publish or keep as WIP.
+        # We call save(incremental=True) which calls the private __save method.
+        if not self.save(incremental=True, comment="Status change"):
+            self.log("Failed to save new version for status update.", LogLevel.Critical)
+            return False
+
+        # 4. Step 2 of Transaction: Publish (if requested)
+        # If publish fails (render fails), we abort the database update.
+        if publish:
+            # incrementVersion=False because we just incremented it above.
+            if not self.publish(showPublishUI, incrementVersion=False):
+                self.log(
+                    "Publish failed. Status update to database aborted.",
+                    LogLevel.Critical,
+                )
+                return False
+
+        # 5. Step 3 of Transaction: Update the Database
+        # Only reached if Publish succeeded OR was not requested.
+        status = self.currentStatus()
+        if status:
+            status.setComment(comment)
+            status.setCompletionRatio(completionRatio)
+            status.setState(state)
+            status.setVersion(self.currentVersion())
+
+        # 6. Preview (Non-critical, doesn't abort the status update if it fails)
+        if savePreview:
+            try:
+                self.savePreview()
+            except Exception as e:
+                self.log(f"Optional preview generation failed: {e}", LogLevel.Warning)
+
+        return True
+
+    def _publish(self, publishInfo: RamFileInfo, publishOptions: dict) -> list:
+        if not self.comp:
+            return []
+
         src = self.currentFilePath()
         if not src:
-            self.log("Cannot publish: current composition has no saved path.", LogLevel.Critical)
+            self.log(
+                "Cannot publish: current composition has no saved path.",
+                LogLevel.Critical,
+            )
             return []
-            
+
         # Ensure publishInfo has the correct extension for the comp backup
-        ext = os.path.splitext(src)[1].lstrip('.')
-        
+        ext = os.path.splitext(src)[1].lstrip(".")
+
         # Use the official API to get the correct publish path
         dst = self.normalizePath(self.publishFilePath(ext, "", publishInfo))
-        
+
         self.log(f"Publishing SRC: {src}", LogLevel.Info)
         self.log(f"Publishing DST: {dst}", LogLevel.Info)
-        
+
         published_files = []
-        
+
         try:
             # 1. Automated Final Render
             # Find the _FINAL anchor node
@@ -424,28 +530,52 @@ class FusionHost(RamHost):
                 self.log("Starting final master render...", LogLevel.Info)
                 # Enable the node
                 final_node.SetAttrs({"TOOLB_PassThrough": False})
+                render_success = False
+                render_path = ""
                 try:
-                    # Execute render
+                    # Execute render - comp.Render returns True only on success
                     if self.comp.Render(True):
                         render_path = self.normalizePath(final_node.Clip[1])
-                        self.log(f"Final render complete: {render_path}", LogLevel.Info)
-                        published_files.append(render_path)
+                        # Secondary Verification: Check file existence and size
+                        if self._verify_render_output(render_path):
+                            self.log(
+                                f"Final render complete and verified: {render_path}",
+                                LogLevel.Info,
+                            )
+                            render_success = True
+                            published_files.append(render_path)
+                        else:
+                            self.log(
+                                f"Final render produced an invalid file: {render_path}",
+                                LogLevel.Critical,
+                            )
                     else:
-                        self.log("Final render failed or was cancelled.", LogLevel.Warning)
+                        self.log(
+                            "Final render failed or was cancelled by user.",
+                            LogLevel.Warning,
+                        )
                 finally:
                     # Always disarm
                     final_node.SetAttrs({"TOOLB_PassThrough": True})
+
+                # GATEKEEPER: If render was attempted but failed/invalid, abort everything
+                if not render_success:
+                    self.log(
+                        "Publish ABORTED: Render failed. No files will be published.",
+                        LogLevel.Critical,
+                    )
+                    return []
             else:
-                self.log("No _FINAL anchor found. Skipping final render.", LogLevel.Warning)
+                self.log(
+                    "No _FINAL anchor found. Skipping final render.", LogLevel.Warning
+                )
 
             # 2. Perform Comp File Backup (standard Ramses publish)
-            # The base class publish() already saves the working file (src) before and after.
-            # We only need to save the backup copy (dst) here.
-            # Using _saveAs ensures consistent path handling.
+            # This only happens if there was no final_node OR if final_node render succeeded.
             if self._saveAs(dst, None, None, -1, "", False):
                 self.log(f"Comp backup published to: {dst}", LogLevel.Info)
                 published_files.append(dst)
-            
+
             return published_files
         except Exception as e:
             self.log(f"Publish failed during process: {e}", LogLevel.Critical)
