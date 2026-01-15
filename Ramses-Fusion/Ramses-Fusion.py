@@ -1611,10 +1611,6 @@ class RamsesFusionApp:
         # Use build helper for naming consistency
         nm = self._build_file_info(ram.ItemType.GENERAL, step, name, "comp")
         path = os.path.join(tpl_folder, nm.fileName())
-            )
-            return
-
-        path = os.path.join(tpl_folder, nm.fileName())
 
         comp = self.ramses.host.comp
         if comp:
