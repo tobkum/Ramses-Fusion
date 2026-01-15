@@ -732,17 +732,21 @@ class FusionHost(RamHost):
         curr_pa_x = float(curr_prefs.get("AspectX", 1.0))
         curr_pa_y = float(curr_prefs.get("AspectY", 1.0))
 
-        # Apply Resolution, Rate and Aspect Ratio via Prefs as requested
+        # Apply Resolution, Rate and Aspect Ratio via Prefs (batched for efficiency)
+        new_prefs = {}
         if curr_w != int(width):
-            self.comp.SetPrefs("Comp.FrameFormat.Width", int(width))
+            new_prefs["Comp.FrameFormat.Width"] = int(width)
         if curr_h != int(height):
-            self.comp.SetPrefs("Comp.FrameFormat.Height", int(height))
+            new_prefs["Comp.FrameFormat.Height"] = int(height)
         if abs(curr_fps - float(fps)) > 0.001:
-            self.comp.SetPrefs("Comp.FrameFormat.Rate", float(fps))
+            new_prefs["Comp.FrameFormat.Rate"] = float(fps)
         if abs(curr_pa_x - float(pa)) > 0.001:
-            self.comp.SetPrefs("Comp.FrameFormat.AspectX", float(pa))
+            new_prefs["Comp.FrameFormat.AspectX"] = float(pa)
         if abs(curr_pa_y - 1.0) > 0.001:
-            self.comp.SetPrefs("Comp.FrameFormat.AspectY", 1.0)
+            new_prefs["Comp.FrameFormat.AspectY"] = 1.0
+
+        if new_prefs:
+            self.comp.SetPrefs(new_prefs)
 
         # Apply Timeline Ranges via Attrs (Immediate and more reliable)
         attrs = self.comp.GetAttrs()
