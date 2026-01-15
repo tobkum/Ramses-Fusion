@@ -346,7 +346,13 @@ class FusionHost(RamHost):
                 name = self._sanitizeNodeName(raw_name)
 
                 if name:
-                    loader.SetAttrs({"TOOLS_Name": name})
+                    # Prevent name collisions by checking if node exists and appending counter
+                    final_name = name
+                    counter = 1
+                    while self.comp.FindTool(final_name):
+                        final_name = f"{name}_{counter}"
+                        counter += 1
+                    loader.SetAttrs({"TOOLS_Name": final_name})
                 
                 # Automatic Alignment
                 loader.GlobalIn[1] = float(start_frame)
@@ -637,26 +643,39 @@ class FusionHost(RamHost):
 
     def _saveAsUI(self) -> dict:
         path = self.fusion.RequestFile()
-        if not path: return None
-        
+        if not path:
+            return None
+
         # Use API to parse the selected path and instantiate the correctly typed object
         item = RamItem.fromPath(path, virtualIfNotFound=True)
         nm = RamFileInfo()
         nm.setFilePath(path)
-        
-        if not item: 
-            item = RamItem(data={'name': nm.shortName or 'New', 'shortName': nm.shortName or 'New'}, create=False)
-            
+
+        if not nm.project:
+            self.log(
+                "The selected path does not seem to belong to a Ramses project. This may cause pipeline issues.",
+                LogLevel.Warning,
+            )
+
+        if not item:
+            item = RamItem(
+                data={"name": nm.shortName or "New", "shortName": nm.shortName or "New"},
+                create=False,
+            )
+
         step = RamStep.fromPath(path)
         # Ensure we have a valid Ramses step
-        if not step: 
-            step = RamStep(data={'name': nm.step or 'New', 'shortName': nm.step or 'New'}, create=False)
-        
+        if not step:
+            step = RamStep(
+                data={"name": nm.step or "New", "shortName": nm.step or "New"},
+                create=False,
+            )
+
         return {
-            'item': item, 
-            'step': step, 
-            'extension': os.path.splitext(path)[1].lstrip('.'), 
-            'resource': nm.resource
+            "item": item,
+            "step": step,
+            "extension": os.path.splitext(path)[1].lstrip("."),
+            "resource": nm.resource,
         }
 
     def _saveChangesUI(self) -> str:

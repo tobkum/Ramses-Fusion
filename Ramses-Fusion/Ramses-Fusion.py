@@ -233,12 +233,20 @@ class RamsesFusionApp:
         Returns: (path, exists)
         """
         # 1. Try existing file
-        path = shot.stepFilePath(step=step, extension="comp")
-        if path:
-            return path, True
+        try:
+            path = shot.stepFilePath(step=step, extension="comp")
+            if path and os.path.exists(path):
+                return path, True
+        except Exception:
+            pass
             
         # 2. Predict path
-        folder = shot.stepFolderPath(step)
+        folder = ""
+        try:
+            folder = shot.stepFolderPath(step)
+        except Exception:
+            pass
+
         if not folder:
             return "", False
             
@@ -1586,6 +1594,9 @@ class RamsesFusionApp:
             step.setPublishSettings(res["YAML"])
 
     def on_save_template(self, ev):
+        if not self._check_connection():
+            return
+            
         step = self._require_step()
         if not step:
             return
@@ -1644,6 +1655,8 @@ class RamsesFusionApp:
         self.refresh_header()
 
     def on_open(self, ev):
+        if not self._check_connection():
+            return
         if self.ramses.host.open():
             self.refresh_header()
 
