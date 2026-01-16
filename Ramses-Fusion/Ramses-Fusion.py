@@ -645,8 +645,8 @@ class RamsesFusionApp:
             res = self.ramses.host._request_input(
                 "Validation Warning", 
                 fields, 
-                ok_text="Ignore & Proceed", 
-                cancel_text="Abort and fix"
+                ok_text="Ignore && Proceed", 
+                cancel_text="Abort && Fix"
             )
             return res is not None
 
@@ -1208,10 +1208,10 @@ class RamsesFusionApp:
                             [
                                 self.ui.HGap(0, 1),
                                 self.ui.Button(
-                                    {"ID": "SaveSettingsButton", "Text": "Save", "Weight": 0, "MinimumSize": [100, 30]}
+                                    {"ID": "SaveSettingsButton", "Text": "Save", "Weight": 0, "MinimumSize": [120, 30]}
                                 ),
                                 self.ui.Button(
-                                    {"ID": "CloseSettingsButton", "Text": "Close", "Weight": 0, "MinimumSize": [100, 30]}
+                                    {"ID": "CloseSettingsButton", "Text": "Close", "Weight": 0, "MinimumSize": [120, 30]}
                                 ),
                             ]
                         ),
@@ -1312,7 +1312,7 @@ class RamsesFusionApp:
                             {"Weight": 0},
                             [
                                 self.ui.HGap(0, 1),
-                                self.ui.Button({"ID": "AboutCloseButton", "Text": "Close", "Weight": 0, "MinimumSize": [100, 30]}),
+                                self.ui.Button({"ID": "AboutCloseButton", "Text": "Close", "Weight": 0, "MinimumSize": [120, 30]}),
                                 self.ui.HGap(0, 1),
                             ]
                         ),
@@ -1447,9 +1447,9 @@ class RamsesFusionApp:
                         {"Weight": 0},
                         [
                             ui.HGap(0, 1),
-                            ui.Button({"ID": "OkBtn", "Text": "OK", "Weight": 0, "MinimumSize": [100, 30]}),
+                            ui.Button({"ID": "OkBtn", "Text": "OK", "Weight": 0, "MinimumSize": [120, 30]}),
                             ui.Button(
-                                {"ID": "CancelBtn", "Text": "Cancel", "Weight": 0, "MinimumSize": [100, 30]}
+                                {"ID": "CancelBtn", "Text": "Cancel", "Weight": 0, "MinimumSize": [120, 30]}
                             ),
                         ]
                     ),

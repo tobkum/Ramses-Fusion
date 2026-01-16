@@ -338,9 +338,9 @@ class FusionHost(RamHost):
 
         # Build Button Group
         buttons = [ui.HGap(0, 1)]
-        buttons.append(ui.Button({"ID": "OkBtn", "Text": ok_text, "Weight": 0, "MinimumSize": [100, 30]}))
+        buttons.append(ui.Button({"ID": "OkBtn", "Text": ok_text, "Weight": 0, "MinimumSize": [120, 30]}))
         if cancel_text:
-            buttons.append(ui.Button({"ID": "CancelBtn", "Text": cancel_text, "Weight": 0, "MinimumSize": [100, 30]}))
+            buttons.append(ui.Button({"ID": "CancelBtn", "Text": cancel_text, "Weight": 0, "MinimumSize": [120, 30]}))
 
         dlg = disp.AddWindow(
             {
