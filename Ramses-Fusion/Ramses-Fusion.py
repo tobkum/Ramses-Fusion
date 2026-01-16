@@ -21,7 +21,7 @@ import ramses as ram
 import fusion_host
 
 
-def requires_connection(func):
+def requires_connection(func: callable) -> callable:
     """Decorator that ensures Ramses connection before handler execution.
 
     Checks if the Daemon is online. If not, attempts to reconnect or shows an error.
@@ -62,7 +62,7 @@ class RamsesFusionApp:
     
     DB_BUTTONS = ["SwitchShotButton", "OpenButton"]
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initializes the Ramses App, connecting to the Daemon and Fusion Host."""
         self.ramses = ram.Ramses.instance()
         self.settings = ram.RamSettings.instance()
@@ -87,7 +87,7 @@ class RamsesFusionApp:
         self._step_path = ""
         self._last_synced_path = None
 
-    def _get_icon(self, icon_name: str):
+    def _get_icon(self, icon_name: str) -> object:
         """Retrieves an icon from the cache, loading it if necessary.
 
         Args:
@@ -1257,7 +1257,7 @@ class RamsesFusionApp:
 
     # --- Handlers ---
 
-    def on_run_ramses(self, ev) -> None:
+    def on_run_ramses(self, ev: object) -> None:
         """Launches the external Ramses Client application.
 
         Args:
@@ -1266,7 +1266,7 @@ class RamsesFusionApp:
         self.ramses.showClient()
 
     @requires_connection
-    def on_switch_shot(self, ev):
+    def on_switch_shot(self, ev: object) -> None:
         """Handler for the 'Switch Shot' wizard.
 
         Displays a cascading dialog (Project -> Step -> Shot) to select a working context.
@@ -1699,7 +1699,7 @@ class RamsesFusionApp:
                         self.refresh_header()
 
     @requires_connection
-    def on_import(self, ev) -> None:
+    def on_import(self, ev: object) -> None:
         """Handler for 'Import' button.
 
         Opens the host's import dialog to bring external files into the composition.
@@ -1710,7 +1710,7 @@ class RamsesFusionApp:
         self.ramses.host.importItem()
 
     @requires_connection
-    def on_replace(self, ev) -> None:
+    def on_replace(self, ev: object) -> None:
         """Handler for 'Replace' button.
 
         Replaces the source file of the currently selected Loader node.
@@ -1721,7 +1721,7 @@ class RamsesFusionApp:
         self.ramses.host.replaceItem()
 
     @requires_connection
-    def on_save(self, ev) -> None:
+    def on_save(self, ev: object) -> None:
         """Handler for 'Save' button.
 
         Syncs render anchors and overwrites the current file version.
@@ -1738,7 +1738,7 @@ class RamsesFusionApp:
             self.refresh_header()
 
     @requires_connection
-    def on_incremental_save(self, ev) -> None:
+    def on_incremental_save(self, ev: object) -> None:
         """Handler for 'Incremental Save' button.
 
         Saves the current file as a new version (e.g., v001 -> v002).
@@ -1753,7 +1753,7 @@ class RamsesFusionApp:
             self.refresh_header()
 
     @requires_connection
-    def on_comment(self, ev) -> None:
+    def on_comment(self, ev: object) -> None:
         """Handler for 'Comment' button.
 
         Shows a dialog to add a comment to the current version in the Ramses DB.
@@ -1789,7 +1789,7 @@ class RamsesFusionApp:
                 self.refresh_header()
 
     @requires_connection
-    def on_update_status(self, ev) -> None:
+    def on_update_status(self, ev: object) -> None:
         """Handler for 'Update Status' button.
 
         Validates the scene for publishing, then opens the Status Update dialog.
@@ -1828,7 +1828,7 @@ class RamsesFusionApp:
             self.refresh_header()
 
     @requires_connection
-    def on_preview(self, ev) -> None:
+    def on_preview(self, ev: object) -> None:
         """Handler for 'Preview' button.
 
         Validates the scene and triggers a preview render via the Host.
@@ -1864,7 +1864,7 @@ class RamsesFusionApp:
 
         self.ramses.host.savePreview()
 
-    def on_publish_settings(self, ev) -> None:
+    def on_publish_settings(self, ev: object) -> None:
         """Handler for 'Publish Settings' button.
 
         Shows a text editor to modify the Step's YAML publish configuration.
@@ -1893,7 +1893,7 @@ class RamsesFusionApp:
             step.setPublishSettings(res["YAML"])
 
     @requires_connection
-    def on_save_template(self, ev) -> None:
+    def on_save_template(self, ev: object) -> None:
         """Handler for 'Save as Template' button.
 
         Saves the current composition to the Step's template folder.
@@ -1938,7 +1938,7 @@ class RamsesFusionApp:
             self.log(f"Template '{name}' saved to {path}", ram.LogLevel.Info)
 
     @requires_connection
-    def on_setup_scene(self, ev) -> None:
+    def on_setup_scene(self, ev: object) -> None:
         """Handler for 'Setup Scene' button.
 
         Re-applies project settings (resolution, framerate) to the current composition.
@@ -1964,7 +1964,7 @@ class RamsesFusionApp:
         self.refresh_header()
 
     @requires_connection
-    def on_open(self, ev) -> None:
+    def on_open(self, ev: object) -> None:
         """Handler for 'Open' button.
 
         Opens the Ramses open file dialog.
@@ -1975,7 +1975,7 @@ class RamsesFusionApp:
         if self.ramses.host.open():
             self.refresh_header()
 
-    def on_retrieve(self, ev) -> None:
+    def on_retrieve(self, ev: object) -> None:
         """Handler for 'Retrieve Version' button.
 
         Allows the user to rollback to a previous version of the composition.
@@ -1986,7 +1986,7 @@ class RamsesFusionApp:
         if self.ramses.host.restoreVersion():
             self.refresh_header()
 
-    def on_close(self, ev) -> None:
+    def on_close(self, ev: object) -> None:
         """Handler for window close event.
 
         Stops the event dispatcher loop.

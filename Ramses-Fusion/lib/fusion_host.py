@@ -13,7 +13,7 @@ class FusionHost(RamHost):
         LogLevel.Debug: "DEBUG"
     }
 
-    def __init__(self, fusion_obj):
+    def __init__(self, fusion_obj: object) -> None:
         super(FusionHost, self).__init__()
         self.fusion = fusion_obj
         self.hostName = "Fusion"
@@ -37,7 +37,7 @@ class FusionHost(RamHost):
         return path.replace("\\", "/")
 
     @property
-    def comp(self):
+    def comp(self) -> object:
         """Gets the currently active Fusion composition.
 
         Returns:
@@ -64,7 +64,7 @@ class FusionHost(RamHost):
         if not self.comp: return False
         return self.comp.GetAttrs().get('COMPB_Modified', False)
 
-    def _log(self, message:str, level:int):
+    def _log(self, message: str, level: int) -> None:
         """Logs a message to the Fusion console.
 
         Args:
@@ -297,7 +297,7 @@ class FusionHost(RamHost):
     # UI Implementation helpers using UIManager
     # -------------------------------------------------------------------------
 
-    def _request_input(self, title, fields):
+    def _request_input(self, title: str, fields: list) -> dict:
         """Shows a custom modal dialog to request user input.
 
         Uses the Fusion UIManager to create a dynamic form based on the `fields` definition.
@@ -395,7 +395,7 @@ class FusionHost(RamHost):
         
         return results if results else None
 
-    def _create_ui_element(self, ui, field_def):
+    def _create_ui_element(self, ui: object, field_def: dict) -> tuple:
         """Creates a specific UI control based on the field definition.
 
         Args:
