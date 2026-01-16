@@ -1159,9 +1159,9 @@ class FusionHost(RamHost):
         def_idx = next((i for i, s in enumerate(states) if s.shortName() == cur_short), 0)
 
         res = self._request_input("Update Status", [
-            {'id': 'Comment', 'label': 'Comment:', 'type': 'text', 'default': cur_comment, 'lines': 6},
-            {'id': 'State', 'label': 'State:', 'type': 'combo', 'options': state_opts, 'default': def_idx},
-            {'id': 'Publish', 'label': 'Publish:', 'type': 'checkbox', 'default': False}
+            {'id': 'Comment', 'label': 'Version Note:', 'type': 'text', 'default': cur_comment, 'lines': 6},
+            {'id': 'State', 'label': 'New State:', 'type': 'combo', 'options': state_opts, 'default': def_idx},
+            {'id': 'Publish', 'label': 'Publish Final:', 'type': 'checkbox', 'default': False}
         ])
         
         if not res: return None

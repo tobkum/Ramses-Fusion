@@ -174,7 +174,7 @@ class RamsesFusionApp:
                         "id": "W",
                         "label": "",
                         "type": "label",
-                        "default": "Save as valid Step first.",
+                        "default": "<font color='#ffcc00'><b>Scene Identity Missing</b></font><br>Please Save or Setup Scene to register this file in the pipeline.",
                     }
                 ],
             )
@@ -324,7 +324,7 @@ class RamsesFusionApp:
                             "id": "E",
                             "label": "",
                             "type": "label",
-                            "default": "Could not reach the Ramses Client. \n\nPlease make sure Ramses is running and you are logged in.",
+                            "default": "<font color='#ff4444'><b>Ramses Client Offline</b></font><br><br>Could not reach the Ramses Client daemon. Please ensure the app is running and you are logged in.",
                         }
                     ],
                 )
@@ -544,7 +544,7 @@ class RamsesFusionApp:
 
             if expected_frames > 0 and actual_frames != expected_frames:
                 errors.append(
-                    f"• Frame Range Mismatch: DB expects {expected_frames} frames, Comp is set to render {actual_frames}."
+                    f"<font color='#ffcc00'>▶</font> <b>Frame Range:</b> DB expects {expected_frames}, Comp is {actual_frames}"
                 )
 
         # 2. Check Resolution (Respects Overrides)
@@ -559,7 +559,7 @@ class RamsesFusionApp:
 
         if db_w != comp_w or db_h != comp_h:
             errors.append(
-                f"• Resolution Mismatch: DB expects {db_w}x{db_h}, Comp is {comp_w}x{comp_h}."
+                f"<font color='#ffcc00'>▶</font> <b>Resolution:</b> DB expects {db_w}x{db_h}, Comp is {comp_w}x{comp_h}"
             )
 
         # 3. Check Framerate (Respects Overrides)
@@ -568,18 +568,18 @@ class RamsesFusionApp:
 
         if abs(db_fps - comp_fps) > 0.001:
             errors.append(
-                f"• Framerate Mismatch: DB expects {db_fps} fps, Comp is set to {comp_fps} fps."
+                f"<font color='#ffcc00'>▶</font> <b>Framerate:</b> DB expects {db_fps} fps, Comp is {comp_fps} fps"
             )
 
         # 4. Check Saver Connections
         def check_anchor(tool_name):
             node = comp.FindTool(tool_name)
             if not node:
-                return f"• Missing Anchor: '{tool_name}' node not found. Run 'Setup Scene' to create it."
+                return f"<font color='#ff4444'>▶</font> <b>Missing Anchor:</b> Node '{tool_name}' not found."
 
             inp = node.FindMainInput(1)
             if not inp or inp.GetConnectedOutput() is None:
-                return f"• Disconnected Anchor: '{tool_name}' node has no input connection."
+                return f"<font color='#ff4444'>▶</font> <b>Disconnected:</b> '{tool_name}' has no input."
             return None
 
         if check_preview:
@@ -593,7 +593,7 @@ class RamsesFusionApp:
                 errors.append(err_final)
 
         if errors:
-            return False, "\n".join(errors)
+            return False, "<br><br>".join(errors)
         return True, ""
 
     def _sync_render_anchors(self) -> None:
@@ -1834,7 +1834,7 @@ class RamsesFusionApp:
                 [
                     {
                         "id": "W",
-                        "label": "Technical Mismatches found:",
+                        "label": "Issues Found:",
                         "type": "label",
                         "default": msg,
                     },
@@ -1871,7 +1871,7 @@ class RamsesFusionApp:
                 [
                     {
                         "id": "W",
-                        "label": "Technical Mismatches found:",
+                        "label": "Issues Found:",
                         "type": "label",
                         "default": msg,
                     },
