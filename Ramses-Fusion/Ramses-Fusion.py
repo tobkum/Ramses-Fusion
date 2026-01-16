@@ -898,13 +898,15 @@ class RamsesFusionApp:
             VGroup: The Fusion UI container.
         """
         bg_color = "#2a3442"  # Very Dark Desaturated Blue
+        header_ss = "background-color: #1a1a1a; color: #888; border-top: 1px solid #111; border-bottom: 1px solid #333; padding-left: 5px;"
         return self.ui.VGroup(
             [
                 self.ui.Label(
                     {
                         "Text": "PROJECT & SCENE",
                         "Weight": 0,
-                        "Font": self.ui.Font({"PixelSize": 11, "Bold": True}),
+                        "Font": self.ui.Font({"PixelSize": 10, "Bold": True}),
+                        "StyleSheet": header_ss
                     }
                 ),
                 self.create_button(
@@ -947,13 +949,15 @@ class RamsesFusionApp:
             VGroup: The Fusion UI container.
         """
         bg_color = "#342a42"  # Very Dark Desaturated Purple
+        header_ss = "background-color: #1a1a1a; color: #888; border-top: 1px solid #111; border-bottom: 1px solid #333; padding-left: 5px;"
         return self.ui.VGroup(
             [
                 self.ui.Label(
                     {
                         "Text": "ASSETS & TOOLS",
                         "Weight": 0,
-                        "Font": self.ui.Font({"PixelSize": 11, "Bold": True}),
+                        "Font": self.ui.Font({"PixelSize": 10, "Bold": True}),
+                        "StyleSheet": header_ss
                     }
                 ),
                 self.create_button(
@@ -989,13 +993,15 @@ class RamsesFusionApp:
             VGroup: The Fusion UI container.
         """
         bg_color = "#2a423d"  # Very Dark Desaturated Teal
+        header_ss = "background-color: #1a1a1a; color: #888; border-top: 1px solid #111; border-bottom: 1px solid #333; padding-left: 5px;"
         return self.ui.VGroup(
             [
                 self.ui.Label(
                     {
                         "Text": "SAVING & ITERATION",
                         "Weight": 0,
-                        "Font": self.ui.Font({"PixelSize": 11, "Bold": True}),
+                        "Font": self.ui.Font({"PixelSize": 10, "Bold": True}),
+                        "StyleSheet": header_ss
                     }
                 ),
                 self.create_button(
@@ -1038,13 +1044,15 @@ class RamsesFusionApp:
             VGroup: The Fusion UI container.
         """
         bg_color = "#2a422a"  # Very Dark Desaturated Green
+        header_ss = "background-color: #1a1a1a; color: #888; border-top: 1px solid #111; border-bottom: 1px solid #333; padding-left: 5px;"
         return self.ui.VGroup(
             [
                 self.ui.Label(
                     {
                         "Text": "REVIEW & PUBLISH",
                         "Weight": 0,
-                        "Font": self.ui.Font({"PixelSize": 11, "Bold": True}),
+                        "Font": self.ui.Font({"PixelSize": 10, "Bold": True}),
+                        "StyleSheet": header_ss
                     }
                 ),
                 self.create_button(
@@ -1073,13 +1081,15 @@ class RamsesFusionApp:
             VGroup: The Fusion UI container.
         """
         bg_color = "#333333"  # Dark Grey
+        header_ss = "background-color: #1a1a1a; color: #888; border-top: 1px solid #111; border-bottom: 1px solid #333; padding-left: 5px;"
         return self.ui.VGroup(
             [
                 self.ui.Label(
                     {
                         "Text": "SETTINGS & INFO",
                         "Weight": 0,
-                        "Font": self.ui.Font({"PixelSize": 11, "Bold": True}),
+                        "Font": self.ui.Font({"PixelSize": 10, "Bold": True}),
+                        "StyleSheet": header_ss
                     }
                 ),
                 self.create_button(
@@ -1134,10 +1144,12 @@ class RamsesFusionApp:
         Returns:
             Button: The created Fusion UI button.
         """
-        # Base Style
+        # Base Style: Reverted to the original flat 1px solid #222 border
         ss = f"QPushButton {{ text-align: left; padding-left: 12px; border: 1px solid #222; border-radius: 3px;"
+        
         if accent_color:
             ss += f" background-color: {accent_color}; }}"
+            
             # Calculate Hover (slightly brighter)
             h = accent_color.lstrip("#")
             hr, hg, hb = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
@@ -1150,7 +1162,7 @@ class RamsesFusionApp:
             pressed = "#%02x%02x%02x" % (
                 max(0, hr - 10),
                 max(0, hg - 10),
-                max(0, hb - 10),
+                max(0, hb - 10)
             )
 
             ss += f" QPushButton:hover {{ background-color: {hover}; }}"
@@ -1165,8 +1177,8 @@ class RamsesFusionApp:
                 "Text": text if text else "",
                 "Weight": weight,
                 "ToolTip": tooltip,
-                "MinimumSize": min_size or [16, 28],
-                "MaximumSize": max_size or [2000, 28],
+                "MinimumSize": min_size or [16, 30],
+                "MaximumSize": max_size or [2000, 30],
                 "IconSize": [16, 16],
                 "Icon": self._get_icon(icon_name),
                 "StyleSheet": ss,
