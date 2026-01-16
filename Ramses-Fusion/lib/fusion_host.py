@@ -71,17 +71,8 @@ class FusionHost(RamHost):
         if not item:
             return {}
 
-        # Try to get the project from the item itself to avoid using the Daemon's active project
-        project = item.project()
-        p_uuid = item.get("project", "")
-        if p_uuid:
-            if not project or project.uuid() != p_uuid:
-                from ramses import RamProject
-
-                project = RamProject(p_uuid)
-
-        if not project:
-            project = RAMSES.project()
+        # STRICT MODE: Always use the Daemon's active project
+        project = RAMSES.project()
 
         if not project:
             return {}
@@ -117,8 +108,14 @@ class FusionHost(RamHost):
     def resolvePreviewPath(self) -> str:
         """Resolves the official flat preview path for the current shot."""
         try:
+            # STRICT MODE: Rely on the Daemon's active project to ensure data freshness
+            project = RAMSES.project()
+            if not project:
+                return ""
+                
+            preview_folder = project.previewPath()
+            
             pub_info = self.publishInfo()
-            preview_folder = self.previewPath()
             
             preview_info = pub_info.copy()
             preview_info.version = -1
@@ -133,7 +130,9 @@ class FusionHost(RamHost):
     def resolveFinalPath(self) -> str:
         """Resolves the official master export path for the current shot."""
         try:
+            # STRICT MODE: Rely on the Daemon's active project
             project = RAMSES.project()
+            
             if not project: return ""
             
             export_folder = project.exportPath()
@@ -182,6 +181,12 @@ class FusionHost(RamHost):
             if item:
                 settings = self.collectItemSettings(item)
                 self._setupCurrentFile(item, self.currentStep(), settings)
+        
+        # Always persist identity metadata before saving
+        if not setupFile:
+            item = self.currentItem()
+            if item:
+                self._store_ramses_metadata(item)
 
         # Calling super().save with setupFile=False avoids the API's __collectItemSettings 
         # while safely calling the private __save method without name-mangling.
@@ -535,6 +540,17 @@ class FusionHost(RamHost):
         ext = os.path.splitext(src)[1].lstrip(".")
 
         # Use the official API to get the correct publish path
+        # 0. Sync Render Anchors (Critical for path validity)
+        # Note: Handled by caller (RamsesFusionApp) or here?
+        # App calls _sync_render_anchors() before save(), so we assume paths are correct.
+
+        # 1. Store Internal Metadata (Project/Item UUID consistency)
+        # This ensures we can identify the file's project even if paths are ambiguous.
+        item = self.currentItem()
+        if item:
+            self._store_ramses_metadata(item)
+
+        # 2. File Operation
         dst = self.normalizePath(self.publishFilePath(ext, "", publishInfo))
 
         self.log(f"Publishing SRC: {src}", LogLevel.Info)
@@ -703,6 +719,24 @@ class FusionHost(RamHost):
             # Final / default
             node.SetInput("QuickTimeMovies.Compression", "Apple ProRes 4444_ap4h", 0)
 
+    def _store_ramses_metadata(self, item: RamItem) -> None:
+        """Embeds Ramses identity (Project/Item UUIDs) into Fusion composition metadata."""
+        if not self.comp or not item:
+            return
+        
+        try:
+            # Store Item UUID
+            self.comp.SetData("Ramses.ItemUUID", str(item.uuid()))
+            
+            # Store Project UUID (Resolves cross-project ambiguity)
+            project = item.project() or RAMSES.project()
+            if project:
+                self.comp.SetData("Ramses.ProjectUUID", str(project.uuid()))
+                
+            self.log(f"Embedded Ramses Metadata: {item.name()}", LogLevel.Debug)
+        except Exception as e:
+            self.log(f"Failed to embed metadata: {e}", LogLevel.Warning)
+
     def _setupCurrentFile(self, item: RamItem, step: RamStep, setupOptions: dict) -> bool:
         if not self.comp:
             return False
@@ -776,6 +810,9 @@ class FusionHost(RamHost):
 
         if new_attrs:
             self.comp.SetAttrs(new_attrs)
+
+        # Persist Identity Metadata
+        self._store_ramses_metadata(item)
 
         return True
 

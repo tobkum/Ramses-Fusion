@@ -9,6 +9,8 @@ This list tracks planned improvements to elevate the Ramses-Fusion plugin for pr
 - [x] **Optimization**: Batched `SetPrefs()` calls (5 -> 1).
 - [x] **Code Quality**: Implemented `@requires_connection` decorator (-22 lines of boilerplate).
 - [x] **Documentation**: Added type hints (19 methods) and docstrings (26 methods).
+- [x] **New Feature**: Internal Metadata Persistence (UUIDs embedded in `.comp`).
+- [x] **Safety**: Strict Project Context Enforcement (Blocks cross-project work).
 
 ---
 
@@ -23,8 +25,6 @@ This list tracks planned improvements to elevate the Ramses-Fusion plugin for pr
     - [ ] **UX**: Visual indicator (🔓/🔒) in header. Heartbeat to prevent stale locks.
 - [ ] **Write Permission Validation**
     - Pre-check write permissions on target directories before attempting render/save/publish actions.
-- [ ] **Internal Metadata Persistence**
-    - Store Ramses UUIDs (Item, Step, Project) directly inside Fusion `comp.SetData()` for resilience.
 
 ## Pipeline Intelligence
 - [ ] **Dependency Tracking (Ramses "Uses")**

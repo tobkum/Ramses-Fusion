@@ -155,12 +155,62 @@ class RamsesFusionApp:
             # We need to re-fetch the item ONLY if online to determine pipeline status
             # If offline, item is None, so pipeline buttons are disabled anyway.
             item = self.current_item if is_online else None
-            is_pipeline = item is not None and bool(item.uuid())
+            
+            # Check Project Mismatch
+            is_mismatch = False
+            if item and is_online:
+                active_proj = self.ramses.project()
+                # Try to get item project (safe, cached inside item usually)
+                item_proj = item.project()
+                
+                # Check 0: Metadata (The Golden Source)
+                meta_uuid = ""
+                try: 
+                    meta_uuid = self.ramses.host.comp.GetData("Ramses.ProjectUUID")
+                except: pass
+                
+                if meta_uuid:
+                    if active_proj and str(active_proj.uuid()) != meta_uuid:
+                         self.log(f"Project Mismatch (Metadata): Active={active_proj.uuid()} vs File={meta_uuid}", ram.LogLevel.Warning)
+                         is_mismatch = True
+                else:
+                    # Fallback Legacy Checks
+                    # 1. UUID Check (Can be false positive if using active project context)
+                    if active_proj and item_proj and str(active_proj.uuid()) != str(item_proj.uuid()):
+                        is_mismatch = True
+                    
+                    # 2. Path Check (If project root is available)
+                    # (Simplified for now as metadata is the primary solution)
+                    proj_path = "Unknown"
+                    try:
+                        # Try known candidates if available
+                        if hasattr(active_proj, "basePath"): proj_path = active_proj.basePath()
+                        elif hasattr(active_proj, "data"): 
+                            d = active_proj.data() or {}
+                            proj_path = d.get("path")
+                    except: pass
+                    
+                    if active_proj and proj_path and proj_path != "Unknown":
+                        cur_file = self.ramses.host.currentFilePath()
+                        n_proj = proj_path.replace("\\", "/").lower()
+                        n_file = cur_file.replace("\\", "/").lower()
+                        if not n_file.startswith(n_proj):
+                             is_mismatch = True
 
-            # Group 1: Pipeline Buttons (Require Connection AND valid Ramses Item)
+            is_pipeline = item is not None and bool(item.uuid()) and not is_mismatch
+
+            # Group 1: Pipeline Buttons (Require Connection AND valid Item AND matching Project)
             for btn_id in self.PIPELINE_BUTTONS:
                 if btn_id in items:
                     items[btn_id].Enabled = is_online and is_pipeline
+
+            # Update Header for Mismatch
+            if is_mismatch and "ContextLabel" in items:
+                 items["ContextLabel"].Text = (
+                     "<font color='#ff4444'><b>PROJECT MISMATCH</b></font><br>"
+                     "<font color='#999'>File belongs to different project.<br>"
+                     "Please switch project in Ramses App.</font>"
+                 )
 
             # Group 2: DB Buttons (Require Connection, but not necessarily an Item)
             for btn_id in self.DB_BUTTONS:
@@ -1033,11 +1083,24 @@ class RamsesFusionApp:
         host = self.ramses.host
         daemon = self.ramses.daemonInterface()
 
-        # 1. Initial Data Fetch (Minimal)
-        all_projects = daemon.getObjects("RamProject")
-        if not all_projects:
-            self.log("No projects found in Ramses.", ram.LogLevel.Warning)
+        # 1. Initial Data Fetch (Strict Mode: Only Active Project)
+        active_project = self.ramses.project()
+        if not active_project:
+            self.ramses.host._request_input(
+                "Ramses Offline",
+                [
+                    {
+                        "id": "Msg",
+                        "label": "Error:",
+                        "type": "text",
+                        "default": "No active project found.\nPlease log in to a project in the Ramses Client.",
+                        "lines": 3,
+                    }
+                ],
+            )
             return
+
+        all_projects = [active_project]
 
         # Pre-cache states once for global state names (small payload)
         all_states = self.ramses.states()
@@ -1077,7 +1140,12 @@ class RamsesFusionApp:
                             ui.HGroup(
                                 [
                                     ui.Label({"Text": "Project:", "Weight": 0.25}),
-                                    ui.ComboBox({"ID": "ProjCombo", "Weight": 0.75}),
+                                    ui.Label({
+                                        "ID": "ProjLabel", 
+                                        "Text": active_project.name(), 
+                                        "Weight": 0.75,
+                                        "StyleSheet": "font-weight: bold; font-size: 14px;"
+                                    }),
                                 ]
                             ),
                             ui.HGroup(
@@ -1320,7 +1388,6 @@ class RamsesFusionApp:
                 self.log(f"Error loading project: {e}", ram.LogLevel.Critical)
 
         # 4. Event Binding
-        dlg.On.ProjCombo.CurrentIndexChanged = on_project_changed
         dlg.On.StepCombo.CurrentIndexChanged = (
             update_shots  # Changing step refreshes shots
         )
@@ -1340,20 +1407,45 @@ class RamsesFusionApp:
         dlg.On[win_id].Close = on_cancel
 
         # 5. Initialization
-        for p in session_cache["projects"]:
-            itm["ProjCombo"].AddItem(p.name())
+        # Load the single active project immediately
+        try:
+            proj = active_project
+            proj_uuid = str(proj.uuid())
+            self.log(f"Loading {proj.name()}...", ram.LogLevel.Info)
 
-        initial_proj_idx = 0
-        if cur_project:
-            cur_p_uuid = str(cur_project.uuid())
-            for i, p in enumerate(session_cache["projects"]):
-                if str(p.uuid()) == cur_p_uuid:
-                    initial_proj_idx = i
-                    break
+            # 1. Chunked Shot Fetching
+            sequences = proj.sequences()
+            seq_map = {str(s.uuid()): s.shortName() for s in sequences}
+            shots = []
+            for seq in sequences:
+                shots.extend(proj.shots(sequence=seq))
+            shots.extend(proj.shots(sequence=""))
 
-        # Trigger cascade: Project -> Step -> Shot
-        itm["ProjCombo"].CurrentIndex = initial_proj_idx
-        on_project_changed()
+            unique_shots = []
+            seen_uuids = set()
+            for s in shots:
+                u = str(s.uuid())
+                if u not in seen_uuids:
+                    unique_shots.append(s)
+                    seen_uuids.add(u)
+
+            # 2. Steps
+            steps = proj.steps(ram.StepType.SHOT_PRODUCTION)
+
+            session_cache["project_data"][proj_uuid] = {
+                "shots": unique_shots,
+                "seq_map": seq_map,
+                "steps": steps,
+            }
+
+            p_data = session_cache["project_data"][proj_uuid]
+            session_cache["current_shots"] = p_data["shots"]
+            session_cache["current_seq_map"] = p_data["seq_map"]
+            session_cache["current_steps"] = p_data["steps"]
+
+            update_steps()
+        except Exception as e:
+            self.log(f"Error loading project: {e}", ram.LogLevel.Critical)
 
         # 6. Show Dialog
         self.dlg.Enabled = False
