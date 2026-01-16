@@ -1469,6 +1469,19 @@ class RamsesFusionApp:
                         host.comp.Save(host.normalizePath(selected_path))
 
                     if host.save(comment="Initial creation", setupFile=True):
+                        # Auto-update status to WIP if needed
+                        try:
+                            status = host.currentStatus()
+                            target_state = self.ramses.defaultState()
+                            
+                            if status and target_state and status.state().shortName() != target_state.shortName():
+                                status.setState(target_state)
+                                status.setComment("Initial creation")
+                                status.setVersion(host.currentVersion())
+                                self.log(f"Auto-updated status to {target_state.name()}", ram.LogLevel.Info)
+                        except Exception as e:
+                            self.log(f"Could not auto-update status: {e}", ram.LogLevel.Warning)
+
                         self.refresh_header()
                         self.log(
                             f"New shot initialized: {selected_path}", ram.LogLevel.Info
