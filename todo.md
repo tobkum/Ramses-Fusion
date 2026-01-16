@@ -11,7 +11,10 @@ This list tracks planned improvements to elevate the Ramses-Fusion plugin for pr
 - [x] **Documentation**: Added type hints (19 methods) and docstrings (26 methods).
 - [x] **New Feature**: Internal Metadata Persistence (UUIDs embedded in `.comp`).
 - [x] **Safety**: Strict Project Context Enforcement (Blocks cross-project work).
-- [x] **Security**: Role-Based UI State Management (Conditional access for "Publish Settings" button; supports solo vs. multi-user logic).
+- [x] **Security**: Role-Based UI State Management (Conditional access for "Step Configuration" button; supports solo vs. multi-user logic).
+- [x] **UX/UI**: Modernized Context Header ("Hero ID" hierarchy, Ramses-synced Step/State colors).
+- [x] **UX/UI**: Live Priority Indicators (Heat-mapped '!', '!!', '!!!' markers).
+- [x] **UX/UI**: Professional Dialog Engine (Non-editable labels, semantic button labels, and two-tier validation hierarchy).
 
 ---
 
@@ -81,7 +84,7 @@ This list tracks planned improvements to elevate the Ramses-Fusion plugin for pr
     - [ ] **The "Summoner"**: Global hotkey to pop up the UI at the mouse cursor position.
 - [ ] **Visual Feedback & Awareness**
     - [ ] **Visual Thumbnails**: Display Ramses preview frames in Version/Shot selection.
-    - [ ] **Contextual Header Badges**: Dynamic colored status/priority tags in the header.
+    - [x] **Contextual Header Badges**: Dynamic colored status/priority tags in the header.
     - [ ] **Outdated Asset Scanner**: Badge notification if Loader nodes have newer versions in Ramses.
 - [ ] **Interface & Layout**
     - [ ] **Collapsible Sections**: Allow folding away groups (e.g., Assets, Settings) to save space.
