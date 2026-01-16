@@ -297,7 +297,7 @@ class FusionHost(RamHost):
     # UI Implementation helpers using UIManager
     # -------------------------------------------------------------------------
 
-    def _request_input(self, title: str, fields: list, ok_text: str = "OK", cancel_text: str = "Cancel", icon: object = None) -> dict:
+    def _request_input(self, title: str, fields: list, ok_text: str = "OK", cancel_text: str = "Cancel") -> dict:
         """Shows a custom modal dialog to request user input.
 
         Uses the Fusion UIManager to create a dynamic form based on the `fields` definition.
@@ -308,7 +308,6 @@ class FusionHost(RamHost):
             fields (list of dict): A list of field definitions.
             ok_text (str): Label for the primary action button.
             cancel_text (str): Label for the secondary button (hidden if None/empty).
-            icon (Icon, optional): A Fusion UI Icon object to display on the left.
 
         Returns:
             dict: A dictionary mapping field IDs to their values if the user clicks OK,
@@ -337,24 +336,6 @@ class FusionHost(RamHost):
             total_height += height + 5 # Add small padding between rows
             rows.append(ui.HGroup([label, ctrl]))
 
-        # Build Body with optional icon
-        body_elements = []
-        if icon:
-            body_elements.append(ui.Button({
-                "ID": "IconBtn", 
-                "Icon": icon, 
-                "Flat": True, 
-                "Enabled": False, 
-                "Weight": 0, 
-                "MinimumSize": [64, 64],
-                "MaximumSize": [64, 64],
-                "IconSize": [48, 48],
-                "StyleSheet": "border: none; background: transparent;"
-            }))
-            body_elements.append(ui.HGap(10))
-
-        body_elements.append(ui.VGroup({"Spacing": 5, "Weight": 1}, rows))
-
         # Build Button Group
         buttons = [ui.HGap(0, 1)]
         buttons.append(ui.Button({"ID": "OkBtn", "Text": ok_text, "Weight": 0, "MinimumSize": [100, 30]}))
@@ -369,7 +350,7 @@ class FusionHost(RamHost):
                 "MaximumSize": [800, 1000] # Prevent crazy growth
             },
             ui.VGroup([
-                ui.HGroup({"Weight": 1}, body_elements),
+                ui.VGroup({"Spacing": 5, "Weight": 0}, rows),
                 ui.VGap(0, 1), # Stretch gap to push buttons down and keep rows tight
                 ui.VGap(10),
                 ui.HGroup({"Weight": 0}, buttons)

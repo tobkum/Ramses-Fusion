@@ -545,7 +545,7 @@ class RamsesFusionApp:
 
             if expected_frames > 0 and actual_frames != expected_frames:
                 errors.append(
-                    f"<font color='#ffcc00'><b>Frame Range Mismatch</b></font><br><font color='#999'>Database: {expected_frames} | Composition: {actual_frames}</font>"
+                    f"<font color='#ffcc00'><b>Frame Range Mismatch</b></font><br><font color='#999'>Database: <b>{expected_frames}</b> | Composition: <b>{actual_frames}</b></font>"
                 )
 
         # 2. Check Resolution (Respects Overrides)
@@ -560,7 +560,7 @@ class RamsesFusionApp:
 
         if db_w != comp_w or db_h != comp_h:
             errors.append(
-                f"<font color='#ffcc00'><b>Resolution Mismatch</b></font><br><font color='#999'>Database: {db_w}x{db_h} | Composition: {comp_w}x{comp_h}</font>"
+                f"<font color='#ffcc00'><b>Resolution Mismatch</b></font><br><font color='#999'>Database: <b>{db_w}x{db_h}</b> | Composition: <b>{comp_w}x{comp_h}</b></font>"
             )
 
         # 3. Check Framerate (Respects Overrides)
@@ -569,7 +569,7 @@ class RamsesFusionApp:
 
         if abs(db_fps - comp_fps) > 0.001:
             errors.append(
-                f"<font color='#ffcc00'><b>Framerate Mismatch</b></font><br><font color='#999'>Database: {db_fps} fps | Composition: {comp_fps} fps</font>"
+                f"<font color='#ffcc00'><b>Framerate Mismatch</b></font><br><font color='#999'>Database: <b>{db_fps} fps</b> | Composition: <b>{comp_fps} fps</b></font>"
             )
 
         # 4. Check Saver Connections
@@ -628,13 +628,11 @@ class RamsesFusionApp:
                 "type": "label",
                 "default": "<font color='#ff4444'><b>Critical errors found.</b></font><br>Please resolve the issues above before continuing.",
             })
-            # Use 'ramstatus.png' (Red) for hard errors
             self.ramses.host._request_input(
                 "Validation Error", 
                 fields, 
                 ok_text="Understood", 
-                cancel_text=None,
-                icon=self._get_icon("ramstatus.png")
+                cancel_text=None
             )
             return False
         else:
@@ -644,13 +642,11 @@ class RamsesFusionApp:
                 "type": "label",
                 "default": "<b>Continue anyway?</b><br><font color='#777'>Choosing 'Ignore' may lead to technical rejection.</font>",
             })
-            # Use 'ramsettings.png' (Orange/Yellow) for warnings
             res = self.ramses.host._request_input(
                 "Validation Warning", 
                 fields, 
                 ok_text="Ignore & Proceed", 
-                cancel_text="Abort and fix",
-                icon=self._get_icon("ramsettings.png")
+                cancel_text="Abort and fix"
             )
             return res is not None
 
