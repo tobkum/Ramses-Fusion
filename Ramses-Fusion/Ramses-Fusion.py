@@ -358,20 +358,32 @@ class RamsesFusionApp:
             
         # 2. State (Status) with color
         state_label = ""
+        priority_suffix = ""
         try:
             status = self.ramses.host.currentStatus()
-            if status and status.state():
-                state = status.state()
-                state_color = state.colorName()
-                # Use shortName for a cleaner look
-                state_label = f" <font color='#555'>|</font> <font color='{state_color}'><b>{state.shortName()}</b></font>"
+            
+            if status:
+                # Priority Suffix logic
+                prio = int(status.get("priority", 0))
+                if prio == 1:
+                    priority_suffix = " <font color='#ffcc00'>!</font>" # Yellow
+                elif prio == 2:
+                    priority_suffix = " <font color='#ff8800'>!!</font>" # Orange
+                elif prio >= 3:
+                    priority_suffix = " <font color='#ff0000'>!!!</font>" # Deep Red
+
+                if status.state():
+                    state = status.state()
+                    state_color = state.colorName()
+                    # Use shortName for a cleaner look
+                    state_label = f" <font color='#555'>|</font> <font color='{state_color}'><b>{state.shortName()}</b></font>"
         except Exception:
             pass
 
         # HERO ID Layout
         return (
             f"<font color='#777' size='3'>{project_name.upper()}</font><br>"
-            f"<font color='#FFF' size='5'><b>{item_name}</b></font><br>"
+            f"<font color='#FFF' size='5'><b>{item_name}</b>{priority_suffix}</font><br>"
             f"<font size='3'>{step_name}{state_label}</font>"
         )
 
