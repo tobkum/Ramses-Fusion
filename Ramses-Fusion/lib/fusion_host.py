@@ -358,8 +358,11 @@ class FusionHost(RamHost):
         )
         
         results = {}
+        # Track if the user actually clicked OK
+        confirmed = [False]
         
         def on_ok(ev):
+            confirmed[0] = True
             items = dlg.GetItems()
             for f in fields:
                 if f['type'] == 'label':
@@ -401,7 +404,7 @@ class FusionHost(RamHost):
             if main_win:
                 main_win.Enabled = True
         
-        return results if results else None
+        return results if confirmed[0] else None
 
     def _create_ui_element(self, ui: object, field_def: dict) -> tuple:
         """Creates a specific UI control based on the field definition.
