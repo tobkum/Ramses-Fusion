@@ -52,8 +52,8 @@ This list tracks planned improvements to elevate the Ramses-Fusion plugin for pr
     - **Goal**: replace "email storms" with targeted channel notifications.
 
 ## Production Compliance
-- [ ] **User Role Permissions**
-    - Disable "Publish" button if user role (e.g., 'Artist') lacks publish rights in Ramses.
+- [ ] **Role-Based UI State Management**
+    - Dynamically enable/disable UI elements (e.g., Publish, Settings, Admin tools) based on the authenticated user's permissions and role within Ramses.
 - [ ] **Approval Workflow**
     - Require Supervisor 'Approved' status in Ramses before allowing a 'Final' publish.
 - [ ] **Audit Trail**
