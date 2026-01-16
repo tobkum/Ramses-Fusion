@@ -1309,73 +1309,20 @@ class RamsesFusionApp:
                     itm["StepCombo"].AddItem(s.name())
 
                 # Pre-selection logic
-                proj_idx = int(itm["ProjCombo"].CurrentIndex)
-                if proj_idx >= 0:
-                    proj = session_cache["projects"][proj_idx]
-                    if cur_step and str(proj.uuid()) == str(cur_project.uuid()):
-                        cur_uuid = str(cur_step.uuid())
-                        for i, s in enumerate(fusion_steps):
-                            if str(s.uuid()) == cur_uuid:
-                                itm["StepCombo"].CurrentIndex = i
-                                session_cache["initial_step_idx"] = i
-                                break
-                    else:
-                        itm["StepCombo"].CurrentIndex = 0
+                itm["StepCombo"].CurrentIndex = 0
+                if cur_step:
+                    cur_uuid = str(cur_step.uuid())
+                    for i, s in enumerate(fusion_steps):
+                        if str(s.uuid()) == cur_uuid:
+                            itm["StepCombo"].CurrentIndex = i
+                            session_cache["initial_step_idx"] = i
+                            break
 
                 update_shots()
             except Exception as e:
                 self.log(f"Error updating steps: {e}", ram.LogLevel.Critical)
 
-        def on_project_changed(ev=None):
-            try:
-                idx = int(itm["ProjCombo"].CurrentIndex)
-                if idx < 0 or idx == session_cache["last_proj_idx"]:
-                    return
-                session_cache["last_proj_idx"] = idx
 
-                proj = session_cache["projects"][idx]
-                proj_uuid = str(proj.uuid())
-
-                if proj_uuid not in session_cache["project_data"]:
-                    self.log(f"Loading {proj.name()}...", ram.LogLevel.Info)
-
-                    # 1. Chunked Shot Fetching: Fetch by sequence to avoid 64KB API buffer limit
-                    sequences = proj.sequences()
-                    seq_map = {str(s.uuid()): s.shortName() for s in sequences}
-
-                    shots = []
-                    # Get shots per sequence
-                    for seq in sequences:
-                        shots.extend(proj.shots(sequence=seq))
-                    # Get shots with no sequence
-                    shots.extend(proj.shots(sequence=""))
-
-                    # Remove duplicates
-                    unique_shots = []
-                    seen_uuids = set()
-                    for s in shots:
-                        u = str(s.uuid())
-                        if u not in seen_uuids:
-                            unique_shots.append(s)
-                            seen_uuids.add(u)
-
-                    # 2. Steps: Fetch only project-relevant steps
-                    steps = proj.steps(ram.StepType.SHOT_PRODUCTION)
-
-                    session_cache["project_data"][proj_uuid] = {
-                        "shots": unique_shots,
-                        "seq_map": seq_map,
-                        "steps": steps,
-                    }
-
-                p_data = session_cache["project_data"][proj_uuid]
-                session_cache["current_shots"] = p_data["shots"]
-                session_cache["current_seq_map"] = p_data["seq_map"]
-                session_cache["current_steps"] = p_data["steps"]
-
-                update_steps()
-            except Exception as e:
-                self.log(f"Error loading project: {e}", ram.LogLevel.Critical)
 
         # 4. Event Binding
         dlg.On.StepCombo.CurrentIndexChanged = (
