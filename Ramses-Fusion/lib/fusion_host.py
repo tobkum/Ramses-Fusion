@@ -25,25 +25,53 @@ class FusionHost(RamHost):
 
     @staticmethod
     def normalizePath(path: str) -> str:
-        """Centralized path normalization for Fusion (forward slashes)."""
+        """Centralized path normalization for Fusion (forward slashes).
+
+        Args:
+            path (str): The file path to normalize.
+
+        Returns:
+            str: The normalized path with forward slashes, or empty string if input is None/empty.
+        """
         if not path: return ""
         return path.replace("\\", "/")
 
     @property
     def comp(self):
-        """Always get the currently active composition."""
+        """Gets the currently active Fusion composition.
+
+        Returns:
+            object: The active Fusion composition object, or None if not available.
+        """
         return self.fusion.GetCurrentComp()
 
     def currentFilePath(self) -> str:
+        """Gets the file path of the current composition.
+
+        Returns:
+            str: The normalized full path to the current composition file, or empty string if not saved.
+        """
         if not self.comp: return ""
         path = self.comp.GetAttrs().get('COMPS_FileName', '')
         return self.normalizePath(path)
 
     def _isDirty(self) -> bool:
+        """Checks if the current composition has unsaved changes.
+
+        Returns:
+            bool: True if the composition is modified (dirty), False otherwise.
+        """
         if not self.comp: return False
         return self.comp.GetAttrs().get('COMPB_Modified', False)
 
     def _log(self, message:str, level:int):
+        """Logs a message to the Fusion console.
+
+        Args:
+            message (str): The message to log.
+            level (int): The severity level (from Ramses LogLevel). 
+                         Levels below Info are ignored.
+        """
         # Silence anything below Info level (0=Debug, -1=DataSent, -2=DataReceived)
         if level < LogLevel.Info:
             return
@@ -53,7 +81,16 @@ class FusionHost(RamHost):
 
     @staticmethod
     def _sanitizeNodeName(name: str) -> str:
-        """Ensures a string is a valid Fusion node name (alphanumeric, starts with letter)."""
+        """Ensures a string is a valid Fusion node name.
+
+        Fusion node names must be alphanumeric (underscores allowed) and cannot start with a digit.
+
+        Args:
+            name (str): The proposed name.
+
+        Returns:
+            str: A sanitized, valid node name.
+        """
         if not name:
             return ""
         # Remove invalid chars (keep only alphanumeric and underscore)
@@ -64,9 +101,18 @@ class FusionHost(RamHost):
         return safe_name
 
     def collectItemSettings(self, item: RamItem) -> dict:
-        """
-        Optimized version of base class __collectItemSettings.
+        """Collects resolution and timing settings for the given item.
+
+        Optimized version of base class `__collectItemSettings`.
         Uses API methods to handle overrides correctly while benefiting from DAEMON caching.
+        Specifically handles Sequence-level overrides for Shot items.
+
+        Args:
+            item (RamItem): The item to collect settings for.
+
+        Returns:
+            dict: A dictionary containing 'width', 'height', 'framerate', 'duration', 
+                  'pixelAspectRatio', and optionally 'frames'.
         """
         if not item:
             return {}
@@ -106,7 +152,13 @@ class FusionHost(RamHost):
         return settings
 
     def resolvePreviewPath(self) -> str:
-        """Resolves the official flat preview path for the current shot."""
+        """Resolves the official preview file path for the current shot.
+
+        Constructs the path using the project's preview folder and the Ramses naming convention.
+
+        Returns:
+            str: The normalized absolute path for the preview file (e.g., .mov), or empty string on failure.
+        """
         try:
             # STRICT MODE: Rely on the Daemon's active project to ensure data freshness
             project = RAMSES.project()
@@ -128,7 +180,14 @@ class FusionHost(RamHost):
             return ""
 
     def resolveFinalPath(self) -> str:
-        """Resolves the official master export path for the current shot."""
+        """Resolves the official master export path for the current shot.
+
+        Attempts to use the project's export path. If not set, falls back to the standard
+        publish file path.
+
+        Returns:
+            str: The normalized absolute path for the final export file, or empty string on failure.
+        """
         try:
             # STRICT MODE: Rely on the Daemon's active project
             project = RAMSES.project()
@@ -151,6 +210,19 @@ class FusionHost(RamHost):
             return ""
 
     def _saveAs(self, filePath:str, item:RamItem, step:RamStep, version:int, comment:str, incremented:bool) -> bool:
+        """Internal implementation to save the composition to a specific path.
+
+        Args:
+            filePath (str): The target file path.
+            item (RamItem): The item being saved (unused by Fusion implementation).
+            step (RamStep): The step context (unused by Fusion implementation).
+            version (int): The version number (unused by Fusion implementation).
+            comment (str): The comment (unused by Fusion implementation).
+            incremented (bool): Whether this is an increment (unused by Fusion implementation).
+
+        Returns:
+            bool: True on success, False on failure.
+        """
         if not self.comp: return False
         # Normalize path for Fusion
         filePath = self.normalizePath(filePath)
@@ -162,6 +234,16 @@ class FusionHost(RamHost):
             return False
 
     def _open(self, filePath:str, item:RamItem, step:RamStep) -> bool:
+        """Internal implementation to open a composition file.
+
+        Args:
+            filePath (str): The file path to open.
+            item (RamItem): The item context (unused).
+            step (RamStep): The step context (unused).
+
+        Returns:
+            bool: True if file exists and opened, False otherwise.
+        """
         if os.path.exists(filePath):
             # Normalize path for Fusion
             self.fusion.LoadComp(self.normalizePath(filePath))
@@ -169,12 +251,31 @@ class FusionHost(RamHost):
         return False
     
     def _setFileName(self, fileName:str ) -> bool:
+        """Sets the internal file name of the composition without saving to disk.
+
+        Args:
+            fileName (str): The new file name/path.
+
+        Returns:
+            bool: True on success, False if no composition is active.
+        """
         if not self.comp: return False
         return self.comp.SetAttrs({'COMPS_FileName': self.normalizePath(fileName)})
 
     def save(self, incremental:bool=False, comment:str=None, setupFile:bool=True) -> bool:
-        """
-        Overridden to bypass sub-optimal base class implementation of __collectItemSettings.
+        """Saves the current file, optionally creating a new version or setting up the scene.
+
+        Overridden to bypass the base class implementation of `__collectItemSettings` which
+        is less efficient for Fusion. Instead, it calls `_setupCurrentFile` directly with
+        optimized settings collection if `setupFile` is True.
+
+        Args:
+            incremental (bool, optional): If True, increments the version number. Defaults to False.
+            comment (str, optional): A comment describing the version. Defaults to None.
+            setupFile (bool, optional): If True, applies project settings (FPS, res) to the comp. Defaults to True.
+
+        Returns:
+            bool: True on success, False on failure.
         """
         if setupFile:
             item = self.currentItem()
@@ -197,8 +298,24 @@ class FusionHost(RamHost):
     # -------------------------------------------------------------------------
 
     def _request_input(self, title, fields):
-        """
-        Custom helper to show a dialog using UIManager instead of AskUser.
+        """Shows a custom modal dialog to request user input.
+
+        Uses the Fusion UIManager to create a dynamic form based on the `fields` definition.
+        Handles window events and result collection.
+
+        Args:
+            title (str): The title of the dialog window.
+            fields (list of dict): A list of field definitions. Each dict must contain:
+                - 'id' (str): Unique identifier for the field.
+                - 'label' (str): Display text for the label.
+                - 'type' (str): One of 'text', 'line', 'combo', 'slider', 'checkbox'.
+                - 'default' (any): Default value.
+                - 'options' (dict, optional): For 'combo' types, mapping index to label.
+                - 'lines' (int, optional): For 'text' types, number of lines.
+
+        Returns:
+            dict: A dictionary mapping field IDs to their values if the user clicks OK,
+                  or None if the user cancels.
         """
         ui = self.fusion.UIManager
         disp = bmd.UIDispatcher(ui)
@@ -279,7 +396,15 @@ class FusionHost(RamHost):
         return results if results else None
 
     def _create_ui_element(self, ui, field_def):
-        """Helper to create UIManager elements from field definitions."""
+        """Creates a specific UI control based on the field definition.
+
+        Args:
+            ui (UIManager): The Fusion UIManager instance.
+            field_def (dict): The field configuration (type, id, default, etc.).
+
+        Returns:
+            tuple: (control_object, height_int)
+        """
         f_type = field_def['type']
         f_id = field_def['id']
         default = field_def.get('default', '')
@@ -313,6 +438,25 @@ class FusionHost(RamHost):
     # -------------------------------------------------------------------------
 
     def _import(self, filePaths:list, item:RamItem, step:RamStep, importOptions:list, forceShowImportUI:bool) -> bool:
+        """Imports the specified files as Loader nodes into the current composition.
+
+        Logic:
+        1. Determines a grid location below the currently active tool.
+        2. Iterates through file paths, creating a Loader node for each.
+        3. Staggers nodes horizontally.
+        4. Renames nodes based on the Item/Step naming convention (`Item_Step`), sanitizing names to be Fusion-safe.
+        5. Sets the Global Start time to match the project start.
+
+        Args:
+            filePaths (list): List of absolute file paths to import.
+            item (RamItem): The source item associated with the files.
+            step (RamStep): The source step associated with the files.
+            importOptions (list): (Unused) Import options.
+            forceShowImportUI (bool): (Unused) Whether to force UI.
+
+        Returns:
+            bool: True on success, False if no composition is open.
+        """
         if not self.comp: return False
         self.comp.Lock()
         
@@ -366,10 +510,28 @@ class FusionHost(RamHost):
         return True
 
     def _importUI(self, item:RamItem, step:RamStep) -> dict:
+        """Shows the native Fusion file request dialog for importing.
+
+        Args:
+            item (RamItem): Context item.
+            step (RamStep): Context step.
+
+        Returns:
+            dict: {'filePaths': [path]} or None if cancelled.
+        """
         path = self.fusion.RequestFile()
         return {'filePaths': [path]} if path else None
 
     def _openUI(self, item:RamItem=None, step:RamStep=None) -> dict:
+        """Shows the native Fusion file request dialog for opening a composition.
+
+        Args:
+            item (RamItem, optional): Context item.
+            step (RamStep, optional): Context step.
+
+        Returns:
+            dict: {'filePath': path} or None if cancelled.
+        """
         path = self.fusion.RequestFile()
         return {'filePath': path} if path else None
 
@@ -380,6 +542,21 @@ class FusionHost(RamHost):
         item: RamItem,
         step: RamStep,
     ) -> list:
+        """Renders a preview using the `_PREVIEW` Saver anchor.
+
+        Locates the specific `_PREVIEW` node in the flow, sets its output path,
+        applies the preview render preset (ProRes 422), triggers the render,
+        and verifies the output file.
+
+        Args:
+            previewFolderPath (str): Target directory for the preview.
+            previewFileBaseName (str): Base filename (without extension usually, but handled here).
+            item (RamItem): Context item.
+            step (RamStep): Context step.
+
+        Returns:
+            list: List of generated file paths (usually just one), or empty list on failure.
+        """
         if not self.comp:
             return []
 
@@ -436,15 +613,44 @@ class FusionHost(RamHost):
                 preview_node.SetAttrs({"TOOLB_PassThrough": True})
 
     def _publishOptions(self, proposedOptions: dict, showPublishUI: bool = False) -> dict:
+        """Returns the publish options, optionally showing a UI.
+
+        Currently just passes through default options.
+
+        Args:
+            proposedOptions (dict): Default options from the Step configuration.
+            showPublishUI (bool): Whether to force a UI dialog.
+
+        Returns:
+            dict: The final publish options.
+        """
         # If the UI is forced, we could show a dialog here.
         # For now, we return the options to ensure the process continues.
         return proposedOptions or {}
 
     def _prePublish(self, publishInfo: RamFileInfo, publishOptions: dict) -> dict:
+        """Hook called before the publish process begins.
+
+        Args:
+            publishInfo (RamFileInfo): Info about the file to be published.
+            publishOptions (dict): Options for the publish process.
+
+        Returns:
+            dict: Potentially modified publish options.
+        """
         return publishOptions or {}
 
     def _verify_render_output(self, path: str) -> bool:
-        """Verifies that a render output exists and is not a 0-byte file."""
+        """Verifies that a render output exists and is valid.
+
+        Checks existence and non-zero file size.
+
+        Args:
+            path (str): The path to verify.
+
+        Returns:
+            bool: True if file exists and size > 0, False otherwise.
+        """
         if not path:
             return False
         if not os.path.exists(path):
@@ -463,9 +669,24 @@ class FusionHost(RamHost):
         publish: bool = False,
         showPublishUI: bool = False,
     ) -> bool:
-        """
-        Overridden to ensure status update and publish are atomic.
-        We rearrange the base class logic so the DB update only happens if the publish succeeds.
+        """Updates the item status in the database, optionally publishing and creating previews.
+
+        Implements an atomic-like transaction:
+        1. Saves and increments the version (on disk).
+        2. Tries to publish (if requested).
+        3. Updates the database status ONLY if publish succeeds (or wasn't requested).
+        4. Generates a preview (optional).
+
+        Args:
+            state (RamState, optional): The target state. If None, shows UI.
+            comment (str, optional): Comment for the version.
+            completionRatio (int, optional): Progress percentage (0-100).
+            savePreview (bool, optional): Whether to generate a preview render.
+            publish (bool, optional): Whether to publish the file.
+            showPublishUI (bool, optional): Whether to force the publish UI.
+
+        Returns:
+            bool: True on success, False on failure or cancellation.
         """
         # 1. Basic checks
         if not self.testDaemonConnection():
@@ -525,6 +746,21 @@ class FusionHost(RamHost):
         return True
 
     def _publish(self, publishInfo: RamFileInfo, publishOptions: dict) -> list:
+        """Executes the publish process: Final Render + Comp Backup.
+
+        Implements a "Split Publish":
+        1. Render: If `_FINAL` anchor exists, renders it to the Project Export folder.
+        2. Backup: Saves a copy of the `.comp` file to the Step Publish folder (`_published`).
+        
+        If the render fails, the entire process is aborted.
+
+        Args:
+            publishInfo (RamFileInfo): Info about the file to be published.
+            publishOptions (dict): Options for the publish process.
+
+        Returns:
+            list: List of published file paths (rendered file + backup file).
+        """
         if not self.comp:
             return []
 
@@ -618,6 +854,20 @@ class FusionHost(RamHost):
             return []
 
     def _replace(self, filePaths:list, item:RamItem, step:RamStep, importOptions:list, forceShowImportUI:bool) -> bool:
+        """Replaces the selected Loader node's clip with the specified file.
+
+        Also updates the node name if it was using a generic name.
+
+        Args:
+            filePaths (list): List containing the new file path (only first is used).
+            item (RamItem): Context item (for naming).
+            step (RamStep): Context step (for naming).
+            importOptions (list): (Unused).
+            forceShowImportUI (bool): (Unused).
+
+        Returns:
+            bool: True on success, False if no valid Loader selected.
+        """
         if not self.comp: return False
         active = self.comp.ActiveTool
         if not active or active.GetAttrs()["TOOLS_RegID"] != "Loader":
@@ -636,11 +886,28 @@ class FusionHost(RamHost):
         return False
 
     def _replaceUI(self, item:RamItem, step:RamStep) -> dict:
+        """Shows the native Fusion file request dialog for replacing.
+
+        Args:
+            item (RamItem): Context item.
+            step (RamStep): Context step.
+
+        Returns:
+            dict: {'filePaths': [path]} or None if cancelled.
+        """
         res = self._openUI(item, step)
         if res: return {"filePaths": [res["filePath"]]}
         return None
 
     def _restoreVersionUI(self, versionFiles:list) -> str:
+        """Shows a UI to select a version to restore.
+
+        Args:
+            versionFiles (list): List of file paths to previous versions.
+
+        Returns:
+            str: The selected file path, or empty string if cancelled.
+        """
         if not versionFiles: return ""
         
         # Enrich options with comments from metadata
@@ -657,6 +924,13 @@ class FusionHost(RamHost):
         return versionFiles[res['Idx']] if res else ""
 
     def _saveAsUI(self) -> dict:
+        """Shows the native Fusion file request dialog for 'Save As'.
+
+        Parsing the selected path to reconstruct Ramses Item/Step context.
+
+        Returns:
+            dict: Dictionary with 'item', 'step', 'extension', 'resource', or None if cancelled.
+        """
         path = self.fusion.RequestFile()
         if not path:
             return None
@@ -694,6 +968,11 @@ class FusionHost(RamHost):
         }
 
     def _saveChangesUI(self) -> str:
+        """Shows a dialog asking to save changes before closing/opening.
+
+        Returns:
+            str: 'save', 'discard', or 'cancel'.
+        """
         res = self._request_input("Save Changes?", [
             {'id': 'Mode', 'label': 'Current file is modified. Action:', 'type': 'combo', 'options': {
                 '0': 'Save and Continue',
@@ -706,9 +985,13 @@ class FusionHost(RamHost):
         return modes.get(res['Mode'], "cancel")
 
     def apply_render_preset(self, node, preset_name: str = "preview") -> None:
-        """
-        Applies standard pipeline settings (codec, format) to a Saver node.
-        Centralizes the logic so it can be changed in one place.
+        """Applies standard pipeline settings (codec, format) to a Saver node.
+        
+        Hardcoded to Apple ProRes for now.
+
+        Args:
+            node (Tool): The Saver node to modify.
+            preset_name (str, optional): 'preview' or 'final'. Defaults to "preview".
         """
         # Future: This will fetch config from self.ramses.settings
         node.SetInput("OutputFormat", "QuickTimeMovies", 0)
@@ -720,7 +1003,13 @@ class FusionHost(RamHost):
             node.SetInput("QuickTimeMovies.Compression", "Apple ProRes 4444_ap4h", 0)
 
     def _store_ramses_metadata(self, item: RamItem) -> None:
-        """Embeds Ramses identity (Project/Item UUIDs) into Fusion composition metadata."""
+        """Embeds Ramses identity (Project/Item UUIDs) into Fusion composition metadata.
+
+        This ensures the file can be identified even if moved outside the project structure.
+
+        Args:
+            item (RamItem): The item whose identity to store.
+        """
         if not self.comp or not item:
             return
         
@@ -738,6 +1027,19 @@ class FusionHost(RamHost):
             self.log(f"Failed to embed metadata: {e}", LogLevel.Warning)
 
     def _setupCurrentFile(self, item: RamItem, step: RamStep, setupOptions: dict) -> bool:
+        """Applies Ramses settings (resolution, FPS, ranges) to the current composition.
+
+        Updates Fusion Preferences (FrameFormat) and Attributes (Timeline/Render ranges).
+        Persists identity metadata.
+
+        Args:
+            item (RamItem): Context item.
+            step (RamStep): Context step.
+            setupOptions (dict): Dictionary with 'width', 'height', 'framerate', 'frames', etc.
+
+        Returns:
+            bool: True on success.
+        """
         if not self.comp:
             return False
 
@@ -817,6 +1119,15 @@ class FusionHost(RamHost):
         return True
 
     def _statusUI(self, currentStatus:RamStatus = None) -> dict:
+        """Shows the dialog to update status, comment, and publish settings.
+
+        Args:
+            currentStatus (RamStatus, optional): The current status object.
+
+        Returns:
+            dict: Dictionary with keys 'comment', 'completionRatio', 'publish', 'state', 'showPublishUI', 'savePreview'.
+                  Returns None if cancelled.
+        """
         states = RAMSES.states()
         if not states: return None
         state_opts = {str(i): s.name() for i, s in enumerate(states)}

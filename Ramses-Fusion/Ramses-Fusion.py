@@ -22,7 +22,16 @@ import fusion_host
 
 
 def requires_connection(func):
-    """Decorator that ensures Ramses connection before handler execution."""
+    """Decorator that ensures Ramses connection before handler execution.
+
+    Checks if the Daemon is online. If not, attempts to reconnect or shows an error.
+
+    Args:
+        func (callable): The handler function to wrap.
+
+    Returns:
+        callable: The wrapped function.
+    """
     def wrapper(self, ev):
         if not self._check_connection():
             return
@@ -31,6 +40,11 @@ def requires_connection(func):
 
 
 class RamsesFusionApp:
+    """The main application controller for the Ramses Fusion integration.
+
+    Manages the UI (Fusion UIManager), maintains connection with the Ramses Daemon,
+    caches context (Project/Item/Step), and delegates actions to the Host.
+    """
     # Button Groups for UI State Management
     PIPELINE_BUTTONS = [
         "SetupSceneButton",
@@ -49,6 +63,7 @@ class RamsesFusionApp:
     DB_BUTTONS = ["SwitchShotButton", "OpenButton"]
 
     def __init__(self):
+        """Initializes the Ramses App, connecting to the Daemon and Fusion Host."""
         self.ramses = ram.Ramses.instance()
         self.settings = ram.RamSettings.instance()
 
@@ -73,7 +88,14 @@ class RamsesFusionApp:
         self._last_synced_path = None
 
     def _get_icon(self, icon_name: str):
-        """Lazy-loading icon cache."""
+        """Retrieves an icon from the cache, loading it if necessary.
+
+        Args:
+            icon_name (str): The filename of the icon (e.g., "ramsave.png").
+
+        Returns:
+            Icon: The Fusion UI Icon object.
+        """
         if icon_name not in self._icon_cache:
             icon_path = os.path.join(self.icon_dir, icon_name)
             self._icon_cache[icon_name] = self.ui.Icon({"File": icon_path})
@@ -81,18 +103,32 @@ class RamsesFusionApp:
 
     @property
     def current_item(self) -> Optional[ram.RamItem]:
-        """Returns the current Ramses item from the active composition."""
+        """The currently active Ramses Item (Shot/Asset) derived from the open file.
+
+        Returns:
+            Optional[RamItem]: The item object or None if context is invalid.
+        """
         self._update_context()
         return self._item_cache
 
     @property
     def current_step(self) -> Optional[ram.RamStep]:
-        """Returns the current pipeline step from the active composition."""
+        """The currently active Pipeline Step derived from the open file.
+
+        Returns:
+            Optional[RamStep]: The step object or None if context is invalid.
+        """
         self._update_context()
         return self._step_cache
 
     def _update_context(self) -> str:
-        """Internal helper to sync item and step from the host once per access cycle."""
+        """Syncs the internal Item/Step cache with the Fusion Host.
+
+        Optimized to only query the database if the file path has changed.
+
+        Returns:
+            str: The current file path.
+        """
         path = self.ramses.host.currentFilePath()
         if path != self._item_path or not self._item_cache or not self._step_cache:
             self._item_path = path
@@ -102,20 +138,34 @@ class RamsesFusionApp:
         return path
 
     def _get_project(self) -> Optional[ram.RamProject]:
-        """Cached access to the current project."""
+        """Gets the active Project from the Ramses Daemon (Cached).
+
+        Returns:
+            Optional[RamProject]: The active project.
+        """
         if not self._project_cache:
             self._project_cache = self.ramses.project()
         return self._project_cache
 
     def _get_user_name(self) -> str:
-        """Cached access to the user name."""
+        """Gets the current User Name from the Ramses Daemon (Cached).
+
+        Returns:
+            str: The user name or "Not Logged In".
+        """
         if not self._user_name_cache:
             user = self.ramses.user()
             self._user_name_cache = user.name() if user else "Not Logged In"
         return self._user_name_cache
 
     def _require_step(self) -> Optional[ram.RamStep]:
-        """Validates that a step is active before proceeding."""
+        """Validates that a valid Step context exists.
+
+        Shows a warning dialog if no step is found (e.g., file not saved in a pipeline path).
+
+        Returns:
+            Optional[RamStep]: The step if valid, None otherwise.
+        """
         step = self.current_step
         if not step:
             self.ramses.host._request_input(
@@ -134,7 +184,15 @@ class RamsesFusionApp:
         return step
 
     def _update_ui_state(self, is_online: bool) -> None:
-        """Updates the UI elements (Header, Buttons) based on connection status."""
+        """Refreshes the UI visual state (headers, button availability).
+
+        - Updates the Context Header (Project/Shot/Step info).
+        - Disables pipeline buttons if offline or if the file isn't in the pipeline.
+        - Shows "PROJECT MISMATCH" warnings if the file metadata conflicts with the active project.
+
+        Args:
+            is_online (bool): Whether the Ramses Daemon is connected.
+        """
         if not self.dlg:
             return
 
@@ -211,7 +269,17 @@ class RamsesFusionApp:
             self.log(f"UI state update skipped: {e}", ram.LogLevel.Debug)
 
     def _check_connection(self, silent: bool = False) -> bool:
-        """Checks if Ramses Daemon is online and shows a dialog if not."""
+        """Verifies connection to the Ramses Daemon.
+
+        Attempts to reconnect if the Daemon was previously offline. 
+        Updates UI state to 'Offline' if connection fails.
+
+        Args:
+            silent (bool): If True, suppresses the error dialog.
+
+        Returns:
+            bool: True if connected, False otherwise.
+        """
         # Check if the daemon is actually responding
         is_responding = self.ramses.daemonInterface().online()
 
@@ -245,7 +313,11 @@ class RamsesFusionApp:
         return True
 
     def _get_context_text(self) -> str:
-        """Builds HTML-formatted context string for the UI header."""
+        """Generates the HTML string for the Context Header (Project / Shot / Step).
+
+        Returns:
+            str: HTML formatted string.
+        """
         item = self.current_item
         step = self.current_step
 
@@ -262,15 +334,34 @@ class RamsesFusionApp:
         return f"<font color='#555'>{project_name} / </font><b><font color='#BBB'>{item_name}</font></b><br><font color='#999'>{step_name}</font>"
 
     def log(self, message: str, level: int = ram.LogLevel.Info) -> None:
-        """Directly logs to the Fusion console bypassing API filtering."""
+        """Logs a message to the Fusion Console.
+
+        Args:
+            message (str): The log message.
+            level (int): The severity level.
+        """
         self.ramses.host._log(message, level)
 
     def _get_footer_text(self) -> str:
-        """Builds HTML-formatted footer string with user and version info."""
+        """Generates the HTML footer string with User and Version info.
+
+        Returns:
+            str: HTML formatted string.
+        """
         return f"<font color='#555'>User: {self._get_user_name()} | Ramses API {self.settings.version}</font>"
 
     def _build_file_info(self, item_type: int, step: ram.RamStep, short_name: str, extension: str) -> ram.RamFileInfo:
-        """Constructs a RamFileInfo object following Ramses conventions."""
+        """Constructs a `RamFileInfo` object for path generation.
+
+        Args:
+            item_type (int): The Ramses ItemType (Shot/Asset/General).
+            step (RamStep): The step context.
+            short_name (str): The short name of the item.
+            extension (str): The desired file extension.
+
+        Returns:
+            RamFileInfo: The populated file info object.
+        """
         nm = ram.RamFileInfo()
         nm.project = step.projectShortName()
         nm.ramType = item_type
@@ -280,12 +371,17 @@ class RamsesFusionApp:
         return nm
 
     def _resolve_shot_path(self, shot: ram.RamShot, step: ram.RamStep) -> tuple[str, bool]:
-        """
-        Returns the path to the shot's comp file.
-        If it exists, returns the actual path.
-        If not, predicts the path based on naming conventions.
-        
-        Returns: (path, exists)
+        """Resolves the expected composition path for a specific Shot and Step.
+
+        First attempts to find an existing file. If none exists, predicts the path
+        where it should be created based on the Ramses naming convention.
+
+        Args:
+            shot (RamShot): The target shot.
+            step (RamStep): The target step.
+
+        Returns:
+            tuple: (file_path: str, exists: bool)
         """
         # 1. Try existing file
         try:
@@ -310,7 +406,16 @@ class RamsesFusionApp:
         return predicted_path, False
 
     def _create_render_anchors(self) -> None:
-        """Creates _PREVIEW and _FINAL Saver nodes at calculated grid coordinates."""
+        """Creates the `_PREVIEW` and `_FINAL` Saver nodes in the Fusion flow.
+
+        Logic:
+        1. Identifies the active tool position in the flow.
+        2. Calculates grid coordinates to place anchors neatly below the selection.
+        3. Creates 'Saver' nodes if they don't exist.
+        4. Colors them (Green for Preview, Red for Final).
+        5. Sets them to 'PassThrough' (disabled) by default for safety.
+        6. Configures their output paths based on the current Project/Step context.
+        """
         comp = self.ramses.host.comp
         if not comp:
             return
@@ -381,7 +486,21 @@ class RamsesFusionApp:
             comp.Unlock()
 
     def _validate_publish(self, check_preview: bool = True, check_final: bool = True) -> tuple[bool, str]:
-        """Validates comp settings against Ramses database before publishing."""
+        """Validates that the composition settings match the Ramses Database.
+
+        Checks:
+        1. Frame Range (RenderStart/End vs. Database Frames).
+        2. Resolution (Width/Height vs. Database Resolution).
+        3. Framerate (FPS).
+        4. Saver Node Connections (Input availability).
+
+        Args:
+            check_preview (bool): Whether to check the `_PREVIEW` node.
+            check_final (bool): Whether to check the `_FINAL` node.
+
+        Returns:
+            tuple: (is_valid: bool, error_message: str)
+        """
         item = self.current_item
         if not item:
             return True, ""
@@ -459,7 +578,12 @@ class RamsesFusionApp:
         return True, ""
 
     def _sync_render_anchors(self) -> None:
-        """Syncs existing _PREVIEW and _FINAL Saver paths with current project specs."""
+        """Updates the output paths of `_PREVIEW` and `_FINAL` nodes.
+
+        Ensures that the Saver nodes always point to the correct file paths
+        derived from the current Project/Item/Step context.
+        Optimized to avoid unnecessary updates if the path hasn't changed.
+        """
         comp = self.ramses.host.comp
         if not comp:
             return
@@ -496,7 +620,14 @@ class RamsesFusionApp:
             self.log(f"Render anchor sync failed: {e}", ram.LogLevel.Debug)
 
     def refresh_header(self, force_full: bool = False) -> None:
-        """Updates the context label and footer with current info."""
+        """Updates the Context Header and UI state.
+
+        Re-evaluates connection status, fetches current item/step from the Host,
+        syncs render anchors (`_sync_render_anchors`), and updates the UI labels.
+
+        Args:
+            force_full (bool): If True, invalidates project/user caches to force a full re-fetch.
+        """
         is_online = self._check_connection(silent=True)
 
         if is_online:
@@ -524,7 +655,12 @@ class RamsesFusionApp:
         self._update_ui_state(is_online)
 
     def show_main_window(self) -> None:
-        """Creates and displays the main Ramses-Fusion UI window."""
+        """Initializes and displays the main Ramses-Fusion panel.
+
+        Creates the window using Fusion's UIManager, builds the layout (header, buttons, footer),
+        binds all event handlers, and starts the event loop.
+        If the window already exists, it brings it to the front instead.
+        """
         # 1. Check for existing window to prevent duplicates
         existing = self.ui.FindWindow("RamsesFusionMainWin")
         if existing:
@@ -643,7 +779,13 @@ class RamsesFusionApp:
         self.dlg = None # Cleanup reference after exit
 
     def _build_project_group(self):
-        """Builds the 'Project & Scene' button group for the UI."""
+        """Builds the 'Project & Scene' UI section.
+
+        Contains buttons for Switching Shots, Setup Scene, Open, and Ramses Client.
+
+        Returns:
+            VGroup: The Fusion UI container.
+        """
         bg_color = "#2a3442"  # Very Dark Desaturated Blue
         return self.ui.VGroup(
             [
@@ -686,7 +828,13 @@ class RamsesFusionApp:
         )
 
     def _build_pipeline_group(self):
-        """Builds the 'Assets & Tools' button group for the UI."""
+        """Builds the 'Assets & Tools' UI section.
+
+        Contains buttons for Import, Replace, and Save Template.
+
+        Returns:
+            VGroup: The Fusion UI container.
+        """
         bg_color = "#342a42"  # Very Dark Desaturated Purple
         return self.ui.VGroup(
             [
@@ -722,7 +870,13 @@ class RamsesFusionApp:
         )
 
     def _build_working_group(self):
-        """Builds the 'Saving & Iteration' button group for the UI."""
+        """Builds the 'Saving & Iteration' UI section.
+
+        Contains buttons for Save, Incremental Save, Comment, and Retrieve.
+
+        Returns:
+            VGroup: The Fusion UI container.
+        """
         bg_color = "#2a423d"  # Very Dark Desaturated Teal
         return self.ui.VGroup(
             [
@@ -765,7 +919,13 @@ class RamsesFusionApp:
         )
 
     def _build_publish_group(self):
-        """Builds the 'Review & Publish' button group for the UI."""
+        """Builds the 'Review & Publish' UI section.
+
+        Contains buttons for Preview and Status Update (Publish).
+
+        Returns:
+            VGroup: The Fusion UI container.
+        """
         bg_color = "#2a422a"  # Very Dark Desaturated Green
         return self.ui.VGroup(
             [
@@ -794,7 +954,13 @@ class RamsesFusionApp:
         )
 
     def _build_settings_group(self):
-        """Builds the 'Settings & Info' button group for the UI."""
+        """Builds the 'Settings & Info' UI section.
+
+        Contains buttons for Publish Settings, Plugin Settings, and About.
+
+        Returns:
+            VGroup: The Fusion UI container.
+        """
         bg_color = "#333333"  # Dark Grey
         return self.ui.VGroup(
             [
@@ -840,6 +1006,23 @@ class RamsesFusionApp:
         max_size=None,
         accent_color=None,
     ):
+        """Creates a standardized UI Button with optional styling.
+
+        Applies custom CSS stylesheets for background color, hover, and pressed states.
+
+        Args:
+            id_name (str): The unique ID for the button.
+            text (str): Button text.
+            icon_name (str): Filename of the icon to load.
+            weight (int, optional): Layout weight. Defaults to 0.
+            tooltip (str, optional): Tooltip text. Defaults to "".
+            min_size (list, optional): [w, h]. Defaults to None.
+            max_size (list, optional): [w, h]. Defaults to None.
+            accent_color (str, optional): Hex color code for background. Defaults to None.
+
+        Returns:
+            Button: The created Fusion UI button.
+        """
         # Base Style
         ss = f"QPushButton {{ text-align: left; padding-left: 12px; border: 1px solid #222; border-radius: 3px;"
         if accent_color:
@@ -880,7 +1063,16 @@ class RamsesFusionApp:
         )
 
     def show_settings_window(self, ev) -> None:
-        """Opens the plugin settings dialog for configuring Ramses paths and ports."""
+        """Opens the plugin settings dialog.
+
+        Allows configuration of:
+        - Ramses Client executable path.
+        - Client port.
+        - Default Comp Start Frame.
+
+        Args:
+            ev: The event object (unused).
+        """
         win_id = "SettingsWin"
         dlg = self.disp.AddWindow(
             {
@@ -986,7 +1178,11 @@ class RamsesFusionApp:
             self.dlg.Enabled = True
 
     def show_about_window(self, ev) -> None:
-        """Opens the About dialog with plugin and developer information."""
+        """Opens the About dialog with plugin version and credits.
+
+        Args:
+            ev: The event object (unused).
+        """
         win_id = "AboutWin"
         dlg = self.disp.AddWindow(
             {
@@ -1062,12 +1258,24 @@ class RamsesFusionApp:
     # --- Handlers ---
 
     def on_run_ramses(self, ev) -> None:
-        """Launches the Ramses Client application."""
+        """Launches the external Ramses Client application.
+
+        Args:
+            ev: The event object (unused).
+        """
         self.ramses.showClient()
 
     @requires_connection
     def on_switch_shot(self, ev):
-        """Interactive one-page wizard for switching/creating shots with cascading dropdowns."""
+        """Handler for the 'Switch Shot' wizard.
+
+        Displays a cascading dialog (Project -> Step -> Shot) to select a working context.
+        Handles creating new shots (from templates or empty) and opening existing ones.
+        Auto-updates status from TODO to WIP on creation.
+
+        Args:
+            ev: The event object (unused).
+        """
         ui = self.ui
         disp = self.disp
         host = self.ramses.host
@@ -1492,17 +1700,35 @@ class RamsesFusionApp:
 
     @requires_connection
     def on_import(self, ev) -> None:
-        """Opens the asset import dialog to add Loaders to the composition."""
+        """Handler for 'Import' button.
+
+        Opens the host's import dialog to bring external files into the composition.
+
+        Args:
+            ev: The event object (unused).
+        """
         self.ramses.host.importItem()
 
     @requires_connection
     def on_replace(self, ev) -> None:
-        """Replaces the selected Loader node with a different asset or version."""
+        """Handler for 'Replace' button.
+
+        Replaces the source file of the currently selected Loader node.
+
+        Args:
+            ev: The event object (unused).
+        """
         self.ramses.host.replaceItem()
 
     @requires_connection
     def on_save(self, ev) -> None:
-        """Saves the current composition, syncing render anchors first."""
+        """Handler for 'Save' button.
+
+        Syncs render anchors and overwrites the current file version.
+
+        Args:
+            ev: The event object (unused).
+        """
         # Ensure anchors are synced before saving
         self._sync_render_anchors()
 
@@ -1513,7 +1739,13 @@ class RamsesFusionApp:
 
     @requires_connection
     def on_incremental_save(self, ev) -> None:
-        """Creates a new version of the composition (e.g., v001 -> v002)."""
+        """Handler for 'Incremental Save' button.
+
+        Saves the current file as a new version (e.g., v001 -> v002).
+
+        Args:
+            ev: The event object (unused).
+        """
         self._sync_render_anchors()
 
         has_project = self._get_project() is not None
@@ -1522,7 +1754,13 @@ class RamsesFusionApp:
 
     @requires_connection
     def on_comment(self, ev) -> None:
-        """Opens dialog to add a comment to the current version in the database."""
+        """Handler for 'Comment' button.
+
+        Shows a dialog to add a comment to the current version in the Ramses DB.
+
+        Args:
+            ev: The event object (unused).
+        """
         res = self.ramses.host._request_input(
             "Add Comment",
             [
@@ -1552,7 +1790,14 @@ class RamsesFusionApp:
 
     @requires_connection
     def on_update_status(self, ev) -> None:
-        """Opens the status update dialog with optional publish workflow."""
+        """Handler for 'Update Status' button.
+
+        Validates the scene for publishing, then opens the Status Update dialog.
+        Handles atomic publish + status update logic.
+
+        Args:
+            ev: The event object (unused).
+        """
         is_valid, msg = self._validate_publish(check_preview=False, check_final=True)
         if not is_valid:
             res = self.ramses.host._request_input(
@@ -1584,7 +1829,13 @@ class RamsesFusionApp:
 
     @requires_connection
     def on_preview(self, ev) -> None:
-        """Renders a preview using the _PREVIEW Saver anchor."""
+        """Handler for 'Preview' button.
+
+        Validates the scene and triggers a preview render via the Host.
+
+        Args:
+            ev: The event object (unused).
+        """
         is_valid, msg = self._validate_publish(check_preview=True, check_final=False)
         if not is_valid:
             res = self.ramses.host._request_input(
@@ -1614,7 +1865,13 @@ class RamsesFusionApp:
         self.ramses.host.savePreview()
 
     def on_publish_settings(self, ev) -> None:
-        """Opens editor for the step's YAML publish configuration."""
+        """Handler for 'Publish Settings' button.
+
+        Shows a text editor to modify the Step's YAML publish configuration.
+
+        Args:
+            ev: The event object (unused).
+        """
         step = self._require_step()
         if not step:
             return
@@ -1637,7 +1894,13 @@ class RamsesFusionApp:
 
     @requires_connection
     def on_save_template(self, ev) -> None:
-        """Saves the current composition as a reusable template for this step."""
+        """Handler for 'Save as Template' button.
+
+        Saves the current composition to the Step's template folder.
+
+        Args:
+            ev: The event object (unused).
+        """
         step = self._require_step()
         if not step:
             return
@@ -1676,7 +1939,13 @@ class RamsesFusionApp:
 
     @requires_connection
     def on_setup_scene(self, ev) -> None:
-        """Configures comp resolution, FPS, and frame range from Ramses database."""
+        """Handler for 'Setup Scene' button.
+
+        Re-applies project settings (resolution, framerate) to the current composition.
+
+        Args:
+            ev: The event object (unused).
+        """
         item = self.current_item
         step = self.current_step
 
@@ -1696,17 +1965,35 @@ class RamsesFusionApp:
 
     @requires_connection
     def on_open(self, ev) -> None:
-        """Opens a Ramses composition via file browser."""
+        """Handler for 'Open' button.
+
+        Opens the Ramses open file dialog.
+
+        Args:
+            ev: The event object (unused).
+        """
         if self.ramses.host.open():
             self.refresh_header()
 
     def on_retrieve(self, ev) -> None:
-        """Opens a previous version of the composition from the versions folder."""
+        """Handler for 'Retrieve Version' button.
+
+        Allows the user to rollback to a previous version of the composition.
+
+        Args:
+            ev: The event object (unused).
+        """
         if self.ramses.host.restoreVersion():
             self.refresh_header()
 
     def on_close(self, ev) -> None:
-        """Closes the main Ramses-Fusion window."""
+        """Handler for window close event.
+
+        Stops the event dispatcher loop.
+
+        Args:
+            ev: The event object (unused).
+        """
         self.disp.ExitLoop()
 
 
