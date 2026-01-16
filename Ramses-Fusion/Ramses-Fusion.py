@@ -994,9 +994,9 @@ class RamsesFusionApp:
                 ),
                 self.create_button(
                     "PubSettingsButton",
-                    "Publish Settings",
+                    "Step Configuration",
                     "rampublishsettings.png",
-                    tooltip="Configure YAML settings for automated publishing.",
+                    tooltip="Configure global YAML settings and automation rules for this pipeline step.",
                     accent_color=bg_color,
                 ),
                 self.create_button(
@@ -1899,7 +1899,7 @@ class RamsesFusionApp:
 
         current_yaml = step.publishSettings()
         res = self.ramses.host._request_input(
-            f"Publish Settings: {step.name()}",
+            f"Step Configuration: {step.name()}",
             [
                 {
                     "id": "YAML",
