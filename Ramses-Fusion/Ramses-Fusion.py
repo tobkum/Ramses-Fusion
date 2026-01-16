@@ -173,9 +173,8 @@ class RamsesFusionApp:
                     {
                         "id": "W",
                         "label": "",
-                        "type": "text",
+                        "type": "label",
                         "default": "Save as valid Step first.",
-                        "lines": 1,
                     }
                 ],
             )
@@ -324,9 +323,8 @@ class RamsesFusionApp:
                         {
                             "id": "E",
                             "label": "",
-                            "type": "text",
+                            "type": "label",
                             "default": "Could not reach the Ramses Client. \n\nPlease make sure Ramses is running and you are logged in.",
-                            "lines": 3,
                         }
                     ],
                 )
@@ -1152,12 +1150,14 @@ class RamsesFusionApp:
                             ]
                         ),
                         self.ui.HGroup(
+                            {"Weight": 0},
                             [
+                                self.ui.HGap(0, 1),
                                 self.ui.Button(
-                                    {"ID": "SaveSettingsButton", "Text": "Save"}
+                                    {"ID": "SaveSettingsButton", "Text": "Save", "Weight": 0, "MinimumSize": [100, 30]}
                                 ),
                                 self.ui.Button(
-                                    {"ID": "CloseSettingsButton", "Text": "Close"}
+                                    {"ID": "CloseSettingsButton", "Text": "Close", "Weight": 0, "MinimumSize": [100, 30]}
                                 ),
                             ]
                         ),
@@ -1254,7 +1254,14 @@ class RamsesFusionApp:
                             }
                         ),
                         self.ui.VGap(),
-                        self.ui.Button({"ID": "AboutCloseButton", "Text": "Close"}),
+                        self.ui.HGroup(
+                            {"Weight": 0},
+                            [
+                                self.ui.HGap(0, 1),
+                                self.ui.Button({"ID": "AboutCloseButton", "Text": "Close", "Weight": 0, "MinimumSize": [100, 30]}),
+                                self.ui.HGap(0, 1),
+                            ]
+                        ),
                     ],
                 )
             ],
@@ -1383,11 +1390,12 @@ class RamsesFusionApp:
                     ),
                     ui.VGap(10),
                     ui.HGroup(
+                        {"Weight": 0},
                         [
-                            ui.HGap(200),
-                            ui.Button({"ID": "OkBtn", "Text": "OK", "Weight": 0.1}),
+                            ui.HGap(0, 1),
+                            ui.Button({"ID": "OkBtn", "Text": "OK", "Weight": 0, "MinimumSize": [100, 30]}),
                             ui.Button(
-                                {"ID": "CancelBtn", "Text": "Cancel", "Weight": 0.1}
+                                {"ID": "CancelBtn", "Text": "Cancel", "Weight": 0, "MinimumSize": [100, 30]}
                             ),
                         ]
                     ),
@@ -1827,9 +1835,8 @@ class RamsesFusionApp:
                     {
                         "id": "W",
                         "label": "Technical Mismatches found:",
-                        "type": "text",
+                        "type": "label",
                         "default": msg,
-                        "lines": 4,
                     },
                     {
                         "id": "Mode",
@@ -1865,9 +1872,8 @@ class RamsesFusionApp:
                     {
                         "id": "W",
                         "label": "Technical Mismatches found:",
-                        "type": "text",
+                        "type": "label",
                         "default": msg,
-                        "lines": 4,
                     },
                     {
                         "id": "Mode",

@@ -335,20 +335,26 @@ class FusionHost(RamHost):
         total_height = 80 # Buttons + Margins
         
         for f in fields:
-            label = ui.Label({"Text": f['label'], "Weight": 0.25})
+            label = ui.Label({"Text": f['label'], "Weight": 0.25, "Alignment": {"AlignTop": True, "AlignRight": True}})
             ctrl, height = self._create_ui_element(ui, f)
-            total_height += height
+            total_height += height + 5 # Add small padding between rows
             rows.append(ui.HGroup([label, ctrl]))
 
         dlg = disp.AddWindow(
-            {"WindowTitle": title, "ID": win_id, "Geometry": [400, 400, 500, total_height]},
+            {
+                "WindowTitle": title, 
+                "ID": win_id, 
+                "Geometry": [400, 400, 500, total_height],
+                "MaximumSize": [800, 1000] # Prevent crazy growth
+            },
             ui.VGroup([
-                ui.VGroup({"Spacing": 5}, rows),
+                ui.VGroup({"Spacing": 5, "Weight": 0}, rows),
+                ui.VGap(0, 1), # Stretch gap to push buttons down and keep rows tight
                 ui.VGap(10),
-                ui.HGroup([
-                    ui.HGap(200),
-                    ui.Button({"ID": "OkBtn", "Text": "OK", "Weight": 0.1}),
-                    ui.Button({"ID": "CancelBtn", "Text": "Cancel", "Weight": 0.1})
+                ui.HGroup({"Weight": 0}, [
+                    ui.HGap(0, 1),
+                    ui.Button({"ID": "OkBtn", "Text": "OK", "Weight": 0, "MinimumSize": [100, 30]}),
+                    ui.Button({"ID": "CancelBtn", "Text": "Cancel", "Weight": 0, "MinimumSize": [100, 30]})
                 ])
             ])
         )
@@ -358,6 +364,9 @@ class FusionHost(RamHost):
         def on_ok(ev):
             items = dlg.GetItems()
             for f in fields:
+                if f['type'] == 'label':
+                    continue # Skip data collection for labels
+                
                 ctrl = items[f['id']]
                 if f['type'] == 'text': results[f['id']] = ctrl.PlainText
                 elif f['type'] == 'line': results[f['id']] = ctrl.Text
@@ -431,6 +440,19 @@ class FusionHost(RamHost):
         if f_type == 'checkbox':
             return ui.CheckBox({"ID": f_id, "Checked": bool(default), "Text": "", "Weight": 0.75}), 30
             
+        if f_type == 'label':
+            # Calculate height based on characters (generous estimation)
+            text_len = len(str(default))
+            h = max(40, (text_len // 50 + 1) * 22)
+            return ui.Label({
+                "ID": f_id, 
+                "Text": str(default), 
+                "Weight": 0.75, 
+                "WordWrap": True,
+                "Alignment": {"AlignTop": True, "AlignLeft": True},
+                "MinimumSize": [200, h]
+            }), h
+
         return ui.Label({"Text": "Unknown Field"}), 30
 
     # -------------------------------------------------------------------------
