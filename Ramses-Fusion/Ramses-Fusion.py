@@ -545,7 +545,7 @@ class RamsesFusionApp:
 
             if expected_frames > 0 and actual_frames != expected_frames:
                 errors.append(
-                    f"<font color='#ffcc00'>▶</font> <b>Frame Range:</b> DB expects {expected_frames}, Comp is {actual_frames}"
+                    f"<font color='#ffcc00'><b>Frame Range Mismatch</b></font><br><font color='#999'>Database: {expected_frames} | Composition: {actual_frames}</font>"
                 )
 
         # 2. Check Resolution (Respects Overrides)
@@ -560,7 +560,7 @@ class RamsesFusionApp:
 
         if db_w != comp_w or db_h != comp_h:
             errors.append(
-                f"<font color='#ffcc00'>▶</font> <b>Resolution:</b> DB expects {db_w}x{db_h}, Comp is {comp_w}x{comp_h}"
+                f"<font color='#ffcc00'><b>Resolution Mismatch</b></font><br><font color='#999'>Database: {db_w}x{db_h} | Composition: {comp_w}x{comp_h}</font>"
             )
 
         # 3. Check Framerate (Respects Overrides)
@@ -569,18 +569,18 @@ class RamsesFusionApp:
 
         if abs(db_fps - comp_fps) > 0.001:
             errors.append(
-                f"<font color='#ffcc00'>▶</font> <b>Framerate:</b> DB expects {db_fps} fps, Comp is {comp_fps} fps"
+                f"<font color='#ffcc00'><b>Framerate Mismatch</b></font><br><font color='#999'>Database: {db_fps} fps | Composition: {comp_fps} fps</font>"
             )
 
         # 4. Check Saver Connections
         def check_anchor(tool_name):
             node = comp.FindTool(tool_name)
             if not node:
-                return f"<font color='#ff4444'>▶</font> <b>Missing Anchor:</b> Node '{tool_name}' not found."
+                return f"<font color='#ff4444'><b>Missing Anchor Node</b></font><br><font color='#999'>The required node '{tool_name}' was not found in the flow.</font>"
 
             inp = node.FindMainInput(1)
             if not inp or inp.GetConnectedOutput() is None:
-                return f"<font color='#ff4444'>▶</font> <b>Disconnected:</b> '{tool_name}' has no input."
+                return f"<font color='#ff4444'><b>Disconnected Anchor</b></font><br><font color='#999'>The '{tool_name}' node has no input connection.</font>"
             return None
 
         if check_preview:
@@ -628,7 +628,14 @@ class RamsesFusionApp:
                 "type": "label",
                 "default": "<font color='#ff4444'><b>Critical errors found.</b></font><br>Please resolve the issues above before continuing.",
             })
-            self.ramses.host._request_input("Validation Error", fields, ok_text="Understood", cancel_text=None)
+            # Use 'ramstatus.png' (Red) for hard errors
+            self.ramses.host._request_input(
+                "Validation Error", 
+                fields, 
+                ok_text="Understood", 
+                cancel_text=None,
+                icon=self._get_icon("ramstatus.png")
+            )
             return False
         else:
             fields.append({
@@ -637,7 +644,14 @@ class RamsesFusionApp:
                 "type": "label",
                 "default": "<b>Continue anyway?</b><br><font color='#777'>Choosing 'Ignore' may lead to technical rejection.</font>",
             })
-            res = self.ramses.host._request_input("Validation Warning", fields, ok_text="Ignore & Proceed", cancel_text="Abort and fix")
+            # Use 'ramsettings.png' (Orange/Yellow) for warnings
+            res = self.ramses.host._request_input(
+                "Validation Warning", 
+                fields, 
+                ok_text="Ignore & Proceed", 
+                cancel_text="Abort and fix",
+                icon=self._get_icon("ramsettings.png")
+            )
             return res is not None
 
     def _sync_render_anchors(self) -> None:
