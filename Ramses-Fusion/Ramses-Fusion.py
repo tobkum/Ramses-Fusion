@@ -167,35 +167,18 @@ class RamsesFusionApp:
                 meta_uuid = ""
                 try: 
                     meta_uuid = self.ramses.host.comp.GetData("Ramses.ProjectUUID")
-                except: pass
+                except Exception:
+                    pass
                 
                 if meta_uuid:
                     if active_proj and str(active_proj.uuid()) != meta_uuid:
                          self.log(f"Project Mismatch (Metadata): Active={active_proj.uuid()} vs File={meta_uuid}", ram.LogLevel.Warning)
                          is_mismatch = True
                 else:
-                    # Fallback Legacy Checks
-                    # 1. UUID Check (Can be false positive if using active project context)
-                    if active_proj and item_proj and str(active_proj.uuid()) != str(item_proj.uuid()):
-                        is_mismatch = True
-                    
-                    # 2. Path Check (If project root is available)
-                    # (Simplified for now as metadata is the primary solution)
-                    proj_path = "Unknown"
-                    try:
-                        # Try known candidates if available
-                        if hasattr(active_proj, "basePath"): proj_path = active_proj.basePath()
-                        elif hasattr(active_proj, "data"): 
-                            d = active_proj.data() or {}
-                            proj_path = d.get("path")
-                    except: pass
-                    
-                    if active_proj and proj_path and proj_path != "Unknown":
-                        cur_file = self.ramses.host.currentFilePath()
-                        n_proj = proj_path.replace("\\", "/").lower()
-                        n_file = cur_file.replace("\\", "/").lower()
-                        if not n_file.startswith(n_proj):
-                             is_mismatch = True
+                    # STRICT MODE: No Metadata = Mismatch/Invalid
+                    # Since this is a fresh deployment, valid Ramses files MUST have metadata.
+                    self.log("Identity Error: File lacks Ramses Metadata.", ram.LogLevel.Warning)
+                    is_mismatch = True
 
             is_pipeline = item is not None and bool(item.uuid()) and not is_mismatch
 
@@ -206,11 +189,18 @@ class RamsesFusionApp:
 
             # Update Header for Mismatch
             if is_mismatch and "ContextLabel" in items:
-                 items["ContextLabel"].Text = (
-                     "<font color='#ff4444'><b>PROJECT MISMATCH</b></font><br>"
-                     "<font color='#999'>File belongs to different project.<br>"
-                     "Please switch project in Ramses App.</font>"
-                 )
+                if meta_uuid:
+                     items["ContextLabel"].Text = (
+                         "<font color='#ff4444'><b>PROJECT MISMATCH</b></font><br>"
+                         "<font color='#999'>File belongs to different project.<br>"
+                         "Please switch project in Ramses App.</font>"
+                     )
+                else:
+                     items["ContextLabel"].Text = (
+                         "<font color='#ff4444'><b>UNKNOWN IDENTITY</b></font><br>"
+                         "<font color='#999'>File lacks Ramses Metadata.<br>"
+                         "Please Save or Setup Scene to fix.</font>"
+                     )
 
             # Group 2: DB Buttons (Require Connection, but not necessarily an Item)
             for btn_id in self.DB_BUTTONS:
