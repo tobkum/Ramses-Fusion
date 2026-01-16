@@ -297,7 +297,7 @@ class FusionHost(RamHost):
     # UI Implementation helpers using UIManager
     # -------------------------------------------------------------------------
 
-    def _request_input(self, title: str, fields: list) -> dict:
+    def _request_input(self, title: str, fields: list, ok_text: str = "OK", cancel_text: str = "Cancel") -> dict:
         """Shows a custom modal dialog to request user input.
 
         Uses the Fusion UIManager to create a dynamic form based on the `fields` definition.
@@ -305,13 +305,9 @@ class FusionHost(RamHost):
 
         Args:
             title (str): The title of the dialog window.
-            fields (list of dict): A list of field definitions. Each dict must contain:
-                - 'id' (str): Unique identifier for the field.
-                - 'label' (str): Display text for the label.
-                - 'type' (str): One of 'text', 'line', 'combo', 'slider', 'checkbox'.
-                - 'default' (any): Default value.
-                - 'options' (dict, optional): For 'combo' types, mapping index to label.
-                - 'lines' (int, optional): For 'text' types, number of lines.
+            fields (list of dict): A list of field definitions.
+            ok_text (str): Label for the primary action button.
+            cancel_text (str): Label for the secondary button (hidden if None/empty).
 
         Returns:
             dict: A dictionary mapping field IDs to their values if the user clicks OK,
@@ -340,6 +336,12 @@ class FusionHost(RamHost):
             total_height += height + 5 # Add small padding between rows
             rows.append(ui.HGroup([label, ctrl]))
 
+        # Build Button Group
+        buttons = [ui.HGap(0, 1)]
+        buttons.append(ui.Button({"ID": "OkBtn", "Text": ok_text, "Weight": 0, "MinimumSize": [100, 30]}))
+        if cancel_text:
+            buttons.append(ui.Button({"ID": "CancelBtn", "Text": cancel_text, "Weight": 0, "MinimumSize": [100, 30]}))
+
         dlg = disp.AddWindow(
             {
                 "WindowTitle": title, 
@@ -351,11 +353,7 @@ class FusionHost(RamHost):
                 ui.VGroup({"Spacing": 5, "Weight": 0}, rows),
                 ui.VGap(0, 1), # Stretch gap to push buttons down and keep rows tight
                 ui.VGap(10),
-                ui.HGroup({"Weight": 0}, [
-                    ui.HGap(0, 1),
-                    ui.Button({"ID": "OkBtn", "Text": "OK", "Weight": 0, "MinimumSize": [100, 30]}),
-                    ui.Button({"ID": "CancelBtn", "Text": "Cancel", "Weight": 0, "MinimumSize": [100, 30]})
-                ])
+                ui.HGroup({"Weight": 0}, buttons)
             ])
         )
         
@@ -382,7 +380,8 @@ class FusionHost(RamHost):
             
         # Bind handlers
         dlg.On.OkBtn.Clicked = on_ok
-        dlg.On.CancelBtn.Clicked = on_cancel
+        if cancel_text:
+            dlg.On.CancelBtn.Clicked = on_cancel
         dlg.On[win_id].Close = on_cancel
         
         try:

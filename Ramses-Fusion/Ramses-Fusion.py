@@ -504,7 +504,7 @@ class RamsesFusionApp:
         finally:
             comp.Unlock()
 
-    def _validate_publish(self, check_preview: bool = True, check_final: bool = True) -> tuple[bool, str]:
+    def _validate_publish(self, check_preview: bool = True, check_final: bool = True) -> tuple[bool, str, bool]:
         """Validates that the composition settings match the Ramses Database.
 
         Checks:
@@ -518,18 +518,19 @@ class RamsesFusionApp:
             check_final (bool): Whether to check the `_FINAL` node.
 
         Returns:
-            tuple: (is_valid: bool, error_message: str)
+            tuple: (is_valid: bool, error_message: str, has_hard_errors: bool)
         """
         item = self.current_item
         if not item:
-            return True, ""
+            return True, "", False
 
         # Use the optimized host implementation to collect settings (respects sequence overrides)
         settings = self.ramses.host.collectItemSettings(item)
         if not settings:
-            return True, ""
+            return True, "", False
 
         errors = []
+        has_hard_errors = False
         comp = self.ramses.host.comp
 
         # 1. Check Frame Range
@@ -586,15 +587,17 @@ class RamsesFusionApp:
             err_preview = check_anchor("_PREVIEW")
             if err_preview:
                 errors.append(err_preview)
+                has_hard_errors = True
 
         if check_final:
             err_final = check_anchor("_FINAL")
             if err_final:
                 errors.append(err_final)
+                has_hard_errors = True
 
         if errors:
-            return False, "<br><br>".join(errors)
-        return True, ""
+            return False, "<br><br>".join(errors), has_hard_errors
+        return True, "", False
 
     def _sync_render_anchors(self) -> None:
         """Updates the output paths of `_PREVIEW` and `_FINAL` nodes.
@@ -1827,30 +1830,38 @@ class RamsesFusionApp:
         Args:
             ev: The event object (unused).
         """
-        is_valid, msg = self._validate_publish(check_preview=False, check_final=True)
+        is_valid, msg, has_hard_error = self._validate_publish(check_preview=False, check_final=True)
         if not is_valid:
-            res = self.ramses.host._request_input(
-                "Validation Warning",
-                [
-                    {
-                        "id": "W",
-                        "label": "Issues Found:",
-                        "type": "label",
-                        "default": msg,
-                    },
-                    {
-                        "id": "Mode",
-                        "label": "Action:",
-                        "type": "combo",
-                        "options": {
-                            "0": "Continue anyway (Force)",
-                            "1": "Abort and fix settings",
-                        },
-                    },
-                ],
-            )
-            if not res or res["Mode"] == 1:
+            fields = [
+                {
+                    "id": "W",
+                    "label": "Issues Found:",
+                    "type": "label",
+                    "default": msg,
+                }
+            ]
+            
+            if has_hard_error:
+                fields.append({
+                    "id": "Instr",
+                    "label": "Action Required:",
+                    "type": "label",
+                    "default": "<font color='#ff4444'><b>Critical errors found.</b></font><br>Please resolve the issues above before continuing.",
+                })
+                # Single button for hard errors
+                self.ramses.host._request_input("Validation Error", fields, ok_text="Understood", cancel_text=None)
                 return
+            else:
+                fields.append({
+                    "id": "Instr",
+                    "label": "Question:",
+                    "type": "label",
+                    "default": "<b>Continue anyway?</b><br><font color='#777'>Choosing 'Ignore' may lead to technical rejection.</font>",
+                })
+                # Use OK/Cancel as Yes/No
+                res = self.ramses.host._request_input("Validation Warning", fields, ok_text="Ignore & Proceed", cancel_text="Abort and fix")
+                if res is None: # User clicked 'Abort and fix'
+                    return
 
         if self.ramses.host.updateStatus():
             self.refresh_header()
@@ -1864,30 +1875,36 @@ class RamsesFusionApp:
         Args:
             ev: The event object (unused).
         """
-        is_valid, msg = self._validate_publish(check_preview=True, check_final=False)
+        is_valid, msg, has_hard_error = self._validate_publish(check_preview=True, check_final=False)
         if not is_valid:
-            res = self.ramses.host._request_input(
-                "Validation Warning",
-                [
-                    {
-                        "id": "W",
-                        "label": "Issues Found:",
-                        "type": "label",
-                        "default": msg,
-                    },
-                    {
-                        "id": "Mode",
-                        "label": "Action:",
-                        "type": "combo",
-                        "options": {
-                            "0": "Continue anyway (Force)",
-                            "1": "Abort and fix settings",
-                        },
-                    },
-                ],
-            )
-            if not res or res["Mode"] == 1:
+            fields = [
+                {
+                    "id": "W",
+                    "label": "Issues Found:",
+                    "type": "label",
+                    "default": msg,
+                }
+            ]
+            
+            if has_hard_error:
+                fields.append({
+                    "id": "Instr",
+                    "label": "Action Required:",
+                    "type": "label",
+                    "default": "<font color='#ff4444'><b>Critical errors found.</b></font><br>Please resolve the issues above before continuing.",
+                })
+                self.ramses.host._request_input("Validation Error", fields, ok_text="Understood", cancel_text=None)
                 return
+            else:
+                fields.append({
+                    "id": "Instr",
+                    "label": "Question:",
+                    "type": "label",
+                    "default": "<b>Continue anyway?</b><br><font color='#777'>Choosing 'Ignore' may lead to technical rejection.</font>",
+                })
+                res = self.ramses.host._request_input("Validation Warning", fields, ok_text="Ignore & Proceed", cancel_text="Abort and fix")
+                if res is None:
+                    return
 
         self.ramses.host.savePreview()
 
