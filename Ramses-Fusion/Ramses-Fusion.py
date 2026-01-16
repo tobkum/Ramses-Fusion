@@ -368,7 +368,12 @@ class RamsesFusionApp:
         except Exception:
             pass
 
-        return f"<font color='#555'>{project_name} | </font><b><font color='#BBB'>{item_name}</font></b><br>{step_name}{state_label}"
+        # HERO ID Layout
+        return (
+            f"<font color='#777' size='3'>{project_name.upper()}</font><br>"
+            f"<font color='#FFF' size='5'><b>{item_name}</b></font><br>"
+            f"<font size='3'>{step_name}{state_label}</font>"
+        )
 
     def log(self, message: str, level: int = ram.LogLevel.Info) -> None:
         """Logs a message to the Fusion Console.
