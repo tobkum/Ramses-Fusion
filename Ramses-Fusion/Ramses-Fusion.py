@@ -349,8 +349,26 @@ class RamsesFusionApp:
         project = self._get_project()
         project_name = project.name() if project else item.projectShortName()
         item_name = item.shortName()
-        step_name = step.name() if step else "No Step"
-        return f"<font color='#555'>{project_name} / </font><b><font color='#BBB'>{item_name}</font></b><br><font color='#999'>{step_name}</font>"
+        
+        # 1. Step with color
+        step_name = "No Step"
+        if step:
+            step_color = step.colorName()
+            step_name = f"<font color='{step_color}'>{step.name()}</font>"
+            
+        # 2. State (Status) with color
+        state_label = ""
+        try:
+            status = self.ramses.host.currentStatus()
+            if status and status.state():
+                state = status.state()
+                state_color = state.colorName()
+                # Use shortName for a cleaner look
+                state_label = f" <font color='#555'>|</font> <font color='{state_color}'><b>{state.shortName()}</b></font>"
+        except Exception:
+            pass
+
+        return f"<font color='#555'>{project_name} | </font><b><font color='#BBB'>{item_name}</font></b><br>{step_name}{state_label}"
 
     def log(self, message: str, level: int = ram.LogLevel.Info) -> None:
         """Logs a message to the Fusion Console.
@@ -715,6 +733,9 @@ class RamsesFusionApp:
                 self._item_path = ""
                 self._step_cache = None
                 self._step_path = ""
+                
+                # Invalidate the host's status cache to ensure the badge updates
+                self.ramses.host._status_cache = None
 
                 # Reset sync gate to force Saver anchor updates on manual refresh
                 self._last_synced_path = None

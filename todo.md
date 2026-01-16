@@ -74,6 +74,24 @@ This list tracks planned improvements to elevate the Ramses-Fusion plugin for pr
 
 ---
 
+## Future UX & Workflow Polish
+- [ ] **Navigation & Accessibility**
+    - [ ] **Searchable Shot Wizard**: Add a filter bar to the Switch Shot dialog for large projects.
+    - [ ] **Recent/Pinned Items**: Quick-access list for current active tasks.
+    - [ ] **The "Summoner"**: Global hotkey to pop up the UI at the mouse cursor position.
+- [ ] **Visual Feedback & Awareness**
+    - [ ] **Visual Thumbnails**: Display Ramses preview frames in Version/Shot selection.
+    - [ ] **Contextual Header Badges**: Dynamic colored status/priority tags in the header.
+    - [ ] **Outdated Asset Scanner**: Badge notification if Loader nodes have newer versions in Ramses.
+- [ ] **Interface & Layout**
+    - [ ] **Collapsible Sections**: Allow folding away groups (e.g., Assets, Settings) to save space.
+    - [ ] **Horizontal Action Bar**: Ultra-slim secondary UI mode for single-monitor setups.
+- [ ] **Pipeline Intelligence**
+    - [ ] **Auto-Healing Validation**: One-click "Fix All" for technical mismatches.
+    - [ ] **Structured Log Viewer**: Dedicated panel for Ramses-specific events and errors.
+
+---
+
 ## Configuration & Customization
 - [ ] **Global Render Specifications**
     - Read render specs (codec, resolution, naming) from Ramses Project/Step YAML settings instead of hardcoding.
