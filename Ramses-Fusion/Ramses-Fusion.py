@@ -798,14 +798,14 @@ class RamsesFusionApp:
                 ),
                 self.create_button(
                     "SwitchShotButton",
-                    "Switch Shot",
+                    "Browse Shots / Tasks",
                     "ramshot.png",
                     tooltip="Quickly jump to another shot in this project or create a new one from a template.",
                     accent_color=bg_color,
                 ),
                 self.create_button(
                     "SetupSceneButton",
-                    "Setup Scene",
+                    "Sync Project Settings",
                     "ramsetupscene.png",
                     tooltip="Automatically set the resolution, FPS, and frame range based on Ramses project settings.",
                     accent_color=bg_color,
@@ -847,7 +847,7 @@ class RamsesFusionApp:
                 ),
                 self.create_button(
                     "ImportButton",
-                    "Import Asset",
+                    "Import Published",
                     "ramimport.png",
                     tooltip="Import a published asset or render into the current composition.",
                     accent_color=bg_color,
@@ -910,7 +910,7 @@ class RamsesFusionApp:
                 ),
                 self.create_button(
                     "RetrieveButton",
-                    "Retrieve Version",
+                    "Version History / Restore",
                     "ramretrieve.png",
                     tooltip="Open a previous version of this composition from the _versions folder.",
                     accent_color=bg_color,
@@ -945,7 +945,7 @@ class RamsesFusionApp:
                 ),
                 self.create_button(
                     "UpdateStatusButton",
-                    "Update Status / Publish",
+                    "Submit / Publish",
                     "ramstatus.png",
                     tooltip="Change the shot status (WIP, Review, Done) and optionally publish the final comp.",
                     accent_color=bg_color,
