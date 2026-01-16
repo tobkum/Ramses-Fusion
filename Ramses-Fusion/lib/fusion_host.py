@@ -305,7 +305,13 @@ class FusionHost(RamHost):
 
         Args:
             title (str): The title of the dialog window.
-            fields (list of dict): A list of field definitions.
+            fields (list of dict): A list of field definitions. Each dict must contain:
+                - 'id' (str): Unique identifier for the field.
+                - 'label' (str): Display text for the label.
+                - 'type' (str): One of 'text', 'line', 'combo', 'slider', 'checkbox', 'label'.
+                - 'default' (any): Default value.
+                - 'options' (dict, optional): For 'combo' types, mapping index to label.
+                - 'lines' (int, optional): For 'text' types, number of lines.
             ok_text (str): Label for the primary action button.
             cancel_text (str): Label for the secondary button (hidden if None/empty).
 

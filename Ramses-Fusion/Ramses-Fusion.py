@@ -1902,7 +1902,7 @@ class RamsesFusionApp:
         self.ramses.host.savePreview()
 
     def on_publish_settings(self, ev: object) -> None:
-        """Handler for 'Publish Settings' button.
+        """Handler for 'Step Configuration' button.
 
         Shows a text editor to modify the Step's YAML publish configuration.
 
