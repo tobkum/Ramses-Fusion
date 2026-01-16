@@ -2,7 +2,7 @@
 
 This list tracks planned improvements to elevate the Ramses-Fusion plugin for professional VFX workflows.
 
-## Completed Code Improvements (2026-01-15)
+## Completed Code Improvements (2026-01-15/16)
 - [x] **Robustness**: Fixed all bare `except` blocks with specific logging.
 - [x] **Safety**: Added null checks for critical status objects.
 - [x] **Bug Fix**: Resolved circular reference in About window.
@@ -11,6 +11,7 @@ This list tracks planned improvements to elevate the Ramses-Fusion plugin for pr
 - [x] **Documentation**: Added type hints (19 methods) and docstrings (26 methods).
 - [x] **New Feature**: Internal Metadata Persistence (UUIDs embedded in `.comp`).
 - [x] **Safety**: Strict Project Context Enforcement (Blocks cross-project work).
+- [x] **Security**: Role-Based UI State Management (Conditional access for "Publish Settings" button; supports solo vs. multi-user logic).
 
 ---
 
@@ -52,8 +53,8 @@ This list tracks planned improvements to elevate the Ramses-Fusion plugin for pr
     - **Goal**: replace "email storms" with targeted channel notifications.
 
 ## Production Compliance
-- [ ] **Role-Based UI State Management**
-    - Dynamically enable/disable UI elements (e.g., Publish, Settings, Admin tools) based on the authenticated user's permissions and role within Ramses.
+- [ ] **Extended Role-Based UI State Management**
+    - Extend dynamic enablement/disablement to other UI elements (e.g., Publish button, Admin tools) based on the authenticated user's permissions.
 - [ ] **Approval Workflow**
     - Require Supervisor 'Approved' status in Ramses before allowing a 'Final' publish.
 - [ ] **Audit Trail**

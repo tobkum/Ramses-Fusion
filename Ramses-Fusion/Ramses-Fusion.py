@@ -57,7 +57,6 @@ class RamsesFusionApp:
         "CommentButton",
         "PreviewButton",
         "UpdateStatusButton",
-        "PubSettingsButton",
     ]
     
     DB_BUTTONS = ["SwitchShotButton", "OpenButton"]
@@ -244,6 +243,28 @@ class RamsesFusionApp:
             for btn_id in self.PIPELINE_BUTTONS:
                 if btn_id in items:
                     items[btn_id].Enabled = is_online and is_pipeline
+
+            # Group 1.5: Role-based Permissions (Publish Settings)
+            if "PubSettingsButton" in items:
+                has_permission = False
+                if is_online and is_pipeline:
+                    # Check Role (Lead or higher) or Single-User mode
+                    user = self.ramses.user()
+                    if user:
+                        # Optimization: we check total users to identify "local" single-user setups
+                        # We only do this if role is standard
+                        if user.role() >= ram.UserRole.LEAD:
+                            has_permission = True
+                        else:
+                            # Check if local/single-user
+                            try:
+                                all_users = self.ramses.daemonInterface().getObjects("RamUser")
+                                if len(all_users) <= 1:
+                                    has_permission = True
+                            except Exception:
+                                pass
+                
+                items["PubSettingsButton"].Enabled = is_online and is_pipeline and has_permission
 
             # Update Header for Mismatch
             if is_mismatch and "ContextLabel" in items:
