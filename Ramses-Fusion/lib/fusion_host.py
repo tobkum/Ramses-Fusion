@@ -1,6 +1,10 @@
 # -*- coding: utf-8 -*-
 import os
 from ramses import RamHost, RamItem, RamStep, RamStatus, RamFileInfo, LogLevel, ItemType, RAMSES, RAM_SETTINGS, RamMetaDataManager, RamState
+try:
+    import ramses.yaml as yaml
+except ImportError:
+    import yaml
 from fusion_config import FusionConfig
 
 class FusionHost(RamHost):
@@ -152,6 +156,30 @@ class FusionHost(RamHost):
 
         return settings
 
+    def _get_fusion_settings(self, step) -> dict:
+        """Helper to safely retrieve and parse Fusion settings from a Step.
+        
+        Handles cases where publishSettings returns either a raw YAML string or a pre-parsed dictionary.
+        """
+        if not step:
+            return {}
+        try:
+            # API might return dict directly or string depending on version/args
+            data = step.publishSettings("yaml")
+            
+            if isinstance(data, dict):
+                return data.get("fusion", {})
+                
+            if isinstance(data, str) and data.strip():
+                parsed = yaml.safe_load(data)
+                if isinstance(parsed, dict):
+                    return parsed.get("fusion", {})
+                    
+        except Exception as e:
+            self.log(f"Error parsing Step settings: {e}", LogLevel.Warning)
+            
+        return {}
+
     def resolvePreviewPath(self) -> str:
         """Resolves the official preview file path for the current shot.
 
@@ -170,21 +198,18 @@ class FusionHost(RamHost):
             ext = "mov"
             is_sequence = False
             
-            step = RAMSES.project().currentStep() if RAMSES.project() else None
-            if step:
-                pub_settings = step.publishSettings("yaml")
-                if pub_settings and isinstance(pub_settings, dict):
-                    fusion_cfg = pub_settings.get("fusion", {})
-                    prev_cfg = fusion_cfg.get("preview", {})
-                    
-                    if prev_cfg:
-                        fmt = prev_cfg.get("format", "")
-                        if fmt:
-                            custom_ext = FusionConfig.get_extension(fmt)
-                            if custom_ext:
-                                ext = custom_ext
-                        
-                        is_sequence = prev_cfg.get("image_sequence", False)
+            step = self.currentStep()
+            fusion_cfg = self._get_fusion_settings(step)
+            prev_cfg = fusion_cfg.get("preview", {})
+            
+            if prev_cfg:
+                fmt = prev_cfg.get("format", "")
+                if fmt:
+                    custom_ext = FusionConfig.get_extension(fmt)
+                    if custom_ext:
+                        ext = custom_ext
+                
+                is_sequence = prev_cfg.get("image_sequence", False)
 
             pub_info = self.publishInfo()
             
@@ -228,21 +253,18 @@ class FusionHost(RamHost):
             ext = "mov"
             is_sequence = False
             
-            step = project.currentStep()
-            if step:
-                pub_settings = step.publishSettings("yaml")
-                if pub_settings and isinstance(pub_settings, dict):
-                    fusion_cfg = pub_settings.get("fusion", {})
-                    final_cfg = fusion_cfg.get("final", {})
-                    
-                    if final_cfg:
-                        fmt = final_cfg.get("format", "")
-                        if fmt:
-                            custom_ext = FusionConfig.get_extension(fmt)
-                            if custom_ext:
-                                ext = custom_ext
-                        
-                        is_sequence = final_cfg.get("image_sequence", False)
+            step = self.currentStep()
+            fusion_cfg = self._get_fusion_settings(step)
+            final_cfg = fusion_cfg.get("final", {})
+            
+            if final_cfg:
+                fmt = final_cfg.get("format", "")
+                if fmt:
+                    custom_ext = FusionConfig.get_extension(fmt)
+                    if custom_ext:
+                        ext = custom_ext
+                
+                is_sequence = final_cfg.get("image_sequence", False)
 
             pub_info = self.publishInfo()
             final_info = pub_info.copy()
@@ -1082,24 +1104,24 @@ class FusionHost(RamHost):
             
         # 1. Check for Step Overrides
         try:
-            project = RAMSES.project()
-            step = project.currentStep() if project else None
+            step = self.currentStep()
+            fusion_cfg = self._get_fusion_settings(step)
+            target_cfg = fusion_cfg.get(preset_name, {})
             
-            if step:
-                pub_settings = step.publishSettings("yaml")
-                if pub_settings and isinstance(pub_settings, dict):
-                    fusion_cfg = pub_settings.get("fusion", {})
-                    # Look for 'preview' or 'final' key
-                    target_cfg = fusion_cfg.get(preset_name, {})
-                    
-                    if target_cfg:
-                        # Apply custom configuration
-                        FusionConfig.apply_config(node, target_cfg)
-                        return
+            if target_cfg:
+                # Apply custom configuration
+                self.log(f"Applying config for {preset_name}: {target_cfg}", LogLevel.Info)
+                res = FusionConfig.apply_config(node, target_cfg)
+                self.log(f"Config application result: {res}", LogLevel.Info)
+                return
+            else:
+                self.log(f"No config found for {preset_name} in Step settings.", LogLevel.Debug)
+
         except Exception as e:
             self.log(f"Failed to apply Step Render Preset: {e}", LogLevel.Warning)
 
         # 2. Fallback to Hardcoded Defaults (ProRes)
+        self.log(f"Applying Fallback Defaults for {preset_name}", LogLevel.Info)
         target_format = "QuickTimeMovies"
         if node.GetInput("OutputFormat") != target_format:
             node.SetInput("OutputFormat", target_format, 0)
