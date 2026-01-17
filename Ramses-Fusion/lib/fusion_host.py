@@ -180,6 +180,30 @@ class FusionHost(RamHost):
             
         return {}
 
+    def _get_preset_settings(self, preset_name: str) -> tuple:
+        """Resolves extension and sequence settings for a given preset.
+        
+        Returns:
+            tuple: (extension: str, is_sequence: bool)
+        """
+        ext = "mov"
+        is_sequence = False
+        
+        step = self.currentStep()
+        fusion_cfg = self._get_fusion_settings(step)
+        preset_cfg = fusion_cfg.get(preset_name, {})
+        
+        if preset_cfg:
+            fmt = preset_cfg.get("format", "")
+            if fmt:
+                custom_ext = FusionConfig.get_extension(fmt)
+                if custom_ext:
+                    ext = custom_ext
+            
+            is_sequence = preset_cfg.get("image_sequence", False)
+            
+        return ext, is_sequence
+
     def _calculate_padding_str(self) -> str:
         """Calculates the sequence padding string (zeroes) based on the shot range."""
         start = RAM_SETTINGS.userSettings.get("compStartFrame", 1001)
@@ -204,60 +228,38 @@ class FusionHost(RamHost):
             str: The normalized absolute path for the preview file, or empty string on failure.
         """
         try:
+            ext, is_sequence = self._get_preset_settings("preview")
+
+            # Determine target folder: Project Preview Folder or Step Publish Folder fallback
             preview_folder = self.previewPath()
             if not preview_folder:
-                return ""
-            
-            # Determine extension and subfolder logic from Step Config
-            ext = "mov"
-            is_sequence = False
-            
-            step = self.currentStep()
-            fusion_cfg = self._get_fusion_settings(step)
-            prev_cfg = fusion_cfg.get("preview", {})
-            
-            if prev_cfg:
-                fmt = prev_cfg.get("format", "")
-                if fmt:
-                    custom_ext = FusionConfig.get_extension(fmt)
-                    if custom_ext:
-                        ext = custom_ext
-                
-                is_sequence = prev_cfg.get("image_sequence", False)
+                # Fallback to standard Ramses publish path logic
+                fallback_path = self.publishFilePath(ext, "")
+                preview_folder = os.path.dirname(fallback_path)
 
+            # Previews are typically non-versioned "Masters"
             pub_info = self.publishInfo()
-            
             preview_info = pub_info.copy()
             preview_info.version = -1
             preview_info.state = ""
             preview_info.resource = ""
-            preview_info.extension = ext
+            preview_info.extension = "" # Exclude from base filename for sequence logic
             
-            filename = preview_info.fileName()
+            base_filename = preview_info.fileName().rstrip(".")
             
             if is_sequence:
-                base, ext_dot = os.path.splitext(filename)
-                
-                # Calculate padding based on render range
-                start = RAM_SETTINGS.userSettings.get("compStartFrame", 1001)
-                item = self.currentItem()
-                frames = 0
-                if item:
-                    settings = self.collectItemSettings(item)
-                    frames = settings.get("frames", 0)
-                
-                end = start + max(0, frames - 1)
-                padding = max(4, len(str(end)))
-                padding_str = "0" * padding
-                
+                padding_str = self._calculate_padding_str()
                 # Fusion sequence format: name.0000.ext
-                filename = f"{base}.{padding_str}{ext_dot}"
-                # Sequence subfolder
-                preview_folder = os.path.join(preview_folder, base)
+                filename = f"{base_filename}.{padding_str}.{ext}"
+                # Sequence subfolder logic
+                preview_folder = os.path.join(preview_folder, base_filename)
+            else:
+                filename = f"{base_filename}.{ext}"
             
             return self.normalizePath(os.path.join(preview_folder, filename))
         except Exception:
             return ""
+
 
     def resolveFinalPath(self) -> str:
         """Resolves the designated master export path for the current shot.

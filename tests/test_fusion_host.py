@@ -180,26 +180,32 @@ class TestFusionHost(unittest.TestCase):
         preview_node = comp.AddTool("Saver", 0, 0)
         preview_node.SetAttrs({"TOOLS_Name": "_PREVIEW"})
         
-        # Mock folder and name
-        folder = "D:/Previews"
-        basename = "TEST_S_Shot01_COMP"
+        # Mock paths
+        self.host.previewPath = MagicMock(return_value="D:/Previews")
+        self.host.publishFilePath = MagicMock(return_value="D:/Previews/fallback.mov")
         
         # Mock Step Settings to ensure fallback logic runs (empty settings)
         mock_step = MagicMock()
-        mock_step.publishSettings.return_value = {} # Return dict directly as per new logic
+        mock_step.publishSettings.return_value = {} 
         self.host.currentStep = MagicMock(return_value=mock_step)
         
-        with MagicMock() as mock_os:
-            # We need to ensure the verify check passes
-            self.host._verify_render_output = MagicMock(return_value=True)
-            
-            results = self.host._preview(folder, basename, None, None)
-            
-            self.assertEqual(len(results), 1)
-            self.assertEqual(results[0], "D:/Previews/TEST_S_Shot01_COMP.mov")
-            self.assertEqual(preview_node.Clip[1], "D:/Previews/TEST_S_Shot01_COMP.mov")
-            # Verify ProRes preset was applied
-            self.assertEqual(preview_node.GetInput("QuickTimeMovies.Compression"), "Apple ProRes 422_apcn")
+        # Mock publishInfo
+        mock_info = MagicMock()
+        mock_info.copy.return_value = mock_info
+        # Return a name WITHOUT extension, as resolvePreviewPath appends it
+        mock_info.fileName.return_value = "TEST_S_Shot01_COMP"
+        self.host.publishInfo = MagicMock(return_value=mock_info)
+        
+        # We need to ensure the verify check passes
+        self.host._verify_render_output = MagicMock(return_value=True)
+        
+        results = self.host._preview("D:/Previews", "TEST_S_Shot01_COMP", None, None)
+        
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0], "D:/Previews/TEST_S_Shot01_COMP.mov")
+        self.assertEqual(preview_node.Clip[1], "D:/Previews/TEST_S_Shot01_COMP.mov")
+        # Verify ProRes preset was applied
+        self.assertEqual(preview_node.GetInput("QuickTimeMovies.Compression"), "Apple ProRes 422_apcn")
 
     def test_publish_logic_split(self):
         """Verify the 'Split Publish' workflow (Master Render + Comp File Backup)."""
