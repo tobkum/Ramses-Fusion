@@ -161,6 +161,15 @@ class FusionConfig:
                     i += 1
                     continue
                 
+                # Comment skipping
+                if char == '-' and i+1 < n and s[i+1] == '-':
+                    # Skip until newline
+                    j = s.find('\n', i+2)
+                    if j == -1:
+                        break # End of string
+                    i = j + 1
+                    continue
+
                 if char in '{}=,':
                     tokens.append(('OP', char))
                     i += 1
@@ -203,11 +212,17 @@ class FusionConfig:
                 # Check for booleans/numbers
                 if val == 'true': tokens.append(('BOOL', True))
                 elif val == 'false': tokens.append(('BOOL', False))
-                elif val.replace('.','',1).isdigit():
-                    if '.' in val: tokens.append(('NUM', float(val)))
-                    else: tokens.append(('NUM', int(val)))
                 else:
-                    tokens.append(('ID', val))
+                    # Robust number check (supports scientific notation 1.0e-5)
+                    try:
+                        num = float(val)
+                        # Check if it's an integer
+                        if num.is_integer() and 'e' not in val.lower() and '.' not in val:
+                            tokens.append(('NUM', int(num)))
+                        else:
+                            tokens.append(('NUM', num))
+                    except ValueError:
+                        tokens.append(('ID', val))
                 i = j
             return tokens
 

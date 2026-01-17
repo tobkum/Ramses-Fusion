@@ -96,6 +96,28 @@ class TestFusionConfig(unittest.TestCase):
         data = FusionConfig._lua_to_dict(lua)
         self.assertEqual(data["Outer"]["Inner"]["Deep"], "Core")
 
+    def test_lua_comments(self):
+        """Verify that Lua comments are ignored."""
+        lua = """{ 
+            Key = "Value", -- This is a comment
+            -- Full line comment
+            Num = 42 -- Another comment
+        }"""
+        data = FusionConfig._lua_to_dict(lua)
+        self.assertEqual(data["Key"], "Value")
+        self.assertEqual(data["Num"], 42)
+
+    def test_scientific_notation(self):
+        """Verify parsing of scientific notation and negative numbers."""
+        lua = '{ Gain = 1.0e-5, Blur = -4.5, Integer = 10 }'
+        data = FusionConfig._lua_to_dict(lua)
+        self.assertEqual(data["Gain"], 1.0e-5)
+        self.assertIsInstance(data["Gain"], float)
+        self.assertEqual(data["Blur"], -4.5)
+        self.assertIsInstance(data["Blur"], float)
+        self.assertEqual(data["Integer"], 10)
+        self.assertIsInstance(data["Integer"], int)
+
     def test_get_extension(self):
         self.assertEqual(FusionConfig.get_extension("QuickTimeMovies"), "mov")
         self.assertEqual(FusionConfig.get_extension("OpenEXRFormat"), "exr")
