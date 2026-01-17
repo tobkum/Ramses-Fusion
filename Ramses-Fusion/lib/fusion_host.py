@@ -276,59 +276,38 @@ class FusionHost(RamHost):
             project = RAMSES.project()
             if not project: return ""
             
-            # Determine extension and subfolder logic from Step Config
-            ext = "mov"
-            is_sequence = False
-            
-            step = self.currentStep()
-            fusion_cfg = self._get_fusion_settings(step)
-            final_cfg = fusion_cfg.get("final", {})
-            
-            if final_cfg:
-                fmt = final_cfg.get("format", "")
-                if fmt:
-                    custom_ext = FusionConfig.get_extension(fmt)
-                    if custom_ext:
-                        ext = custom_ext
-                is_sequence = final_cfg.get("image_sequence", False)
+            ext, is_sequence = self._get_preset_settings("final")
 
             export_folder = project.exportPath()
             
+            # 1. Resolve Base Filename and Target Directory
             pub_info = self.publishInfo()
-            final_info = pub_info.copy()
-            final_info.version = -1
-            final_info.state = ""
-            final_info.resource = ""
-            final_info.extension = ext
             
-            filename = final_info.fileName()
-            
-            if is_sequence:
-                base, ext_dot = os.path.splitext(filename)
-                
-                # Calculate padding based on render range
-                start = RAM_SETTINGS.userSettings.get("compStartFrame", 1001)
-                item = self.currentItem()
-                frames = 0
-                if item:
-                    settings = self.collectItemSettings(item)
-                    frames = settings.get("frames", 0)
-                
-                end = start + max(0, frames - 1)
-                padding = max(4, len(str(end)))
-                padding_str = "0" * padding
-                
-                filename = f"{base}.{padding_str}{ext_dot}"
-                
-                # Use export folder or fallback to publish folder
-                target_folder = export_folder or self.publishFolderPath()
-                # Sequence subfolder
-                target_folder = os.path.join(target_folder, base)
-                return self.normalizePath(os.path.join(target_folder, filename))
+            if export_folder:
+                # Master Render (No versioning in filename)
+                master_info = pub_info.copy()
+                master_info.version = -1
+                master_info.extension = "" 
+                base_filename = master_info.fileName().rstrip(".")
+                target_dir = export_folder
             else:
-                if not export_folder:
-                    return self.normalizePath(self.publishFilePath(ext, ""))
-                return self.normalizePath(os.path.join(export_folder, filename))
+                # Archival Render (Versioned fallback)
+                # We get the path from Ramses, then strip extension for our own sequence logic
+                archival_path = self.publishFilePath(ext, "")
+                base_filename = os.path.splitext(os.path.basename(archival_path))[0]
+                target_dir = os.path.dirname(archival_path)
+
+            # 2. Handle Sequence Logic
+            if is_sequence:
+                padding_str = self._calculate_padding_str()
+                # Fusion sequence format: name.0000.ext
+                filename = f"{base_filename}.{padding_str}.{ext}"
+                # Sequence subfolder
+                target_dir = os.path.join(target_dir, base_filename)
+            else:
+                filename = f"{base_filename}.{ext}"
+            
+            return self.normalizePath(os.path.join(target_dir, filename))
                 
         except Exception:
             return ""
