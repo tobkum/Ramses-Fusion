@@ -2091,7 +2091,7 @@ class RamsesFusionApp:
             return
 
         if self.ramses.host.updateStatus():
-            self.refresh_header()
+            self.refresh_header(force_full=True)
 
     @requires_connection
     def on_preview(self, ev: object) -> None:
