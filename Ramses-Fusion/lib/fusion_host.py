@@ -1110,18 +1110,13 @@ class FusionHost(RamHost):
             
             if target_cfg:
                 # Apply custom configuration
-                self.log(f"Applying config for {preset_name}: {target_cfg}", LogLevel.Info)
-                res = FusionConfig.apply_config(node, target_cfg)
-                self.log(f"Config application result: {res}", LogLevel.Info)
+                FusionConfig.apply_config(node, target_cfg)
                 return
-            else:
-                self.log(f"No config found for {preset_name} in Step settings.", LogLevel.Debug)
 
         except Exception as e:
             self.log(f"Failed to apply Step Render Preset: {e}", LogLevel.Warning)
 
         # 2. Fallback to Hardcoded Defaults (ProRes)
-        self.log(f"Applying Fallback Defaults for {preset_name}", LogLevel.Info)
         target_format = "QuickTimeMovies"
         if node.GetInput("OutputFormat") != target_format:
             node.SetInput("OutputFormat", target_format, 0)
