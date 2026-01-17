@@ -108,7 +108,7 @@ class TestRamsesFusionApp(unittest.TestCase):
         
         with patch.object(RamsesFusionApp, 'current_item', new_callable=PropertyMock) as mock_prop:
             mock_prop.return_value = mock_item
-            is_valid, msg = self.app._validate_publish(check_preview=False, check_final=False)
+            is_valid, msg, has_hard_error = self.app._validate_publish(check_preview=False, check_final=False)
             self.assertFalse(is_valid)
             self.assertIn("Resolution Mismatch", msg)
             
@@ -118,7 +118,7 @@ class TestRamsesFusionApp(unittest.TestCase):
         
         with patch.object(RamsesFusionApp, 'current_item', new_callable=PropertyMock) as mock_prop:
             mock_prop.return_value = mock_item
-            is_valid, msg = self.app._validate_publish(check_preview=False, check_final=False)
+            is_valid, msg, has_hard_error = self.app._validate_publish(check_preview=False, check_final=False)
             self.assertFalse(is_valid)
             self.assertIn("Frame Range Mismatch", msg)
 
@@ -157,7 +157,7 @@ class TestRamsesFusionApp(unittest.TestCase):
         
         with patch.object(RamsesFusionApp, 'current_item', new_callable=PropertyMock) as mock_prop:
             mock_prop.return_value = mock_item
-            is_valid, msg = self.app._validate_publish(check_preview=False, check_final=True)
+            is_valid, msg, has_hard_error = self.app._validate_publish(check_preview=False, check_final=True)
             self.assertFalse(is_valid)
             self.assertIn("Disconnected Anchor", msg)
 
