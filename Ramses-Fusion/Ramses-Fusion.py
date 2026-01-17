@@ -2229,14 +2229,16 @@ class RamsesFusionApp:
         final_cfg = fusion_cfg.get("final", {})
         
         # Helper to build a column
-        def build_col(title, id_prefix, cfg):
-            return ui.VGroup({"Weight": 1, "Spacing": 5, "Margin": 0}, [
-                ui.Label({"Text": f"<b>{title}</b>", "Alignment": {"AlignHCenter": True}, "Weight": 0}),
+        def build_col(title, id_prefix, cfg, color):
+            return ui.VGroup({"Spacing": 10, "Weight": 1}, [
+                ui.Label({"Text": f"<b><font color='{color}'>{title}</font></b>", "Alignment": {"AlignHCenter": True}, "Weight": 0}),
                 ui.Label({"Text": "Paste Saver Node Text:", "Weight": 0}),
                 ui.TextEdit({
                     "ID": f"{id_prefix}Txt",
                     "PlaceholderText": "Copy a Saver node in Fusion and paste here...",
-                    "Weight": 1
+                    "Weight": 1,
+                    "Lexer": "lua",
+                    "Font": ui.Font({"Family": "Consolas"})
                 }),
                 ui.Label({
                     "ID": f"{id_prefix}Info",
@@ -2250,26 +2252,38 @@ class RamsesFusionApp:
             {
                 "WindowTitle": "Fusion Render Wizard",
                 "ID": win_id,
-                "Geometry": [450, 450, 700, 500],
+                "Geometry": [400, 400, 1000, 800],
             },
             [
-                ui.VGroup({"Weight": 1, "Margin": 10, "Spacing": 10}, [
-                    ui.HGroup({"Weight": 10, "Spacing": 15}, [
-                        build_col("PREVIEW", "Prev", prev_cfg),
-                        # Vertical Separator
-                        ui.Label({"Text": "|", "Weight": 0, "StyleSheet": "color: #444;"}), 
-                        build_col("FINAL", "Final", final_cfg)
+                ui.VGroup({"Spacing": 0, "Weight": 1}, [
+                    ui.VGap(20),
+                    ui.HGroup({"Weight": 1}, [
+                        ui.HGap(20),
+                        ui.VGroup({"Spacing": 15, "Weight": 1}, [
+                            # Main Columns
+                            ui.HGroup({"Weight": 1, "Spacing": 40}, [
+                                build_col("PREVIEW", "Prev", prev_cfg, "#4CB24C"),
+                                # Vertical Separator
+                                ui.Label({"Text": "", "StyleSheet": "background-color: #333;", "MaximumSize": [1, 2000], "MinimumSize": [1, 10]}),
+                                build_col("FINAL", "Final", final_cfg, "#B24C4C")
+                            ]),
+                            # Instructions
+                            ui.Label({
+                                "Text": "<i>Paste the content of a Saver node (Ctrl+C) into the text fields above.</i>", 
+                                "Alignment": {"AlignHCenter": True},
+                                "Weight": 0
+                            }),
+                            ui.VGap(10),
+                            # Buttons
+                            ui.HGroup({"Weight": 0}, [
+                                ui.HGap(0, 1),
+                                ui.Button({"ID": "OkBtn", "Text": "Generate Config", "Weight": 0, "MinimumSize": [120, 30]}),
+                                ui.Button({"ID": "CancelBtn", "Text": "Cancel", "Weight": 0, "MinimumSize": [120, 30]}),
+                            ])
+                        ]),
+                        ui.HGap(20),
                     ]),
-                    ui.Label({
-                        "Text": "<i>Paste the content of a Saver node (Ctrl+C) into the text fields above.</i>", 
-                        "Alignment": {"AlignHCenter": True},
-                        "Weight": 0
-                    }),
-                    ui.HGroup({"Weight": 0}, [
-                        ui.HGap(0, 1),
-                        ui.Button({"ID": "OkBtn", "Text": "Generate Config", "Weight": 0, "MinimumSize": [120, 30]}),
-                        ui.Button({"ID": "CancelBtn", "Text": "Cancel", "Weight": 0, "MinimumSize": [120, 30]}),
-                    ])
+                    ui.VGap(20),
                 ])
             ]
         )

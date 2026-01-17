@@ -181,7 +181,7 @@ class FusionHost(RamHost):
         return {}
 
     def resolvePreviewPath(self) -> str:
-        """Resolves the official preview file path for the current shot.
+        """Resolves the designated preview file path for the current shot.
 
         Constructs the path using the project's preview folder and the Ramses naming convention.
         Respects custom format/sequence settings from the Step configuration.
@@ -231,7 +231,7 @@ class FusionHost(RamHost):
             return ""
 
     def resolveFinalPath(self) -> str:
-        """Resolves the official master export path for the current shot.
+        """Resolves the designated master export path for the current shot.
 
         Attempts to use the project's export path. If not set, falls back to the standard
         publish file path. Respects custom format/sequence settings from the Step configuration.
@@ -880,7 +880,7 @@ class FusionHost(RamHost):
         # Ensure publishInfo has the correct extension for the comp backup
         ext = os.path.splitext(src)[1].lstrip(".")
 
-        # Use the official API to get the correct publish path
+        # Use the standard naming logic to get the correct publish path
         # 0. Sync Render Anchors (Critical for path validity)
         # Note: Handled by caller (RamsesFusionApp) or here?
         # App calls _sync_render_anchors() before save(), so we assume paths are correct.
