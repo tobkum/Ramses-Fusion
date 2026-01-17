@@ -694,15 +694,10 @@ class RamsesFusionApp:
 
         Ensures that the Saver nodes always point to the correct file paths
         derived from the current Project/Item/Step context.
-        Optimized to avoid unnecessary updates if the path hasn't changed.
+        Optimized to avoid unnecessary updates if the values already match.
         """
         comp = self.ramses.host.comp
         if not comp:
-            return
-
-        # Performance Gate: Only sync if context changed
-        current_path = self.ramses.host.currentFilePath()
-        if self._last_synced_path == current_path:
             return
 
         try:
@@ -715,17 +710,17 @@ class RamsesFusionApp:
             try:
                 preview_node = comp.FindTool("_PREVIEW")
                 if preview_node:
-                    if preview_node.Clip[1] != preview_path:
+                    # Only update if different to avoid dirtying the comp
+                    if self.ramses.host.normalizePath(preview_node.Clip[1]) != preview_path:
                         preview_node.Clip[1] = preview_path
                     self.ramses.host.apply_render_preset(preview_node, "preview")
 
                 final_node = comp.FindTool("_FINAL")
                 if final_node:
-                    if final_node.Clip[1] != final_path:
+                    # Only update if different to avoid dirtying the comp
+                    if self.ramses.host.normalizePath(final_node.Clip[1]) != final_path:
                         final_node.Clip[1] = final_path
                     self.ramses.host.apply_render_preset(final_node, "final")
-
-                self._last_synced_path = current_path
             finally:
                 comp.Unlock()
         except (AttributeError, RuntimeError) as e:
@@ -763,11 +758,12 @@ class RamsesFusionApp:
                 # Invalidate the host's status cache to ensure the badge updates
                 self.ramses.host._status_cache = None
 
-                # Reset sync gate to force Saver anchor updates on manual refresh
-                self._last_synced_path = None
-
-                # Sync Savers before updating UI (Optimized with path gating)
-                self._sync_render_anchors()
+                # Sync Savers? ONLY on full manual refresh to avoid dirtying the comp automatically
+                if force_full:
+                    self._sync_render_anchors()
+                
+                # Update the gate to ensure re-fetching is gated correctly
+                self._last_synced_path = current_path
             except (AttributeError, RuntimeError) as e:
                 self.log(f"Header refresh error: {e}", ram.LogLevel.Debug)
 

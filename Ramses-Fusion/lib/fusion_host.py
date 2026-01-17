@@ -160,13 +160,10 @@ class FusionHost(RamHost):
             str: The normalized absolute path for the preview file (e.g., .mov), or empty string on failure.
         """
         try:
-            # STRICT MODE: Rely on the Daemon's active project to ensure data freshness
-            project = RAMSES.project()
-            if not project:
+            preview_folder = self.previewPath()
+            if not preview_folder:
                 return ""
                 
-            preview_folder = project.previewPath()
-            
             pub_info = self.publishInfo()
             
             preview_info = pub_info.copy()
@@ -1017,25 +1014,33 @@ class FusionHost(RamHost):
     def apply_render_preset(self, node, preset_name: str = "preview") -> None:
         """Applies standard pipeline settings (codec, format) to a Saver node.
         
-        Hardcoded to Apple ProRes for now.
+        Optimized to avoid dirtying the composition if settings already match.
 
         Args:
             node (Tool): The Saver node to modify.
             preset_name (str, optional): 'preview' or 'final'. Defaults to "preview".
         """
-        # Future: This will fetch config from self.ramses.settings
-        node.SetInput("OutputFormat", "QuickTimeMovies", 0)
+        if not node:
+            return
+
+        target_format = "QuickTimeMovies"
+        if node.GetInput("OutputFormat") != target_format:
+            node.SetInput("OutputFormat", target_format, 0)
         
         if preset_name == "preview":
-            node.SetInput("QuickTimeMovies.Compression", "Apple ProRes 422_apcn", 0)
+            target_codec = "Apple ProRes 422_apcn"
+            if node.GetInput("QuickTimeMovies.Compression") != target_codec:
+                node.SetInput("QuickTimeMovies.Compression", target_codec, 0)
         else:
             # Final / default
-            node.SetInput("QuickTimeMovies.Compression", "Apple ProRes 4444_ap4h", 0)
+            target_codec = "Apple ProRes 4444_ap4h"
+            if node.GetInput("QuickTimeMovies.Compression") != target_codec:
+                node.SetInput("QuickTimeMovies.Compression", target_codec, 0)
 
     def _store_ramses_metadata(self, item: RamItem) -> None:
         """Embeds Ramses identity (Project/Item UUIDs) into Fusion composition metadata.
 
-        This ensures the file can be identified even if moved outside the project structure.
+        Optimized to only write data if it differs from current metadata.
 
         Args:
             item (RamItem): The item whose identity to store.
@@ -1044,13 +1049,16 @@ class FusionHost(RamHost):
             return
         
         try:
-            # Store Item UUID
-            self.comp.SetData("Ramses.ItemUUID", str(item.uuid()))
+            item_uuid = str(item.uuid())
+            if self.comp.GetData("Ramses.ItemUUID") != item_uuid:
+                self.comp.SetData("Ramses.ItemUUID", item_uuid)
             
             # Store Project UUID (Resolves cross-project ambiguity)
             project = item.project() or RAMSES.project()
             if project:
-                self.comp.SetData("Ramses.ProjectUUID", str(project.uuid()))
+                proj_uuid = str(project.uuid())
+                if self.comp.GetData("Ramses.ProjectUUID") != proj_uuid:
+                    self.comp.SetData("Ramses.ProjectUUID", proj_uuid)
                 
             self.log(f"Embedded Ramses Metadata: {item.name()}", LogLevel.Debug)
         except Exception as e:
