@@ -18,7 +18,9 @@ if lib_path not in sys.path:
     sys.path.append(lib_path)
 
 import ramses as ram
+import yaml
 import fusion_host
+from fusion_config import FusionConfig
 
 
 def requires_connection(func: callable) -> callable:
@@ -2110,7 +2112,8 @@ class RamsesFusionApp:
     def on_step_configuration(self, ev: object) -> None:
         """Handler for 'Step Configuration' button.
 
-        Shows a text editor to modify the Step's YAML publish configuration.
+        Shows a dialog to modify the Step's YAML publish configuration.
+        Includes a "Wizard" to generate Fusion-specific settings from clipboard.
 
         Args:
             ev: The event object (unused).
@@ -2120,20 +2123,215 @@ class RamsesFusionApp:
             return
 
         current_yaml = step.publishSettings()
-        res = self.ramses.host._request_input(
-            f"Step Configuration: {step.name()}",
+        
+        # We build a custom window to support the Wizard button
+        win_id = f"StepConfig_{int(os.getpid())}"
+        ui = self.ui
+        
+        dlg = self.disp.AddWindow(
+            {
+                "WindowTitle": f"Step Config: {step.name()}",
+                "ID": win_id,
+                "Geometry": [400, 400, 600, 500],
+            },
             [
-                {
-                    "id": "YAML",
-                    "label": "YAML Config:",
-                    "type": "text",
-                    "default": current_yaml or "",
-                    "lines": 15,
-                }
-            ],
+                ui.VGroup([
+                    ui.Label({"Text": "Publish Configuration (YAML):", "Weight": 0}),
+                    ui.TextEdit({
+                        "ID": "YAML",
+                        "Text": current_yaml or "",
+                        "Lexer": "yaml",
+                        "Weight": 1,
+                        "Font": ui.Font({"Family": "Consolas", "PixelSize": 12})
+                    }),
+                    ui.VGap(10),
+                    ui.HGroup({"Weight": 0}, [
+                        ui.Button({"ID": "WizardBtn", "Text": "Fusion Render Wizard...", "Weight": 0}),
+                        ui.HGap(0, 1), # Spacer
+                        ui.Button({"ID": "SaveBtn", "Text": "Save", "Weight": 0, "MinimumSize": [100, 30]}),
+                        ui.Button({"ID": "CancelBtn", "Text": "Cancel", "Weight": 0, "MinimumSize": [100, 30]}),
+                    ])
+                ])
+            ]
         )
-        if res:
-            step.setPublishSettings(res["YAML"])
+        
+        itm = dlg.GetItems()
+        
+        def on_wizard(ev):
+            # Parse current YAML to pass existing settings
+            try:
+                txt = itm["YAML"].PlainText
+                data = yaml.safe_load(txt) if txt.strip() else {}
+            except Exception:
+                data = {}
+            
+            new_data = self._show_step_config_wizard(step, data)
+            if new_data:
+                # Update Text Area
+                try:
+                    new_yaml = yaml.dump(new_data, default_flow_style=False)
+                    itm["YAML"].PlainText = new_yaml
+                except Exception as e:
+                    self.log(f"YAML Generation Error: {e}", ram.LogLevel.Critical)
+
+        def on_save(ev):
+            new_yaml = itm["YAML"].PlainText
+            # Validate YAML before saving
+            try:
+                if new_yaml.strip():
+                    yaml.safe_load(new_yaml)
+                step.setPublishSettings(new_yaml)
+                self.log("Step configuration updated.", ram.LogLevel.Info)
+            except Exception as e:
+                self.ramses.host._request_input("YAML Error", [
+                    {"id": "Err", "label": "Invalid YAML:", "type": "label", "default": f"<font color='#ff4444'>{str(e)}</font>"}
+                ])
+                return # Don't close
+            self.disp.ExitLoop()
+
+        def on_cancel(ev):
+            self.disp.ExitLoop()
+            
+        dlg.On.WizardBtn.Clicked = on_wizard
+        dlg.On.SaveBtn.Clicked = on_save
+        dlg.On.CancelBtn.Clicked = on_cancel
+        dlg.On[win_id].Close = on_cancel
+        
+        self.dlg.Enabled = False
+        try:
+            dlg.Show()
+            self.disp.RunLoop()
+        finally:
+            dlg.Hide()
+            self.dlg.Enabled = True
+
+    def _show_step_config_wizard(self, step, current_data: dict) -> dict:
+        """Shows the Render Configuration Wizard.
+
+        Args:
+            step: The current step.
+            current_data: The existing configuration dictionary.
+
+        Returns:
+            dict: The updated configuration dictionary (or None if cancelled).
+        """
+        ui = self.ui
+        win_id = f"Wizard_{int(os.getpid())}"
+        
+        # Extract existing Fusion settings
+        fusion_cfg = current_data.get("fusion", {}) if isinstance(current_data, dict) else {}
+        prev_cfg = fusion_cfg.get("preview", {})
+        final_cfg = fusion_cfg.get("final", {})
+        
+        # Helper to build a column
+        def build_col(title, id_prefix, cfg):
+            return ui.VGroup({"Weight": 1, "Spacing": 5}, [
+                ui.Label({"Text": f"<b>{title}</b>", "Alignment": {"AlignHCenter": True}}),
+                ui.VGap(5),
+                ui.CheckBox({
+                    "ID": f"{id_prefix}Seq", 
+                    "Text": "Image Sequence (Subfolder)", 
+                    "Checked": cfg.get("image_sequence", False)
+                }),
+                ui.Label({"Text": "Paste Saver Node Text:", "Weight": 0}),
+                ui.TextEdit({
+                    "ID": f"{id_prefix}Txt",
+                    "PlaceholderText": "Copy a Saver node in Fusion and paste here...",
+                    "Weight": 1
+                }),
+                ui.Label({
+                    "ID": f"{id_prefix}Info",
+                    "Text": f"Current: {cfg.get('format', 'Default')}",
+                    "Weight": 0,
+                    "StyleSheet": "color: #888;"
+                })
+            ])
+
+        dlg = self.disp.AddWindow(
+            {
+                "WindowTitle": "Fusion Render Wizard",
+                "ID": win_id,
+                "Geometry": [450, 450, 700, 500],
+            },
+            [
+                ui.VGroup([
+                    ui.HGroup({"Weight": 1, "Spacing": 15}, [
+                        build_col("PREVIEW", "Prev", prev_cfg),
+                        # Vertical Separator (simulated with thin VGroup)
+                        ui.Label({"Text": "|", "Weight": 0, "StyleSheet": "color: #444;"}), 
+                        build_col("FINAL", "Final", final_cfg)
+                    ]),
+                    ui.VGap(15),
+                    ui.Label({"Text": "<i>Paste the content of a Saver node (Ctrl+C) into the text fields above.</i>", "Alignment": {"AlignHCenter": True}}),
+                    ui.VGap(15),
+                    ui.HGroup({"Weight": 0}, [
+                        ui.HGap(0, 1),
+                        ui.Button({"ID": "OkBtn", "Text": "Generate Config", "Weight": 0, "MinimumSize": [120, 30]}),
+                        ui.Button({"ID": "CancelBtn", "Text": "Cancel", "Weight": 0, "MinimumSize": [120, 30]}),
+                    ])
+                ])
+            ]
+        )
+        
+        itm = dlg.GetItems()
+        result = [None]
+        
+        def on_ok(ev):
+            # 1. Preview Parsing
+            p_text = itm["PrevTxt"].PlainText
+            p_parsed = FusionConfig.parse_saver_node(p_text)
+            
+            # If text provided but parsing failed
+            if p_text.strip() and not p_parsed:
+                itm["PrevInfo"].Text = "<font color='#ff4444'>Invalid Saver Node</font>"
+                return
+            
+            # 2. Final Parsing
+            f_text = itm["FinalTxt"].PlainText
+            f_parsed = FusionConfig.parse_saver_node(f_text)
+            
+            if f_text.strip() and not f_parsed:
+                itm["FinalInfo"].Text = "<font color='#ff4444'>Invalid Saver Node</font>"
+                return
+
+            # 3. Construct Data
+            # Start with existing config to preserve other keys
+            new_data = current_data.copy()
+            if "fusion" not in new_data: new_data["fusion"] = {}
+            
+            # Merge Preview
+            if p_parsed:
+                new_data["fusion"]["preview"] = p_parsed
+                # Add the checkbox value
+                new_data["fusion"]["preview"]["image_sequence"] = bool(itm["PrevSeq"].Checked)
+            elif "preview" in new_data["fusion"]:
+                # Just update checkbox if node wasn't pasted (preserve existing props)
+                 new_data["fusion"]["preview"]["image_sequence"] = bool(itm["PrevSeq"].Checked)
+                 
+            # Merge Final
+            if f_parsed:
+                new_data["fusion"]["final"] = f_parsed
+                new_data["fusion"]["final"]["image_sequence"] = bool(itm["FinalSeq"].Checked)
+            elif "final" in new_data["fusion"]:
+                 new_data["fusion"]["final"]["image_sequence"] = bool(itm["FinalSeq"].Checked)
+
+            result[0] = new_data
+            self.disp.ExitLoop()
+
+        def on_cancel(ev):
+            self.disp.ExitLoop()
+            
+        dlg.On.OkBtn.Clicked = on_ok
+        dlg.On.CancelBtn.Clicked = on_cancel
+        dlg.On[win_id].Close = on_cancel
+        
+        try:
+            dlg.Show()
+            self.disp.RunLoop()
+        finally:
+            dlg.Hide()
+            
+        return result[0]
 
     @requires_connection
     def on_save_template(self, ev: object) -> None:

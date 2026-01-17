@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import os
 from ramses import RamHost, RamItem, RamStep, RamStatus, RamFileInfo, LogLevel, ItemType, RAMSES, RAM_SETTINGS, RamMetaDataManager, RamState
+from fusion_config import FusionConfig
 
 class FusionHost(RamHost):
     """
@@ -155,24 +156,52 @@ class FusionHost(RamHost):
         """Resolves the official preview file path for the current shot.
 
         Constructs the path using the project's preview folder and the Ramses naming convention.
+        Respects custom format/sequence settings from the Step configuration.
 
         Returns:
-            str: The normalized absolute path for the preview file (e.g., .mov), or empty string on failure.
+            str: The normalized absolute path for the preview file, or empty string on failure.
         """
         try:
             preview_folder = self.previewPath()
             if not preview_folder:
                 return ""
-                
+            
+            # Determine extension and subfolder logic from Step Config
+            ext = "mov"
+            is_sequence = False
+            
+            step = RAMSES.project().currentStep() if RAMSES.project() else None
+            if step:
+                pub_settings = step.publishSettings("yaml")
+                if pub_settings and isinstance(pub_settings, dict):
+                    fusion_cfg = pub_settings.get("fusion", {})
+                    prev_cfg = fusion_cfg.get("preview", {})
+                    
+                    if prev_cfg:
+                        fmt = prev_cfg.get("format", "")
+                        if fmt:
+                            custom_ext = FusionConfig.get_extension(fmt)
+                            if custom_ext:
+                                ext = custom_ext
+                        
+                        is_sequence = prev_cfg.get("image_sequence", False)
+
             pub_info = self.publishInfo()
             
             preview_info = pub_info.copy()
             preview_info.version = -1
             preview_info.state = ""
             preview_info.resource = ""
-            preview_info.extension = "mov"
+            preview_info.extension = ext
             
-            return self.normalizePath(os.path.join(preview_folder, preview_info.fileName()))
+            filename = preview_info.fileName()
+            
+            # If Image Sequence, create a subfolder with the base name
+            if is_sequence:
+                base_name = os.path.splitext(filename)[0]
+                preview_folder = os.path.join(preview_folder, base_name)
+            
+            return self.normalizePath(os.path.join(preview_folder, filename))
         except Exception:
             return ""
 
@@ -180,7 +209,7 @@ class FusionHost(RamHost):
         """Resolves the official master export path for the current shot.
 
         Attempts to use the project's export path. If not set, falls back to the standard
-        publish file path.
+        publish file path. Respects custom format/sequence settings from the Step configuration.
 
         Returns:
             str: The normalized absolute path for the final export file, or empty string on failure.
@@ -195,14 +224,41 @@ class FusionHost(RamHost):
             if not export_folder:
                 return self.normalizePath(self.publishFilePath("mov", ""))
                 
+            # Determine extension and subfolder logic from Step Config
+            ext = "mov"
+            is_sequence = False
+            
+            step = project.currentStep()
+            if step:
+                pub_settings = step.publishSettings("yaml")
+                if pub_settings and isinstance(pub_settings, dict):
+                    fusion_cfg = pub_settings.get("fusion", {})
+                    final_cfg = fusion_cfg.get("final", {})
+                    
+                    if final_cfg:
+                        fmt = final_cfg.get("format", "")
+                        if fmt:
+                            custom_ext = FusionConfig.get_extension(fmt)
+                            if custom_ext:
+                                ext = custom_ext
+                        
+                        is_sequence = final_cfg.get("image_sequence", False)
+
             pub_info = self.publishInfo()
             final_info = pub_info.copy()
             final_info.version = -1
             final_info.state = ""
             final_info.resource = ""
-            final_info.extension = "mov"
+            final_info.extension = ext
             
-            return self.normalizePath(os.path.join(export_folder, final_info.fileName()))
+            filename = final_info.fileName()
+            
+            # If Image Sequence, create a subfolder with the base name
+            if is_sequence:
+                base_name = os.path.splitext(filename)[0]
+                export_folder = os.path.join(export_folder, base_name)
+            
+            return self.normalizePath(os.path.join(export_folder, filename))
         except Exception:
             return ""
 
@@ -1015,6 +1071,7 @@ class FusionHost(RamHost):
         """Applies standard pipeline settings (codec, format) to a Saver node.
         
         Optimized to avoid dirtying the composition if settings already match.
+        Checks for Step-specific overrides in the Ramses Project Settings (YAML).
 
         Args:
             node (Tool): The Saver node to modify.
@@ -1022,7 +1079,27 @@ class FusionHost(RamHost):
         """
         if not node:
             return
+            
+        # 1. Check for Step Overrides
+        try:
+            project = RAMSES.project()
+            step = project.currentStep() if project else None
+            
+            if step:
+                pub_settings = step.publishSettings("yaml")
+                if pub_settings and isinstance(pub_settings, dict):
+                    fusion_cfg = pub_settings.get("fusion", {})
+                    # Look for 'preview' or 'final' key
+                    target_cfg = fusion_cfg.get(preset_name, {})
+                    
+                    if target_cfg:
+                        # Apply custom configuration
+                        FusionConfig.apply_config(node, target_cfg)
+                        return
+        except Exception as e:
+            self.log(f"Failed to apply Step Render Preset: {e}", LogLevel.Warning)
 
+        # 2. Fallback to Hardcoded Defaults (ProRes)
         target_format = "QuickTimeMovies"
         if node.GetInput("OutputFormat") != target_format:
             node.SetInput("OutputFormat", target_format, 0)
