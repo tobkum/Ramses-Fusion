@@ -296,9 +296,9 @@ class RamsesFusionApp:
                         "Please Save or Setup Scene to fix.</font>"
                     )
 
-            for btn_id in self.DB_BUTTONS:
-                if btn_id in items:
-                    items[btn_id].Enabled = is_online
+            # Group 2: DB Buttons (Require Connection only)
+            if "SwitchShotButton" in items:
+                items["SwitchShotButton"].Enabled = is_online
 
             self.resize_to_fit()
         except (AttributeError, KeyError) as e:
