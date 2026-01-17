@@ -34,6 +34,10 @@ class TestFusionHost(unittest.TestCase):
 
     def setUp(self):
         self.mock_fusion = MockFusion()
+        # Inject global mocks into the module namespace
+        import fusion_host
+        fusion_host.bmd = sys.modules["bmd"]
+        fusion_host.fusionscript = sys.modules["fusionscript"]
         self.host = FusionHost(self.mock_fusion)
 
     def test_initialization(self):
@@ -42,25 +46,25 @@ class TestFusionHost(unittest.TestCase):
         self.assertEqual(self.host.hostVersion, "18.5 (Mock)")
 
     def test_normalize_path(self):
-        """Test path normalization (backslashes to forward slashes)."""
+        """Verify path normalization (converting backslashes to forward slashes)."""
         path = "C:\\Users\\Test\\File.comp"
         expected = "C:/Users/Test/File.comp"
         self.assertEqual(self.host.normalizePath(path), expected)
         self.assertEqual(self.host.normalizePath(None), "")
 
     def test_current_file_path(self):
-        """Test retrieving the current file path."""
+        """Verify retrieval of the current active composition file path."""
         path = self.host.currentFilePath()
         self.assertEqual(path, "D:/Projects/Test/TEST_S_Shot01_COMP_v001.comp")
 
     def test_sanitize_node_name(self):
-        """Test node name sanitization logic."""
+        """Verify that Fusion node names are correctly sanitized (alphanumeric only)."""
         self.assertEqual(self.host._sanitizeNodeName("My Node"), "My_Node")
         self.assertEqual(self.host._sanitizeNodeName("123Node"), "R_123Node")
         self.assertEqual(self.host._sanitizeNodeName("Node!@#"), "Node___")
 
     def test_import_logic(self):
-        """Test the _import method logic (node creation and placement)."""
+        """Verify Loader node creation and grid placement during batch import."""
         files = ["D:/Renders/TEST_S_Shot01_RENDER_v001.exr", "D:/Renders/TEST_S_Shot01_RENDER_v002.exr"]
         self.host._import(files, None, None, [], False)
         
@@ -76,7 +80,7 @@ class TestFusionHost(unittest.TestCase):
             self.assertTrue(t.Clip[1].startswith("D:/Renders/"))
 
     def test_import_collision(self):
-        """Test that importing nodes with existing names triggers auto-renaming."""
+        """Verify that importing a node with an existing name triggers auto-increment renaming."""
         comp = self.mock_fusion.GetCurrentComp()
         # Create a pre-existing tool
         comp.AddTool("Loader", 0, 0).SetAttrs({"TOOLS_Name": "AssetA"})
@@ -93,7 +97,7 @@ class TestFusionHost(unittest.TestCase):
         self.assertIn("AssetA_1", tool_names)
 
     def test_replace_logic(self):
-        """Test replacing the file path of a selected Loader node."""
+        """Verify that replacing a Loader correctly updates the path and renames the node."""
         comp = self.mock_fusion.GetCurrentComp()
         loader = comp.AddTool("Loader", 0, 0)
         loader.SetAttrs({"TOOLS_Name": "OldLoader"})
@@ -110,14 +114,14 @@ class TestFusionHost(unittest.TestCase):
         self.assertEqual(loader.Name, "NewAsset")
 
     def test_save_as_logic(self):
-        """Test the _saveAs method."""
+        """Verify that '_saveAs' correctly updates the active file path in Fusion."""
         target_path = "D:\\Projects\\Test\\TEST_S_Shot01_COMP_v002.comp"
         success = self.host._saveAs(target_path, None, None, 2, "Test Comment", True)
         self.assertTrue(success)
         self.assertEqual(self.host.currentFilePath(), "D:/Projects/Test/TEST_S_Shot01_COMP_v002.comp")
 
     def test_metadata_persistence(self):
-        """Test if _store_ramses_metadata writes to Comp data."""
+        """Verify that Ramses Item and Project UUIDs are correctly embedded in Comp metadata."""
         mock_item = MagicMock()
         mock_item.uuid.return_value = "item-uuid-123"
         mock_project = MagicMock()
@@ -131,7 +135,7 @@ class TestFusionHost(unittest.TestCase):
         self.assertEqual(comp_data.get("Ramses.ProjectUUID"), "project-uuid-456")
 
     def test_setup_current_file(self):
-        """Test applying project settings (resolution, fps, range) to the comp."""
+        """Verify that project settings (Resolution, FPS, Frame Ranges) are applied correctly."""
         mock_item = MagicMock()
         mock_item.itemType.return_value = "S" # Shot
         mock_item.duration.return_value = 10.0
@@ -161,7 +165,7 @@ class TestFusionHost(unittest.TestCase):
         self.assertEqual(attrs["COMPN_GlobalEnd"], 1250.0) # 1001 + 250 - 1
 
     def test_preview_logic(self):
-        """Test the preview render logic including node discovery and presets."""
+        """Verify '_PREVIEW' anchor discovery and automatic ProRes preset application."""
         comp = self.mock_fusion.GetCurrentComp()
         preview_node = comp.AddTool("Saver", 0, 0)
         preview_node.SetAttrs({"TOOLS_Name": "_PREVIEW"})
@@ -183,7 +187,7 @@ class TestFusionHost(unittest.TestCase):
             self.assertEqual(preview_node.GetInput("QuickTimeMovies.Compression"), "Apple ProRes 422_apcn")
 
     def test_publish_logic_split(self):
-        """Test the 'Split Publish' (Render + Backup)."""
+        """Verify the 'Split Publish' workflow (Master Render + Comp File Backup)."""
         comp = self.mock_fusion.GetCurrentComp()
         comp.SetAttrs({"COMPS_FileName": "D:/Projects/WIP/TEST_S_Shot01_COMP_v001.comp"})
         
@@ -226,6 +230,48 @@ class TestFusionHost(unittest.TestCase):
         finally:
             # Restore stdout
             sys.stdout = sys.__stdout__
+
+    def test_defensive_dirtying(self):
+        """Verify that metadata and presets only write if values actually changed."""
+        mock_item = MagicMock()
+        mock_item.uuid.return_value = "fixed-uuid"
+        
+        comp = self.mock_fusion.GetCurrentComp()
+        comp.SetData("Ramses.ItemUUID", "fixed-uuid")
+        comp.Modified = False # Reset dirty flag
+        
+        # 1. Metadata check
+        self.host._store_ramses_metadata(mock_item)
+        self.assertFalse(comp.Modified, "Comp should not be dirty if metadata is identical")
+        
+        # 2. Render Preset check
+        saver = comp.AddTool("Saver", 0, 0)
+        saver.SetInput("OutputFormat", "QuickTimeMovies", 0)
+        saver.SetInput("QuickTimeMovies.Compression", "Apple ProRes 422_apcn", 0)
+        comp.Modified = False # Reset again
+        
+        self.host.apply_render_preset(saver, "preview")
+        self.assertFalse(comp.Modified, "Comp should not be dirty if preset is identical")
+
+    def test_request_input_enhancements(self):
+        """Verify new dialog features: return value on empty inputs and custom buttons."""
+        from unittest.mock import patch
+        
+        # Mock dispatcher and window
+        mock_disp = MagicMock()
+        mock_dlg = MagicMock()
+        
+        with patch("bmd.UIDispatcher", return_value=mock_disp):
+            with patch.object(self.mock_fusion.UIManager, 'AddWindow', return_value=mock_dlg):
+                fields = [{'id': 'L', 'label': 'Info', 'type': 'label', 'default': 'Text'}]
+                
+                # 1. Check custom buttons are passed to UIManager
+                self.host._request_input("Title", fields, ok_text="Proceed", cancel_text="Go Back")
+                
+                # Verify UIManager.Button was called with our custom text
+                # We access the mock method directly
+                button_calls = [c for c in self.mock_fusion.UIManager.Button.call_args_list if c[0][0].get("Text") in ["Proceed", "Go Back"]]
+                self.assertEqual(len(button_calls), 2)
 
 if __name__ == "__main__":
     unittest.main()

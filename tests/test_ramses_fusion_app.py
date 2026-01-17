@@ -89,7 +89,7 @@ class TestRamsesFusionApp(unittest.TestCase):
             self.assertIn("PROJECT MISMATCH", call_args)
 
     def test_validate_publish_mismatches(self):
-        """Test validation of resolution and frame range before publishing."""
+        """Verify technical validation of resolution and frame range before publishing."""
         mock_item = MagicMock()
         mock_item.itemType.return_value = ramses.ItemType.SHOT
         
@@ -145,7 +145,7 @@ class TestRamsesFusionApp(unittest.TestCase):
         self.assertTrue(final_node.attrs.get("TOOLB_PassThrough"))
 
     def test_anchor_validation(self):
-        """Verify that publish fails if anchors are disconnected."""
+        """Verify that publish/preview blocks if required Saver anchors are missing or disconnected."""
         mock_item = MagicMock()
         mock_item.itemType.return_value = ramses.ItemType.SHOT
         self.app.ramses.host.collectItemSettings = MagicMock(return_value={"width": 1920, "height": 1080, "framerate": 24.0})
@@ -162,7 +162,7 @@ class TestRamsesFusionApp(unittest.TestCase):
             self.assertIn("Disconnected Anchor", msg)
 
     def test_resolve_shot_path(self):
-        """Test the path resolution logic for existing vs predicted shots."""
+        """Verify the path resolution logic for existing files vs. predicted Ramses naming."""
         mock_shot = MagicMock()
         mock_shot.shortName.return_value = "SH010"
         mock_step = MagicMock()
@@ -187,7 +187,7 @@ class TestRamsesFusionApp(unittest.TestCase):
             self.assertIn("D:/NewFolder", path)
 
     def test_context_caching(self):
-        """Verify that context is cached and only re-fetched when the path changes."""
+        """Verify that Project/Shot context is cached and only re-fetched when the file path changes."""
         self.app.ramses.host.currentFilePath = MagicMock(return_value="D:/Path/A.comp")
         self.app.ramses.host.currentItem = MagicMock(return_value=MagicMock(name="ItemA"))
         
@@ -206,7 +206,7 @@ class TestRamsesFusionApp(unittest.TestCase):
         self.assertEqual(self.app.ramses.host.currentItem.call_count, 2)
 
     def test_requires_connection_decorator(self):
-        """Verify that handlers are blocked if the Ramses connection is lost."""
+        """Verify that the @requires_connection decorator blocks handlers when the Ramses Daemon is offline."""
         # 1. Force offline
         self.app.ramses.daemonInterface().online.return_value = False
         ramses.Ramses.instance().online = MagicMock(return_value=False)
@@ -220,7 +220,7 @@ class TestRamsesFusionApp(unittest.TestCase):
         self.app.ramses.host.importItem.assert_not_called()
 
     def test_incremental_save_handler(self):
-        """Verify that incremental save triggers anchor sync and host save."""
+        """Verify that the Incremental Save handler triggers anchor synchronization and version increment."""
         self.app._sync_render_anchors = MagicMock()
         self.app.ramses.host.save = MagicMock(return_value=True)
         self.app.refresh_header = MagicMock()
@@ -230,6 +230,97 @@ class TestRamsesFusionApp(unittest.TestCase):
         self.app._sync_render_anchors.assert_called_once()
         self.app.ramses.host.save.assert_called_once_with(incremental=True, setupFile=True)
         self.app.refresh_header.assert_called_once()
+
+    def test_role_based_ui_state(self):
+        """Verify that Step Configuration is enabled/disabled based on role and users count."""
+        mock_items = {
+            "PubSettingsButton": MagicMock(),
+            "ContextLabel": MagicMock(),
+            "RamsesVersion": MagicMock(),
+            "SwitchShotButton": MagicMock()
+        }
+        self.app.dlg = MagicMock()
+        self.app.dlg.GetItems.return_value = mock_items
+        
+        # 1. Standard Role, Multi-User -> Disabled
+        mock_user = MagicMock()
+        mock_user.role.return_value = ramses.UserRole.STANDARD
+        self.app.ramses.user = MagicMock(return_value=mock_user)
+        self.app.ramses.daemonInterface().getObjects.return_value = [mock_user, MagicMock()] # 2 users
+        
+        # Mock valid pipeline context
+        mock_item = MagicMock()
+        mock_item.uuid.return_value = "item-uuid"
+        # Project mismatch check needs data
+        mock_project = MagicMock()
+        mock_project.uuid.return_value = "proj-uuid"
+        self.app.ramses.project = MagicMock(return_value=mock_project)
+
+        with patch.object(self.app.ramses.host.comp, 'GetData', return_value="proj-uuid"):
+            with patch.object(RamsesFusionApp, 'current_item', new_callable=PropertyMock) as mock_prop:
+                mock_prop.return_value = mock_item
+                self.app._update_ui_state(True)
+                self.assertFalse(mock_items["PubSettingsButton"].Enabled)
+
+            # 2. Lead Role, Multi-User -> Enabled
+            mock_user.role.return_value = ramses.UserRole.LEAD
+            with patch.object(RamsesFusionApp, 'current_item', new_callable=PropertyMock) as mock_prop:
+                mock_prop.return_value = mock_item
+                self.app._update_ui_state(True)
+                self.assertTrue(mock_items["PubSettingsButton"].Enabled)
+
+            # 3. Standard Role, Single-User -> Enabled
+            mock_user.role.return_value = ramses.UserRole.STANDARD
+            self.app.ramses.daemonInterface().getObjects.return_value = [mock_user] # 1 user
+            with patch.object(RamsesFusionApp, 'current_item', new_callable=PropertyMock) as mock_prop:
+                mock_prop.return_value = mock_item
+                self.app._update_ui_state(True)
+                self.assertTrue(mock_items["PubSettingsButton"].Enabled)
+
+    def test_priority_and_color_rendering(self):
+        """Verify that the header renders priority suffixes and Ramses colors."""
+        mock_item = MagicMock()
+        mock_item.shortName.return_value = "SH010"
+        mock_item.projectShortName.return_value = "PROJ"
+        
+        mock_step = MagicMock()
+        mock_step.name.return_value = "Compositing"
+        mock_step.colorName.return_value = "#ff00ff"
+        
+        mock_state = MagicMock()
+        mock_state.shortName.return_value = "WIP"
+        mock_state.colorName.return_value = "#00ffff"
+        
+        mock_status = MagicMock()
+        mock_status.state.return_value = mock_state
+        mock_status.get.return_value = 2 # Priority Urgent
+        
+        self.app.ramses.host.currentStatus = MagicMock(return_value=mock_status)
+        self.app._project_cache = MagicMock()
+        self.app._project_cache.name.return_value = "My Project"
+        
+        with patch.object(RamsesFusionApp, 'current_item', new_callable=PropertyMock) as mock_item_prop:
+            mock_item_prop.return_value = mock_item
+            with patch.object(RamsesFusionApp, 'current_step', new_callable=PropertyMock) as mock_step_prop:
+                mock_step_prop.return_value = mock_step
+                
+                html = self.app._get_context_text()
+                
+                # Check Priority !!
+                self.assertIn("!!", html)
+                self.assertIn("#ff8800", html) # Urgent color
+                
+                # Check Step Color
+                self.assertIn("#ff00ff", html)
+                self.assertIn("Compositing", html)
+                
+                # Check State Badge
+                self.assertIn("#00ffff", html)
+                self.assertIn("WIP", html)
+                
+                # Check Hero ID (White & Bold)
+                self.assertIn("#FFF", html)
+                self.assertIn("SH010", html)
 
 if __name__ == "__main__":
     unittest.main()

@@ -164,17 +164,22 @@ class MockComp:
 
 class MockUIManager:
     # Minimal mock for UIManager
-    def Label(self, attrs): return MagicMock(name="Label")
+    def __init__(self):
+        self.Button = MagicMock(side_effect=lambda attrs: MagicMock(name=f"Button_{attrs.get('ID', 'btn')}", **attrs))
+        self.Label = MagicMock(side_effect=lambda attrs: MagicMock(name="Label", **attrs))
+
+    def AddWindow(self, *args): return MagicMock(name="Dialog")
     def HGroup(self, *args): return MagicMock(name="HGroup")
     def VGroup(self, *args): return MagicMock(name="VGroup")
     def HGap(self, *args): return MagicMock(name="HGap")
     def VGap(self, *args): return MagicMock(name="VGap")
-    def Button(self, attrs): return MagicMock(name="Button")
     def LineEdit(self, attrs): return MagicMock(name="LineEdit")
     def TextEdit(self, attrs): return MagicMock(name="TextEdit")
     def ComboBox(self, attrs): return MagicMock(name="ComboBox")
     def Slider(self, attrs): return MagicMock(name="Slider")
     def CheckBox(self, attrs): return MagicMock(name="CheckBox")
+    def Font(self, attrs): return MagicMock(name="Font")
+    def Icon(self, attrs): return MagicMock(name="Icon")
 
 class MockFusion:
     def __init__(self):
