@@ -744,6 +744,11 @@ class RamsesFusionApp:
 
         if is_online:
             try:
+                # Performance Gate: Don't refresh if the path hasn't changed unless forced
+                current_path = self.ramses.host.currentFilePath()
+                if not force_full and self._last_synced_path == current_path and self._item_cache:
+                    return
+
                 # Force cache refresh for project and user only if requested
                 if force_full:
                     self._project_cache = None
@@ -1766,8 +1771,17 @@ class RamsesFusionApp:
                             f"New shot initialized: {selected_path}", ram.LogLevel.Info
                         )
                 else:
-                    if host.open(shot_data["path"]):
+                    target_path = host.normalizePath(shot_data["path"])
+                    current_path = host.currentFilePath()
+                    
+                    # Manual dirty check to bypass the base RamHost.open() prompt if not needed
+                    if current_path == target_path:
+                        # Already there, no need to open/prompt
                         self.refresh_header()
+                    else:
+                        # Different path, let RamHost handle the open/prompt logic
+                        if host.open(shot_data["path"]):
+                            self.refresh_header()
 
     @requires_connection
     def on_import(self, ev: object) -> None:
