@@ -42,7 +42,7 @@ This list tracks planned improvements to elevate the Ramses-Fusion plugin for pr
 
 ## Workflow Enhancements
 - [ ] **Render Farm Integration**
-    - Submit jobs to Deadline/Tractor with proper metadata (frames, output path, user) instead of local render.
+    - Submit jobs to Deadline/OpenCue/etc. with proper metadata (frames, output path, user) instead of local render.
 - [ ] **Batch Operations**
     - "Update All Loaders": One-click update all assets to latest version.
     - "Batch Status": Update status for multiple loaded assets at once.
