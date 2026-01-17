@@ -2233,11 +2233,6 @@ class RamsesFusionApp:
             return ui.VGroup({"Weight": 1, "Spacing": 5}, [
                 ui.Label({"Text": f"<b>{title}</b>", "Alignment": {"AlignHCenter": True}}),
                 ui.VGap(5),
-                ui.CheckBox({
-                    "ID": f"{id_prefix}Seq", 
-                    "Text": "Image Sequence (Subfolder)", 
-                    "Checked": cfg.get("image_sequence", False)
-                }),
                 ui.Label({"Text": "Paste Saver Node Text:", "Weight": 0}),
                 ui.TextEdit({
                     "ID": f"{id_prefix}Txt",
@@ -2307,18 +2302,14 @@ class RamsesFusionApp:
             # Merge Preview
             if p_parsed:
                 new_data["fusion"]["preview"] = p_parsed
-                # Add the checkbox value
-                new_data["fusion"]["preview"]["image_sequence"] = bool(itm["PrevSeq"].Checked)
-            elif "preview" in new_data["fusion"]:
-                # Just update checkbox if node wasn't pasted (preserve existing props)
-                 new_data["fusion"]["preview"]["image_sequence"] = bool(itm["PrevSeq"].Checked)
+                # Automate Image Sequence detection
+                new_data["fusion"]["preview"]["image_sequence"] = FusionConfig.is_sequence(p_parsed.get("format"))
                  
             # Merge Final
             if f_parsed:
                 new_data["fusion"]["final"] = f_parsed
-                new_data["fusion"]["final"]["image_sequence"] = bool(itm["FinalSeq"].Checked)
-            elif "final" in new_data["fusion"]:
-                 new_data["fusion"]["final"]["image_sequence"] = bool(itm["FinalSeq"].Checked)
+                # Automate Image Sequence detection
+                new_data["fusion"]["final"]["image_sequence"] = FusionConfig.is_sequence(f_parsed.get("format"))
 
             result[0] = new_data
             self.disp.ExitLoop()

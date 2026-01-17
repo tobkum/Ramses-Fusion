@@ -8,26 +8,101 @@ class FusionConfig:
     """
 
     EXTENSION_MAP = {
-        "QuickTimeMovies": "mov",
-        "OpenEXRFormat": "exr",
-        "TiffFormat": "tif",
-        "DPXFormat": "dpx",
-        "MXFFormat": "mxf",
-        "JpegFormat": "jpg",
-        "PngFormat": "png",
-        "TargaFormat": "tga",
-        "CineonFormat": "cin",
-        "SGIFormat": "sgi",
-        "AVIFormat": "avi",
-        "BMPFormat": "bmp",
-        "PhotoshopFormat": "psd",
-        "SoftimageFormat": "pic",
-        "MayaFormat": "iff",
-        "Jpeg2000Format": "jp2"
+        "QuickTimeMovies": {"ext": "mov", "seq": False},
+        "OpenEXRFormat": {"ext": "exr", "seq": True},
+        "TiffFormat": {"ext": "tif", "seq": True},
+        "DPXFormat": {"ext": "dpx", "seq": True},
+        "MXFFormat": {"ext": "mxf", "seq": False},
+        "JpegFormat": {"ext": "jpg", "seq": True},
+        "PngFormat": {"ext": "png", "seq": True},
+        "TargaFormat": {"ext": "tga", "seq": True},
+        "CineonFormat": {"ext": "cin", "seq": True},
+        "SGIFormat": {"ext": "sgi", "seq": True},
+        "AVIFormat": {"ext": "avi", "seq": False},
+        "BMPFormat": {"ext": "bmp", "seq": True},
+        "PhotoshopFormat": {"ext": "psd", "seq": True},
+        "SoftimageFormat": {"ext": "pic", "seq": True},
+        "MayaFormat": {"ext": "iff", "seq": True},
+        "Jpeg2000Format": {"ext": "jp2", "seq": True}
     }
 
     @staticmethod
     def parse_saver_node(text: str) -> dict:
+        """Parses the text content of a copied Fusion Saver node.
+
+        Extracts the OutputFormat and all specific format properties (e.g. Compression).
+        
+        Args:
+            text (str): The raw text from the clipboard (Lua table structure).
+
+        Returns:
+            dict: A dictionary with 'format' (str) and 'properties' (dict).
+                  Returns None if the text is not a valid Saver node.
+        """
+        if not text or "Saver" not in text:
+            return None
+
+        # 1. Isolate the Inputs block to save parsing time and avoid noise
+        # We look for 'Inputs = {' and count braces to capture the full block.
+        inputs_start = text.find("Inputs = {")
+        if inputs_start == -1:
+            return None
+            
+        # Extract the Inputs block text using a brace counter
+        inputs_text = FusionConfig._extract_block(text, inputs_start + 9) # +9 to skip "Inputs = "
+        if not inputs_text:
+            return None
+
+        # 2. Parse the Lua Table into a Python Dictionary
+        inputs_data = FusionConfig._lua_to_dict(inputs_text)
+        
+        config = {
+            "format": "",
+            "properties": {}
+        }
+        
+        # 3. Extract Format
+        # Input: OutputFormat = Input { Value = FuID { "FormatName" } }
+        # Parsed: {'OutputFormat': {'Value': 'FormatName'}} (because we handle FuID unwrapping)
+        
+        # Helper to get value safely from our parsed structure
+        def get_val(key):
+            # Key can be "OutputFormat" or "['OutputFormat']" depending on tokenizer,
+            # but our tokenizer strips brackets/quotes for keys.
+            node = inputs_data.get(key)
+            if not node: return None
+            # Check for standard Input { Value = X } structure
+            if isinstance(node, dict) and "Value" in node:
+                return node["Value"]
+            # Fallback for direct assignment
+            return node
+
+        fmt = get_val("OutputFormat")
+        if not fmt:
+            return None
+            
+        config["format"] = fmt
+
+        # 4. Extract Properties
+        # Iterate over all parsed keys
+        for key, val in inputs_data.items():
+            # Only keep keys relevant to the format (e.g. "QuickTimeMovies.Compression")
+            # Our tokenizer handles ["Key"] by stripping quotes, so key is clean.
+            if not key.startswith(config["format"]):
+                continue
+                
+            # Flatten the value if it's inside an Input { Value = ... } structure
+            final_val = val
+            if isinstance(val, dict) and "Value" in val:
+                final_val = val["Value"]
+            
+            # Additional unwrapping for weird Fusion types if missed by parser (should rely on parser though)
+            config["properties"][key] = final_val
+
+        return config
+
+    @staticmethod
+    def _extract_block(text: str, start_index: int) -> str:
         """Parses the text content of a copied Fusion Saver node.
 
         Extracts the OutputFormat and all specific format properties (e.g. Compression).
@@ -363,7 +438,18 @@ class FusionConfig:
     @staticmethod
     def get_extension(format_id: str) -> str:
         """Returns the default file extension for a given Fusion Format ID."""
-        return FusionConfig.EXTENSION_MAP.get(format_id, "")
+        fmt_info = FusionConfig.EXTENSION_MAP.get(format_id)
+        if isinstance(fmt_info, dict):
+            return fmt_info.get("ext", "")
+        return ""
+
+    @staticmethod
+    def is_sequence(format_id: str) -> bool:
+        """Returns True if the given Fusion Format ID is typically an image sequence."""
+        fmt_info = FusionConfig.EXTENSION_MAP.get(format_id)
+        if isinstance(fmt_info, dict):
+            return fmt_info.get("seq", False)
+        return False
 
     @staticmethod
     def apply_config(node: object, config: dict) -> bool:
