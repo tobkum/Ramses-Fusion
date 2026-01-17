@@ -17,9 +17,21 @@ lib_path = os.path.join(script_dir, "lib")
 if lib_path not in sys.path:
     sys.path.append(lib_path)
 
+import importlib
 import ramses as ram
-import yaml
+try:
+    import ramses.yaml as yaml
+except ImportError:
+    import yaml
+
 import fusion_host
+importlib.reload(fusion_host)
+
+try:
+    import fusion_config
+    importlib.reload(fusion_config)
+except ImportError:
+    pass
 from fusion_config import FusionConfig
 
 
