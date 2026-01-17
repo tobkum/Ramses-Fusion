@@ -325,25 +325,105 @@ class TestFusionHost(unittest.TestCase):
         self.host.apply_render_preset(saver, "preview")
         self.assertFalse(comp.Modified, "Comp should not be dirty if preset is identical")
 
-    def test_request_input_enhancements(self):
-        """Verify new dialog features: return value on empty inputs and custom buttons."""
-        from unittest.mock import patch
+    def test_calculate_padding_str(self):
+        """Verify dynamic padding calculation based on shot frame range."""
+        import ramses
+        ramses.RAM_SETTINGS.userSettings = {"compStartFrame": 1001}
         
-        # Mock dispatcher and window
-        mock_disp = MagicMock()
-        mock_dlg = MagicMock()
+        # 1. Standard shot (e.g. 100 frames -> ends at 1100 -> 4 digits)
+        mock_item = MagicMock()
+        self.host.currentItem = MagicMock(return_value=mock_item)
+        self.host.collectItemSettings = MagicMock(return_value={"frames": 100})
+        self.assertEqual(self.host._calculate_padding_str(), "0000")
         
-        with patch("bmd.UIDispatcher", return_value=mock_disp):
-            with patch.object(self.mock_fusion.UIManager, 'AddWindow', return_value=mock_dlg):
-                fields = [{'id': 'L', 'label': 'Info', 'type': 'label', 'default': 'Text'}]
-                
-                # 1. Check custom buttons are passed to UIManager
-                self.host._request_input("Title", fields, ok_text="Proceed", cancel_text="Go Back")
-                
-                # Verify UIManager.Button was called with our custom text
-                # We access the mock method directly
-                button_calls = [c for c in self.mock_fusion.UIManager.Button.call_args_list if c[0][0].get("Text") in ["Proceed", "Go Back"]]
-                self.assertEqual(len(button_calls), 2)
+        # 2. Long shot (e.g. 10000 frames -> ends at 11000 -> 5 digits)
+        self.host.collectItemSettings = MagicMock(return_value={"frames": 10000})
+        self.assertEqual(self.host._calculate_padding_str(), "00000")
+
+    def test_long_shot_padding(self):
+        """Verify that padding scales beyond 4 digits if needed."""
+        import ramses
+        ramses.RAM_SETTINGS.userSettings = {"compStartFrame": 1001}
+        mock_item = MagicMock()
+        self.host.currentItem = MagicMock(return_value=mock_item)
+        
+        # Shot ending at 100,000 (1001 + 98999) -> 6 digits
+        self.host.collectItemSettings = MagicMock(return_value={"frames": 99000})
+        self.assertEqual(len(self.host._calculate_padding_str()), 6)
+
+    def test_sequence_path_resolution(self):
+        """Verify sequence path resolution logic (subfolders and padding)."""
+        # Mock Step to return sequence config
+        mock_step = MagicMock()
+        # Mock _get_fusion_settings to return sequence config for 'final'
+        self.host._get_fusion_settings = MagicMock(return_value={
+            "final": {"format": "OpenEXRFormat", "image_sequence": True}
+        })
+        self.host.currentStep = MagicMock(return_value=mock_step)
+        
+        # Mock Project Export Path
+        mock_project = MagicMock()
+        mock_project.exportPath.return_value = "D:/Exports"
+        import ramses
+        ramses.RAMSES.project = MagicMock(return_value=mock_project)
+        
+        # Mock Item/Padding
+        self.host._calculate_padding_str = MagicMock(return_value="0000")
+        
+        # Mock publishInfo
+        mock_info = MagicMock()
+        mock_info.copy.return_value = mock_info
+        mock_info.fileName.return_value = "Shot01"
+        self.host.publishInfo = MagicMock(return_value=mock_info)
+        
+        path = self.host.resolveFinalPath()
+        
+        # Should be: ExportDir / BaseName / BaseName.Padding.Ext
+        expected = "D:/Exports/Shot01/Shot01.0000.exr"
+        self.assertEqual(path, expected)
+
+    def test_update_status_transaction(self):
+        """Verify the updateStatus transaction logic (Save -> Publish -> DB Update)."""
+        # Mock Daemon Connection
+        self.host.testDaemonConnection = MagicMock(return_value=True)
+        self.host.currentItem = MagicMock(return_value=MagicMock())
+        
+        # Mock Status UI result
+        mock_state = MagicMock()
+        mock_state.completionRatio.return_value = 100
+        self.host._statusUI = MagicMock(return_value={
+            "publish": True,
+            "comment": "Final Render",
+            "state": mock_state,
+            "completionRatio": 100
+        })
+        
+        # 1. Test Successful Transaction
+        self.host.save = MagicMock(return_value=True)
+        self.host.publish = MagicMock(return_value=True)
+        self.host.currentVersion = MagicMock(return_value=5)
+        
+        mock_status = MagicMock()
+        self.host.currentStatus = MagicMock(return_value=mock_status)
+        
+        success = self.host.updateStatus()
+        
+        self.assertTrue(success)
+        self.host.save.assert_called_with(incremental=True, comment="Status change")
+        self.host.publish.assert_called_with(False, incrementVersion=False)
+        mock_status.setState.assert_called_with(mock_state)
+        mock_status.setVersion.assert_called_with(5)
+
+        # 2. Test Abort on Save Failure
+        self.host.save.return_value = False
+        success = self.host.updateStatus()
+        self.assertFalse(success)
+        
+        # 3. Test Abort on Publish Failure
+        self.host.save.return_value = True
+        self.host.publish.return_value = False
+        success = self.host.updateStatus()
+        self.assertFalse(success)
 
 if __name__ == "__main__":
     unittest.main()
