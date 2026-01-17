@@ -32,6 +32,7 @@ Desktop.ini
 # --- Documentation ---
 site/
 mkdocs.yml
+wiki/
 
 # --- Temporary / User Specific ---
 *.log
