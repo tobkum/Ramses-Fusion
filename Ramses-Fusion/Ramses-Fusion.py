@@ -246,7 +246,7 @@ class RamsesFusionApp:
                 if btn_id in items:
                     items[btn_id].Enabled = is_online and is_pipeline
 
-            # Group 1.5: Role-based Permissions (Publish Settings)
+            # Group 1.5: Role-based Permissions (Step Configuration)
             if "PubSettingsButton" in items:
                 has_permission = False
                 if is_online and is_pipeline:
@@ -986,17 +986,6 @@ class RamsesFusionApp:
             "Checkable": True,
             "Checked": is_collapsed
         })
-
-    def on_toggle_section(self, ev):
-        """Event handler for section header clicks."""
-        if not self.dlg:
-            return
-            
-        items = self.dlg.GetItems()
-        # Find which header was clicked
-        # ev contains the ID of the object that triggered the event in some versions,
-        # but usually we bind directly.
-        pass # Will be handled by the lambda in binding
 
     def _build_project_group(self):
         """Builds the 'Project & Scene' UI section."""

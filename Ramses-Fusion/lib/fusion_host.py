@@ -1180,7 +1180,7 @@ class FusionHost(RamHost):
             {'id': 'Publish', 'label': 'Publish Final:', 'type': 'checkbox', 'default': False}
         ])
         
-        if not res: return None
+        if res is None: return None
         
         selected_state = states[res['State']]
         
