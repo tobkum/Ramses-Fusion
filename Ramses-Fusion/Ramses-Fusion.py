@@ -939,7 +939,7 @@ class RamsesFusionApp:
         self.dlg.On.TemplateButton.Clicked = self.on_save_template
         self.dlg.On.SetupSceneButton.Clicked = self.on_setup_scene
         self.dlg.On.RetrieveButton.Clicked = self.on_retrieve
-        self.dlg.On.PubSettingsButton.Clicked = self.on_publish_settings
+        self.dlg.On.PubSettingsButton.Clicked = self.on_step_configuration
         self.dlg.On.SettingsButton.Clicked = self.show_settings_window
         self.dlg.On.AboutButton.Clicked = self.show_about_window
         self.dlg.On.RamsesFusionMainWin.Close = self.on_close
@@ -1078,28 +1078,28 @@ class RamsesFusionApp:
                     "PipelineHeader", "ASSETS && TOOLS", content_id
                 ),
                 self.create_button(
-                    "ImportButton",
-                    "Import Published",
-                    "ramimport.png",
-                    accent_color=bg_color,
+                    "ImportButton", 
+                    "Import Published", 
+                    "ramimport.png", 
+                    accent_color=bg_color, 
                     weight=0,
-                    tooltip="Import a published asset or render into the current composition.",
+                    tooltip="Import a published asset or render into the current composition."
                 ),
                 self.create_button(
-                    "ReplaceButton",
-                    "Replace Loader",
-                    "ramreplace.png",
-                    accent_color=bg_color,
+                    "ReplaceButton", 
+                    "Replace Loader", 
+                    "ramreplace.png", 
+                    accent_color=bg_color, 
                     weight=0,
-                    tooltip="Replace the selected Loader node with a different version or asset.",
+                    tooltip="Replace the selected Loader node with a different version or asset."
                 ),
                 self.create_button(
-                    "TemplateButton",
-                    "Save as Template",
-                    "ramtemplate.png",
-                    accent_color=bg_color,
+                    "TemplateButton", 
+                    "Save as Template", 
+                    "ramtemplate.png", 
+                    accent_color=bg_color, 
                     weight=0,
-                    tooltip="Save the current composition as a template for other shots in this step.",
+                    tooltip="Save the current composition as a template for other shots in this step."
                 ),
             ]
         )
@@ -1114,36 +1114,36 @@ class RamsesFusionApp:
                     "WorkingHeader", "SAVING && ITERATION", content_id
                 ),
                 self.create_button(
-                    "SaveButton",
-                    "Save",
-                    "ramsave.png",
-                    accent_color=bg_color,
+                    "SaveButton", 
+                    "Save", 
+                    "ramsave.png", 
+                    accent_color=bg_color, 
                     weight=0,
-                    tooltip="Overwrite the current working file version.",
+                    tooltip="Overwrite the current working file version."
                 ),
                 self.create_button(
-                    "IncrementalSaveButton",
-                    "Incremental Save",
-                    "ramsaveincremental.png",
-                    accent_color=bg_color,
+                    "IncrementalSaveButton", 
+                    "Incremental Save", 
+                    "ramsaveincremental.png", 
+                    accent_color=bg_color, 
                     weight=0,
-                    tooltip="Save a new version of the current file (e.g., v001 -> v002).",
+                    tooltip="Save a new version of the current file (e.g., v001 -> v002)."
                 ),
                 self.create_button(
-                    "CommentButton",
-                    "Add Note",
-                    "ramcomment.png",
-                    accent_color=bg_color,
+                    "CommentButton", 
+                    "Add Note", 
+                    "ramcomment.png", 
+                    accent_color=bg_color, 
                     weight=0,
-                    tooltip="Add a descriptive note to the current version in the Ramses database.",
+                    tooltip="Add a descriptive note to the current version in the Ramses database."
                 ),
                 self.create_button(
-                    "RetrieveButton",
-                    "Version History / Restore",
-                    "ramretrieve.png",
-                    accent_color=bg_color,
+                    "RetrieveButton", 
+                    "Version History / Restore", 
+                    "ramretrieve.png", 
+                    accent_color=bg_color, 
                     weight=0,
-                    tooltip="Browse and restore a previous version of this composition.",
+                    tooltip="Browse and restore a previous version of this composition."
                 ),
             ]
         )
@@ -1158,20 +1158,20 @@ class RamsesFusionApp:
                     "PublishHeader", "REVIEW && PUBLISH", content_id
                 ),
                 self.create_button(
-                    "PreviewButton",
-                    "Create Preview",
-                    "rampreview.png",
-                    accent_color=bg_color,
+                    "PreviewButton", 
+                    "Create Preview", 
+                    "rampreview.png", 
+                    accent_color=bg_color, 
                     weight=0,
-                    tooltip="Generate a preview render for supervisor review.",
+                    tooltip="Generate a preview render for supervisor review."
                 ),
                 self.create_button(
-                    "UpdateStatusButton",
-                    "Update / Publish",
-                    "ramstatus.png",
+                    "UpdateStatusButton", 
+                    "Update / Publish", 
+                    "ramstatus.png", 
                     tooltip="Change the shot status (e.g., WIP, Review) and optionally publish the final output.",
-                    accent_color=bg_color,
-                    weight=0,
+                    accent_color=bg_color, 
+                    weight=0
                 ),
             ]
         )
@@ -2108,7 +2108,7 @@ class RamsesFusionApp:
 
         self.ramses.host.savePreview()
 
-    def on_publish_settings(self, ev: object) -> None:
+    def on_step_configuration(self, ev: object) -> None:
         """Handler for 'Step Configuration' button.
 
         Shows a text editor to modify the Step's YAML publish configuration.
