@@ -1035,7 +1035,6 @@ class RamsesFusionApp:
         """Builds the 'Project & Scene' UI section."""
         bg_color = "#2a3442"
         content_id = "ProjectContent"
-        is_hidden = self._section_states.get(content_id, False)
         return self.ui.VGroup(
             [
                 self._create_section_header(
