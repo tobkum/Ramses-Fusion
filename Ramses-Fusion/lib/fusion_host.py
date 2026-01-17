@@ -157,26 +157,19 @@ class FusionHost(RamHost):
         return settings
 
     def _get_fusion_settings(self, step) -> dict:
-        """Helper to safely retrieve and parse Fusion settings from a Step.
+        """Helper to safely retrieve Fusion settings from a Step.
         
-        Handles cases where publishSettings returns either a raw YAML string or a pre-parsed dictionary.
+        The Ramses API 'publishSettings("yaml")' automatically parses the stored 
+        YAML string into a Python dictionary.
         """
         if not step:
             return {}
         try:
-            # API might return dict directly or string depending on version/args
             data = step.publishSettings("yaml")
-            
             if isinstance(data, dict):
                 return data.get("fusion", {})
-                
-            if isinstance(data, str) and data.strip():
-                parsed = yaml.safe_load(data)
-                if isinstance(parsed, dict):
-                    return parsed.get("fusion", {})
-                    
         except Exception as e:
-            self.log(f"Error parsing Step settings: {e}", LogLevel.Warning)
+            self.log(f"Error retrieving Step settings: {e}", LogLevel.Warning)
             
         return {}
 
