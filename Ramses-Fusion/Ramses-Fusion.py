@@ -85,6 +85,9 @@ class RamsesFusionApp:
         self._step_cache = None
         self._step_path = ""
         self._last_synced_path = None
+        
+        # UI State
+        self._section_states = {} # {content_id: is_collapsed}
 
     def _get_icon(self, icon_name: str) -> object:
         """Retrieves an icon from the cache, loading it if necessary.
@@ -765,6 +768,17 @@ class RamsesFusionApp:
         # Update UI based on the determined status
         self._update_ui_state(is_online)
 
+    def resize_to_fit(self):
+        """Adjusts the window height to match the current content visibility."""
+        if not self.dlg:
+            return
+        # Use RecalcLayout first to ensure internal sizes are correct
+        self.dlg.RecalcLayout()
+        geom = self.dlg.GetGeometry()
+        # Set to a very small height and let the UIManager expand it to the minimum required
+        self.dlg.SetGeometry([geom[1], geom[2], geom[3], 10])
+        self.dlg.RecalcLayout()
+
     def show_main_window(self) -> None:
         """Initializes and displays the main Ramses-Fusion panel.
 
@@ -831,17 +845,18 @@ class RamsesFusionApp:
                                             ],
                                         ),
                                         self.ui.VGap(10),
-                                        # Groups
-                                        self._build_project_group(),
-                                        self.ui.VGap(8),
-                                        self._build_pipeline_group(),
-                                        self.ui.VGap(8),
-                                        self._build_working_group(),
-                                        self.ui.VGap(8),
-                                        self._build_publish_group(),
-                                        self.ui.VGap(8),
-                                        self._build_settings_group(),
-                                        # Spacer to push everything up
+                                        # Groups Container (No weight, stays as small as possible)
+                                        self.ui.VGroup(
+                                            {"Weight": 0, "Spacing": 8},
+                                            [
+                                                self._build_project_group(),
+                                                self._build_pipeline_group(),
+                                                self._build_working_group(),
+                                                self._build_publish_group(),
+                                                self._build_settings_group(),
+                                            ]
+                                        ),
+                                        # Spacer to push everything up (Takes all remaining weight)
                                         self.ui.VGap(0, 1),
                                         # Footer Version
                                         self.ui.Label(
@@ -883,238 +898,153 @@ class RamsesFusionApp:
         self.dlg.On.AboutButton.Clicked = self.show_about_window
         self.dlg.On.RamsesFusionMainWin.Close = self.on_close
 
+        # Section Button Mapping
+        section_map = {
+            "ProjectContent": ["SwitchShotButton", "SetupSceneButton", "OpenButton", "RamsesButton"],
+            "PipelineContent": ["ImportButton", "ReplaceButton", "TemplateButton"],
+            "WorkingContent": ["SaveButton", "IncrementalSaveButton", "CommentButton", "RetrieveButton"],
+            "PublishContent": ["PreviewButton", "UpdateStatusButton"],
+            "SettingsContent": ["PubSettingsButton", "SettingsButton", "AboutButton"]
+        }
+
+        # Bind Section Toggles
+        def bind_toggle(header_id, content_id, title):
+            def toggle(ev):
+                items = self.dlg.GetItems()
+                # Toggle internal state
+                is_collapsed = not self._section_states.get(content_id, False)
+                self._section_states[content_id] = is_collapsed
+                
+                # Update Header Text
+                prefix = "[ + ]" if is_collapsed else "[ − ]"
+                items[header_id].Text = f"{prefix}  {title}"
+                
+                # Manually toggle each button's visibility
+                for btn_id in section_map.get(content_id, []):
+                    if btn_id in items:
+                        items[btn_id].Hidden = is_collapsed
+                
+                self.resize_to_fit()
+            
+            self.dlg.On[header_id].Clicked = toggle
+            
+            # Set initial state if collapsed
+            if self._section_states.get(content_id, False):
+                items = self.dlg.GetItems()
+                for btn_id in section_map.get(content_id, []):
+                    if btn_id in items:
+                        items[btn_id].Hidden = True
+
+        bind_toggle("ProjectHeader", "ProjectContent", "PROJECT && SCENE")
+        bind_toggle("PipelineHeader", "PipelineContent", "ASSETS && TOOLS")
+        bind_toggle("WorkingHeader", "WorkingContent", "SAVING && ITERATION")
+        bind_toggle("PublishHeader", "PublishContent", "REVIEW && PUBLISH")
+        bind_toggle("SettingsHeader", "SettingsContent", "SETTINGS && INFO")
+
         self.refresh_header()
         self.dlg.Show()
+        self.resize_to_fit() # Force initial sizing to show footer
         self.disp.RunLoop()
         self.dlg.Hide()
         self.dlg = None # Cleanup reference after exit
 
-    def _build_project_group(self):
-        """Builds the 'Project & Scene' UI section.
+    def _create_section_header(self, id_name: str, title: str, content_id: str):
+        """Creates a clickable section header that toggles a content group.
 
-        Contains buttons for Switching Shots, Setup Scene, Open, and Ramses Client.
+        Args:
+            id_name (str): ID for the header button.
+            title (str): The display text.
+            content_id (str): ID of the VGroup to toggle.
 
         Returns:
-            VGroup: The Fusion UI container.
+            Button: The Fusion UI button styled as a header.
         """
-        bg_color = "#2a3442"  # Very Dark Desaturated Blue
-        header_ss = "background-color: #1a1a1a; color: #888; border-top: 1px solid #111; border-bottom: 1px solid #333; padding-left: 5px;"
-        return self.ui.VGroup(
-            [
-                self.ui.Label(
-                    {
-                        "Text": "PROJECT & SCENE",
-                        "Weight": 0,
-                        "Font": self.ui.Font({"PixelSize": 10, "Bold": True}),
-                        "StyleSheet": header_ss
-                    }
-                ),
-                self.create_button(
-                    "SwitchShotButton",
-                    "Browse Shots / Tasks",
-                    "ramshot.png",
-                    tooltip="Quickly jump to another shot in this project or create a new one from a template.",
-                    accent_color=bg_color,
-                ),
-                self.create_button(
-                    "SetupSceneButton",
-                    "Sync Project Settings",
-                    "ramsetupscene.png",
-                    tooltip="Automatically set the resolution, FPS, and frame range based on Ramses project settings.",
-                    accent_color=bg_color,
-                ),
-                self.create_button(
-                    "OpenButton",
-                    "Open Composition",
-                    "ramopen.png",
-                    tooltip="Browse and open an existing Ramses composition.",
-                    accent_color=bg_color,
-                ),
-                self.create_button(
-                    "RamsesButton",
-                    "Open Ramses Client",
-                    "ramses.png",
-                    tooltip="Launch the main Ramses Client application.",
-                    accent_color=bg_color,
-                ),
-            ]
-        )
+        # Initial state
+        is_collapsed = self._section_states.get(content_id, False)
+        prefix = "[ + ]" if is_collapsed else "[ − ]"
+        
+        ss = "QPushButton { text-align: left; padding-left: 5px; background-color: #1a1a1a; color: #888; border: none; border-top: 1px solid #111; border-bottom: 1px solid #333; }"
+        ss += " QPushButton:hover { color: #BBB; background-color: #222; }"
+
+        return self.ui.Button({
+            "ID": id_name,
+            "Text": f"{prefix}  {title}",
+            "Weight": 0,
+            "MinimumSize": [16, 22],
+            "MaximumSize": [2000, 22],
+            "Font": self.ui.Font({"PixelSize": 10, "Bold": True}),
+            "StyleSheet": ss,
+            "Checkable": True,
+            "Checked": is_collapsed
+        })
+
+    def on_toggle_section(self, ev):
+        """Event handler for section header clicks."""
+        if not self.dlg:
+            return
+            
+        items = self.dlg.GetItems()
+        # Find which header was clicked
+        # ev contains the ID of the object that triggered the event in some versions,
+        # but usually we bind directly.
+        pass # Will be handled by the lambda in binding
+
+    def _build_project_group(self):
+        """Builds the 'Project & Scene' UI section."""
+        bg_color = "#2a3442"
+        content_id = "ProjectContent"
+        is_hidden = self._section_states.get(content_id, False)
+        return self.ui.VGroup([
+            self._create_section_header("ProjectHeader", "PROJECT && SCENE", content_id),
+            self.create_button("SwitchShotButton", "Browse Shots / Tasks", "ramshot.png", accent_color=bg_color, weight=0),
+            self.create_button("SetupSceneButton", "Sync Project Settings", "ramsetupscene.png", accent_color=bg_color, weight=0),
+            self.create_button("OpenButton", "Open Composition", "ramopen.png", accent_color=bg_color, weight=0),
+            self.create_button("RamsesButton", "Open Ramses Client", "ramses.png", accent_color=bg_color, weight=0),
+        ])
 
     def _build_pipeline_group(self):
-        """Builds the 'Assets & Tools' UI section.
-
-        Contains buttons for Import, Replace, and Save Template.
-
-        Returns:
-            VGroup: The Fusion UI container.
-        """
-        bg_color = "#342a42"  # Very Dark Desaturated Purple
-        header_ss = "background-color: #1a1a1a; color: #888; border-top: 1px solid #111; border-bottom: 1px solid #333; padding-left: 5px;"
-        return self.ui.VGroup(
-            [
-                self.ui.Label(
-                    {
-                        "Text": "ASSETS & TOOLS",
-                        "Weight": 0,
-                        "Font": self.ui.Font({"PixelSize": 10, "Bold": True}),
-                        "StyleSheet": header_ss
-                    }
-                ),
-                self.create_button(
-                    "ImportButton",
-                    "Import Published",
-                    "ramimport.png",
-                    tooltip="Import a published asset or render into the current composition.",
-                    accent_color=bg_color,
-                ),
-                self.create_button(
-                    "ReplaceButton",
-                    "Replace Loader",
-                    "ramreplace.png",
-                    tooltip="Replace the selected Loader node with a different version or asset.",
-                    accent_color=bg_color,
-                ),
-                self.create_button(
-                    "TemplateButton",
-                    "Save as Template",
-                    "ramtemplate.png",
-                    tooltip="Save the current composition as a template for other shots in this step.",
-                    accent_color=bg_color,
-                ),
-            ]
-        )
+        """Builds the 'Assets & Tools' UI section."""
+        bg_color = "#342a42"
+        content_id = "PipelineContent"
+        return self.ui.VGroup([
+            self._create_section_header("PipelineHeader", "ASSETS && TOOLS", content_id),
+            self.create_button("ImportButton", "Import Published", "ramimport.png", accent_color=bg_color, weight=0),
+            self.create_button("ReplaceButton", "Replace Loader", "ramreplace.png", accent_color=bg_color, weight=0),
+            self.create_button("TemplateButton", "Save as Template", "ramtemplate.png", accent_color=bg_color, weight=0),
+        ])
 
     def _build_working_group(self):
-        """Builds the 'Saving & Iteration' UI section.
-
-        Contains buttons for Save, Incremental Save, Comment, and Retrieve.
-
-        Returns:
-            VGroup: The Fusion UI container.
-        """
-        bg_color = "#2a423d"  # Very Dark Desaturated Teal
-        header_ss = "background-color: #1a1a1a; color: #888; border-top: 1px solid #111; border-bottom: 1px solid #333; padding-left: 5px;"
-        return self.ui.VGroup(
-            [
-                self.ui.Label(
-                    {
-                        "Text": "SAVING & ITERATION",
-                        "Weight": 0,
-                        "Font": self.ui.Font({"PixelSize": 10, "Bold": True}),
-                        "StyleSheet": header_ss
-                    }
-                ),
-                self.create_button(
-                    "SaveButton",
-                    "Save",
-                    "ramsave.png",
-                    tooltip="Overwrite the current working file version.",
-                    accent_color=bg_color,
-                ),
-                self.create_button(
-                    "IncrementalSaveButton",
-                    "Incremental Save",
-                    "ramsaveincremental.png",
-                    tooltip="Save a new version of the current file (v001 -> v002).",
-                    accent_color=bg_color,
-                ),
-                self.create_button(
-                    "CommentButton",
-                    "Add Comment",
-                    "ramcomment.png",
-                    tooltip="Add a note to the current version in the Ramses database.",
-                    accent_color=bg_color,
-                ),
-                self.create_button(
-                    "RetrieveButton",
-                    "Version History / Restore",
-                    "ramretrieve.png",
-                    tooltip="Open a previous version of this composition from the _versions folder.",
-                    accent_color=bg_color,
-                ),
-            ]
-        )
+        """Builds the 'Saving & Iteration' UI section."""
+        bg_color = "#2a423d"
+        content_id = "WorkingContent"
+        return self.ui.VGroup([
+            self._create_section_header("WorkingHeader", "SAVING && ITERATION", content_id),
+            self.create_button("SaveButton", "Save", "ramsave.png", accent_color=bg_color, weight=0),
+            self.create_button("IncrementalSaveButton", "Incremental Save", "ramsaveincremental.png", accent_color=bg_color, weight=0),
+            self.create_button("CommentButton", "Add Note", "ramcomment.png", accent_color=bg_color, weight=0),
+            self.create_button("RetrieveButton", "Version History / Restore", "ramretrieve.png", accent_color=bg_color, weight=0),
+        ])
 
     def _build_publish_group(self):
-        """Builds the 'Review & Publish' UI section.
-
-        Contains buttons for Preview and Status Update (Publish).
-
-        Returns:
-            VGroup: The Fusion UI container.
-        """
-        bg_color = "#2a422a"  # Very Dark Desaturated Green
-        header_ss = "background-color: #1a1a1a; color: #888; border-top: 1px solid #111; border-bottom: 1px solid #333; padding-left: 5px;"
-        return self.ui.VGroup(
-            [
-                self.ui.Label(
-                    {
-                        "Text": "REVIEW & PUBLISH",
-                        "Weight": 0,
-                        "Font": self.ui.Font({"PixelSize": 10, "Bold": True}),
-                        "StyleSheet": header_ss
-                    }
-                ),
-                self.create_button(
-                    "PreviewButton",
-                    "Create Preview",
-                    "rampreview.png",
-                    tooltip="Generate a preview render for review.",
-                    accent_color=bg_color,
-                ),
-                self.create_button(
-                    "UpdateStatusButton",
-                    "Submit / Publish",
-                    "ramstatus.png",
-                    tooltip="Change the shot status (WIP, Review, Done) and optionally publish the final comp.",
-                    accent_color=bg_color,
-                ),
-            ]
-        )
+        """Builds the 'Review & Publish' UI section."""
+        bg_color = "#2a422a"
+        content_id = "PublishContent"
+        return self.ui.VGroup([
+            self._create_section_header("PublishHeader", "REVIEW && PUBLISH", content_id),
+            self.create_button("PreviewButton", "Create Preview", "rampreview.png", accent_color=bg_color, weight=0),
+            self.create_button("UpdateStatusButton", "Submit / Publish", "ramstatus.png", accent_color=bg_color, weight=0),
+        ])
 
     def _build_settings_group(self):
-        """Builds the 'Settings & Info' UI section.
-
-        Contains buttons for Publish Settings, Plugin Settings, and About.
-
-        Returns:
-            VGroup: The Fusion UI container.
-        """
-        bg_color = "#333333"  # Dark Grey
-        header_ss = "background-color: #1a1a1a; color: #888; border-top: 1px solid #111; border-bottom: 1px solid #333; padding-left: 5px;"
-        return self.ui.VGroup(
-            [
-                self.ui.Label(
-                    {
-                        "Text": "SETTINGS & INFO",
-                        "Weight": 0,
-                        "Font": self.ui.Font({"PixelSize": 10, "Bold": True}),
-                        "StyleSheet": header_ss
-                    }
-                ),
-                self.create_button(
-                    "PubSettingsButton",
-                    "Step Configuration",
-                    "rampublishsettings.png",
-                    tooltip="Configure global YAML settings and automation rules for this pipeline step.",
-                    accent_color=bg_color,
-                ),
-                self.create_button(
-                    "SettingsButton",
-                    "Plugin Settings",
-                    "ramsettings.png",
-                    tooltip="Configure Ramses paths, ports, and default frame ranges.",
-                    accent_color=bg_color,
-                ),
-                self.create_button(
-                    "AboutButton",
-                    "About",
-                    "ramses.png",
-                    tooltip="Information about Ramses-Fusion and Overmind Studios.",
-                    accent_color=bg_color,
-                ),
-            ]
-        )
+        """Builds the 'Settings & Info' UI section."""
+        bg_color = "#333333"
+        content_id = "SettingsContent"
+        return self.ui.VGroup([
+            self._create_section_header("SettingsHeader", "SETTINGS && INFO", content_id),
+            self.create_button("PubSettingsButton", "Step Configuration", "rampublishsettings.png", accent_color=bg_color, weight=0),
+            self.create_button("SettingsButton", "Plugin Settings", "ramsettings.png", accent_color=bg_color, weight=0),
+            self.create_button("AboutButton", "About", "ramses.png", accent_color=bg_color, weight=0),
+        ])
 
     def create_button(
         self,
