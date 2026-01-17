@@ -15,10 +15,10 @@ This list tracks planned improvements to elevate the Ramses-Fusion plugin for pr
 - [x] **UX/UI**: Modernized Context Header ("Hero ID" hierarchy, Ramses-synced Step/State colors).
 - [x] **UX/UI**: Live Priority Indicators (Heat-mapped '!', '!!', '!!!' markers).
 - [x] **UX/UI**: Professional Dialog Engine (Non-editable labels, semantic button labels, and two-tier validation hierarchy).
-- [x] **Robustness**: Hardened Lua parser to support comments and scientific notation (Fixes issues with floating-point parameters).
+- [x] **Code Quality**: Removed significant code duplication in `fusion_config.py` (Parser and Extract methods) and verified with 39 unit tests.
+- [x] **Robustness**: Hardened Lua parser to support scientific notation and comments.
 - [x] **Safety**: Transactional Publish Workflow (Strictly requires `_FINAL` anchor; aborts all operations if render fails).
-- [x] **UX/UI**: Automated Image Sequence detection in Configuration Wizard (Removed manual toggle).
-- [x] **UX/UI**: Improved Layout for Step Configuration Wizard (Text boxes now utilize full window height).
+- [x] **UX/UI**: Modernized Step Configuration Wizard with responsive layout and automated sequence detection.
 
 ---
 
