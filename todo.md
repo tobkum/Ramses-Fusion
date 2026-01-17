@@ -2,7 +2,7 @@
 
 This list tracks planned improvements to elevate the Ramses-Fusion plugin for professional VFX workflows.
 
-## Completed Code Improvements (2026-01-15/16)
+## Completed Code Improvements (2026-01-15/17)
 - [x] **Robustness**: Fixed all bare `except` blocks with specific logging.
 - [x] **Safety**: Added null checks for critical status objects.
 - [x] **Bug Fix**: Resolved circular reference in About window.
@@ -15,6 +15,10 @@ This list tracks planned improvements to elevate the Ramses-Fusion plugin for pr
 - [x] **UX/UI**: Modernized Context Header ("Hero ID" hierarchy, Ramses-synced Step/State colors).
 - [x] **UX/UI**: Live Priority Indicators (Heat-mapped '!', '!!', '!!!' markers).
 - [x] **UX/UI**: Professional Dialog Engine (Non-editable labels, semantic button labels, and two-tier validation hierarchy).
+- [x] **Robustness**: Hardened Lua parser to support comments and scientific notation (Fixes issues with floating-point parameters).
+- [x] **Safety**: Transactional Publish Workflow (Strictly requires `_FINAL` anchor; aborts all operations if render fails).
+- [x] **UX/UI**: Automated Image Sequence detection in Configuration Wizard (Removed manual toggle).
+- [x] **UX/UI**: Improved Layout for Step Configuration Wizard (Text boxes now utilize full window height).
 
 ---
 

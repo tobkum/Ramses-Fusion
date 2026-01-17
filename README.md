@@ -6,40 +6,31 @@
 
 ## 🌟 Overview
 
-Ramses-Fusion integrates the production database directly into the Fusion interface. It removes the need for manual file system management by enforcing project standards at the software level. Every composition is synchronized with the database, ensuring that versions are tracked, technical specifications are met, and renders are delivered to the correct locations automatically.
+Ramses-Fusion integrates your production database directly into the Fusion interface. It removes the need for manual file management by enforcing project standards automatically. Every composition is synchronized with the database, ensuring that versions are tracked, technical specifications are met, and renders are delivered to the correct locations without manual intervention.
 
 ## 🚀 Key Capabilities
 
 ### 🔗 Pipeline Integration & Browsing
-The tool provides a centralized interface to browse projects, sequences, and shots. 
-* **Shot Switching:** Quickly jump between shots or initialize new compositions using standardized templates.
-* **Context Awareness:** The UI dynamically tracks your current Project, Shot, and Step (task), providing relevant shortcuts for your specific context.
+The tool provides a centralized interface to navigate your project structure.
+* **Smart Navigation:** Quickly jump between shots or initialize new compositions using standardized studio templates.
+* **Context Awareness:** The UI dynamically tracks your active task, providing relevant shortcuts and information for your specific shot.
 
 ### 📐 Automated Scene Configuration
-Standardize your working environment with a single click. The **Setup Scene** function pulls technical specifications directly from the Ramses database to configure:
-* **Format:** Resolution, Pixel Aspect Ratio, and Framerate.
-* **Frame Range:** Global and Render ranges are automatically aligned with shot durations.
-* **Render Anchors:** Automatically generates managed `_PREVIEW` and `_FINAL` Saver nodes. These anchors are pre-configured with the correct server paths and codecs (ProRes), so you never have to manually name a render file.
+Standardize your working environment with a single click. The tool pulls technical specifications from the database to configure your scene:
+* **Project Alignment:** Automatically sets resolution, framerate, and aspect ratio.
+* **Frame Accuracy:** Aligns the timeline and render ranges with the shot duration defined in the pipeline.
+* **Managed Render Anchors:** Generates specialized nodes that handle all output paths and render settings automatically, ensuring you never have to manually name a file.
 
 ### 📦 Asset & Version Management
 Manage the flow of data into your composition without browsing folders.
-* **Smart Importing:** Bring in published renders or assets with collision-safe node naming and automated frame-start alignment.
-* **Version Swapping:** Replace existing Loader nodes with new versions or different assets while maintaining all downstream node connections.
-* **Retrieval:** Instantly access and restore previous versions of your composition directly from the versioning archive.
+* **Smart Importing:** Bring in published renders or assets with automated naming and alignment.
+* **Version Control:** Easily swap existing assets for newer versions or different iterations while maintaining your node connections.
+* **Retrieval:** Instantly access and restore previous versions of your work from the production archive.
 
-### 🏁 Technical Validation & Publishing
-
+### 🏁 Validation & Publishing
 The tool acts as a gatekeeper to ensure only technically correct data moves down the pipeline.
-
-* **Mismatch Detection:** Before publishing, the tool validates your composition's resolution, FPS, and frame range against the database, including any sequence-level overrides, warning you of any discrepancies.
-
-* **Automated Publishing:** Orchestrates the archival of the `.comp` file and the rendering of master files. The process is atomic: if a render fails or is cancelled, the publish is aborted to ensure the database and the server stay perfectly in sync.
-
-* **Metadata Logging:** Every save and publish can be accompanied by comments that are logged directly into the Ramses database for production tracking.
-
-## 🛠️ Roadmap / TODO
-
-* **Configurable Codecs:** Currently, the output codecs for `_PREVIEW` (ProRes 422) and `_FINAL` (ProRes 4444) are hardcoded. Future updates will allow these to be configured via the **Ramses Project Settings** to ensure consistency across the entire pipeline.
-* **Configurable Preview Quality Settings:** Settings like HiQ, MB, Proxy will be configurable in the future.
+* **Mismatch Detection:** Before delivery, the tool verifies your composition against project standards and warns you of any discrepancies.
+* **Safe Publishing:** Orchestrates the archival of your composition and the rendering of master files in one step. The process ensures that the database and the server stay perfectly in sync.
+* **Production Tracking:** All progress and comments are logged directly into the database for transparent production tracking.
 
 *Developed with ε> by [Overmind Studios](https://www.overmind-studios.de).*
