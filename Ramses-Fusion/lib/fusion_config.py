@@ -1,9 +1,11 @@
 # -*- coding: utf-8 -*-
 import re
-import logging
 
 class FusionConfig:
-    """Helper class for parsing Fusion Saver nodes and managing Render Configuration."""
+    """Helper class for parsing Fusion Saver nodes and managing Render Configuration.
+    
+    Uses a robust stack-based Lua parser to handle nested structures correctly.
+    """
 
     EXTENSION_MAP = {
         "QuickTimeMovies": "mov",
@@ -33,90 +35,281 @@ class FusionConfig:
         if not text or "Saver" not in text:
             return None
 
+        # 1. Isolate the Inputs block to save parsing time and avoid noise
+        # We look for 'Inputs = {' and count braces to capture the full block.
+        inputs_start = text.find("Inputs = {")
+        if inputs_start == -1:
+            return None
+            
+        # Extract the Inputs block text using a brace counter
+        inputs_text = FusionConfig._extract_block(text, inputs_start + 9) # +9 to skip "Inputs = "
+        if not inputs_text:
+            return None
+
+        # 2. Parse the Lua Table into a Python Dictionary
+        inputs_data = FusionConfig._lua_to_dict(inputs_text)
+        
         config = {
             "format": "",
             "properties": {}
         }
+        
+        # 3. Extract Format
+        # Input: OutputFormat = Input { Value = FuID { "FormatName" } }
+        # Parsed: {'OutputFormat': {'Value': 'FormatName'}} (because we handle FuID unwrapping)
+        
+        # Helper to get value safely from our parsed structure
+        def get_val(key):
+            # Key can be "OutputFormat" or "['OutputFormat']" depending on tokenizer,
+            # but our tokenizer strips brackets/quotes for keys.
+            node = inputs_data.get(key)
+            if not node: return None
+            # Check for standard Input { Value = X } structure
+            if isinstance(node, dict) and "Value" in node:
+                return node["Value"]
+            # Fallback for direct assignment
+            return node
 
-        # 1. Extract Output Format
-        # Pattern: OutputFormat = Input { Value = FuID { "QuickTimeMovies" }, },
-        format_match = re.search(r'OutputFormat\s*=\s*Input\s*\{\s*Value\s*=\s*FuID\s*\{\s*"([^"]+)"\s*\}\s*,?\s*\}', text)
-        if format_match:
-            config["format"] = format_match.group(1)
-        else:
-            # Helper: Try to find simple assignment if formatted differently
-            simple_match = re.search(r'OutputFormat\s*=\s*FuID\s*\{\s*"([^"]+)"\s*\}', text)
-            if simple_match:
-                config["format"] = simple_match.group(1)
-
-        if not config["format"]:
+        fmt = get_val("OutputFormat")
+        if not fmt:
             return None
-
-        # 2. Extract Properties
-        # We look for inputs that start with the format name or are common parameters
-        # Examples:
-        # ["QuickTimeMovies.Compression"] = Input { Value = FuID { "Apple ProRes 422_apcn" }, }
-        # ["OpenEXRFormat.Compression"] = Input { Value = 8, }
-        # ["MXFFormat.FrameRateFps"] = Input { Value = 29.97, }
-        
-        # Regex to capture: Key (in brackets or plain) and the Value block
-        # Key: \["?([\w\.]+)"?\]  -> Captures "QuickTimeMovies.Compression"
-        # Value: Input\s*\{\s*Value\s*=\s*(.+?)\s*,?\s*\}
-        
-        # This is complex because the Value can be a number, a string, or a nested table (FuID).
-        # We'll use a simpler approach: Iterate line by line or use specific extractors.
-        
-        # Refined Strategy: Find all inputs that look like format properties.
-        # We scan for lines defining Inputs.
-        
-        prop_pattern = re.compile(r'\["([\w\.]+)"\]\s*=\s*Input\s*\{\s*Value\s*=\s*(.+?)\s*,?\s*\}')
-        
-        for match in prop_pattern.finditer(text):
-            key = match.group(1)
-            raw_value = match.group(2)
             
-            # Only keep properties that belong to the detected format or generic ones we care about
-            # Usually format properties start with the format name (e.g. "QuickTimeMovies.")
+        config["format"] = fmt
+
+        # 4. Extract Properties
+        # Iterate over all parsed keys
+        for key, val in inputs_data.items():
+            # Only keep keys relevant to the format (e.g. "QuickTimeMovies.Compression")
+            # Our tokenizer handles ["Key"] by stripping quotes, so key is clean.
             if not key.startswith(config["format"]):
                 continue
-
-            # Parse the value
-            # Case A: FuID { "Value" }
-            fuid_match = re.search(r'FuID\s*\{\s*"([^"]+)"\s*\}', raw_value)
-            if fuid_match:
-                config["properties"][key] = fuid_match.group(1)
-                continue
                 
-            # Case B: Number { Value = 4 } (Fusion sometimes wraps numbers)
-            num_struct_match = re.search(r'Number\s*\{\s*Value\s*=\s*([\d\.-]+)\s*\}', raw_value)
-            if num_struct_match:
-                config["properties"][key] = float(num_struct_match.group(1))
-                continue
-                
-            # Case C: Simple Number (Value = 8)
-            # We check if it looks like a number
-            try:
-                # Remove trailing comma if captured
-                clean_val = raw_value.strip().rstrip(",")
-                val = float(clean_val)
-                # Store as int if integer
-                if val.is_integer():
-                    config["properties"][key] = int(val)
-                else:
-                    config["properties"][key] = val
-                continue
-            except ValueError:
-                pass
+            # Flatten the value if it's inside an Input { Value = ... } structure
+            final_val = val
+            if isinstance(val, dict) and "Value" in val:
+                final_val = val["Value"]
             
-            # Case D: Boolean (1 or 0 usually in Fusion, or true/false)
-            if raw_value.strip() in ["true", "True"]:
-                config["properties"][key] = True
-                continue
-            if raw_value.strip() in ["false", "False"]:
-                config["properties"][key] = False
-                continue
+            # Additional unwrapping for weird Fusion types if missed by parser (should rely on parser though)
+            config["properties"][key] = final_val
 
         return config
+
+    @staticmethod
+    def _extract_block(text, start_index):
+        """Extracts a balanced brace block starting at start_index."""
+        count = 0
+        found_start = False
+        
+        for i in range(start_index, len(text)):
+            char = text[i]
+            if char == '{':
+                count += 1
+                found_start = True
+            elif char == '}':
+                count -= 1
+                if found_start and count == 0:
+                    return text[start_index:i+1]
+        return None
+
+    @staticmethod
+    def _lua_to_dict(lua_str):
+        """Robust mini-parser for Lua tables found in Fusion nodes."""
+        
+        # Tokenizer
+        def tokenize(s):
+            tokens = []
+            i = 0
+            n = len(s)
+            while i < n:
+                char = s[i]
+                
+                if char.isspace():
+                    i += 1
+                    continue
+                
+                if char in '{}=,':
+                    tokens.append(('OP', char))
+                    i += 1
+                    continue
+                
+                if char == '"':
+                    # String literal
+                    j = i + 1
+                    while j < n and s[j] != '"':
+                        # Handle escaped quotes if necessary (Fusion is simple usually)
+                        if s[j] == '\\' and j+1 < n:
+                            j += 2
+                        else:
+                            j += 1
+                    val = s[i+1:j] # Strip quotes
+                    tokens.append(('STR', val))
+                    i = j + 1
+                    continue
+                    
+                if char == '[':
+                    # Key bracket ["Key"]
+                    j = s.find(']', i)
+                    if j != -1:
+                        # Extract content inside brackets
+                        inner = s[i+1:j].strip()
+                        # If quoted, strip quotes
+                        if inner.startswith('"') and inner.endswith('"'):
+                            inner = inner[1:-1]
+                        tokens.append(('KEY', inner))
+                        i = j + 1
+                        continue
+                        
+                # Identifier or Number
+                j = i
+                while j < n and (s[j].isalnum() or s[j] in '._-'):
+                    j += 1
+                
+                val = s[i:j]
+                
+                # Check for booleans/numbers
+                if val == 'true': tokens.append(('BOOL', True))
+                elif val == 'false': tokens.append(('BOOL', False))
+                elif val.replace('.','',1).isdigit():
+                    if '.' in val: tokens.append(('NUM', float(val)))
+                    else: tokens.append(('NUM', int(val)))
+                else:
+                    tokens.append(('ID', val))
+                i = j
+            return tokens
+
+        tokens = tokenize(lua_str)
+        token_iter = iter(tokens)
+        current_token = [next(token_iter, None)]
+
+        def next_tok():
+            t = current_token[0]
+            try:
+                current_token[0] = next(token_iter)
+            except StopIteration:
+                current_token[0] = None
+            return t
+            
+        def peek():
+            return current_token[0]
+
+        def parse_value():
+            tok = peek()
+            if not tok: return None
+            
+            type_, val = tok
+            
+            if type_ == 'OP' and val == '{':
+                return parse_table()
+            
+            # Consume the value token
+            next_tok()
+            
+            # Handle Function Calls like FuID { "X" } or Input { ... }
+            # If we see an Identifier followed immediately by '{', it's a struct
+            if type_ == 'ID' and peek() and peek()[0] == 'OP' and peek()[1] == '{':
+                struct_data = parse_table() # Consumes the { ... }
+
+                # Unwrap specific Fusion types immediately for cleaner data
+                if val == 'FuID':
+                    # FuID { "Value" } -> returns "Value"
+                    # Usually FuID table is implicit array [1] = "Value" or just string inside?
+                    # The tokenizer sees: FuID, {, STR("Val"), }
+                    # parse_table returns {0: "Val"} or similar?
+                    # Fusion table: { "Val" } -> Python list/dict.
+                    # My parse_table returns list if indices are implicit.
+                    if isinstance(struct_data, list) and len(struct_data) > 0:
+                        return struct_data[0]
+                    return struct_data # Fallback
+                    
+                if val == 'Number':
+                    # Number { Value = 4 } -> returns 4
+                    if isinstance(struct_data, dict) and 'Value' in struct_data:
+                        return struct_data['Value']
+                    return struct_data
+                    
+                if val == 'Input':
+                    # Keep Input structure intact: { 'Value': ... }
+                    return struct_data
+                    
+                return struct_data
+                
+            return val
+
+        def parse_table():
+            # Consume '{'
+            next_tok()
+            
+            data_dict = {}
+            data_list = []
+            
+            while peek():
+                tok = peek()
+                if tok[0] == 'OP' and tok[1] == '}':
+                    next_tok() # Consume '}'
+                    # Return list if only implicit keys, else dict
+                    if data_list and not data_dict:
+                        return data_list
+                    return data_dict
+                
+                # Check for explicit Key assignment: Key = Val
+                # Key can be ID or KEY token.
+                key = None
+                is_assignment = False
+                
+                # Look ahead for '=' (limited lookahead hack: consume, check, backtrack if needed? 
+                # Or just assume structure). 
+                # Fusion structure is predictable: Key = Val, or Val (implicit index)
+                
+                # We consume first token
+                first = next_tok()
+                
+                if peek() and peek()[0] == 'OP' and peek()[1] == '=':
+                    # It is a key assignment
+                    next_tok() # Consume '='
+                    key = first[1]
+                    val = parse_value()
+                    data_dict[key] = val
+                else:
+                    # It is an implicit value (array item)
+                    # We consumed 'first' thinking it was a key, but it's actually the value (or start of it)
+                    # This is tricky because parse_value expects to START at the value.
+                    # We need to "put back" the token or handle it.
+                    # Since we are recursive descent, explicit lookahead is cleaner.
+                    # But here, let's just handle primitive value directly if we consumed it.
+                    
+                    # Logic fix:
+                    # parse_value handles nested structs (ID + {).
+                    # If 'first' was ID and next is '{', it was start of struct.
+                    val = None
+                    if first[0] == 'ID' and peek()[0] == 'OP' and peek()[1] == '{':
+                         # Reconstruct the "ID {" sequence logic
+                         struct_name = first[1]
+                         struct_data = parse_table()
+                         
+                         # Same unwrapping logic as parse_value
+                         if struct_name == 'FuID':
+                             if isinstance(struct_data, list) and len(struct_data) > 0: val = struct_data[0]
+                             else: val = struct_data
+                         elif struct_name == 'Number':
+                             if isinstance(struct_data, dict) and 'Value' in struct_data: val = struct_data['Value']
+                             else: val = struct_data
+                         else:
+                             val = struct_data # e.g. Input { ... } or Clip { ... }
+                    else:
+                        # Simple primitive
+                        val = first[1]
+                    
+                    data_list.append(val)
+                
+                # Consume comma if present
+                if peek() and peek()[0] == 'OP' and peek()[1] == ',':
+                    next_tok()
+                    
+            return data_dict
+
+        # Start parsing (Lua top level is implicit table usually, or we start inside one)
+        # inputs_text starts with '{'.
+        return parse_value()
 
     @staticmethod
     def get_extension(format_id: str) -> str:
