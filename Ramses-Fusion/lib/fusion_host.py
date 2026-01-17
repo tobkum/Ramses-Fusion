@@ -1109,8 +1109,8 @@ class FusionHost(RamHost):
             if node.GetInput("QuickTimeMovies.Compression") != target_codec:
                 node.SetInput("QuickTimeMovies.Compression", target_codec, 0)
         else:
-            # Final / default
-            target_codec = "Apple ProRes 4444_ap4h"
+            # Final / default: Apple ProRes 422 HQ
+            target_codec = "Apple ProRes 422 HQ_apch"
             if node.GetInput("QuickTimeMovies.Compression") != target_codec:
                 node.SetInput("QuickTimeMovies.Compression", target_codec, 0)
 
