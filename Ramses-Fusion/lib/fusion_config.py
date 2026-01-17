@@ -95,8 +95,19 @@ class FusionConfig:
         return config
 
     @staticmethod
-    def _extract_block(text, start_index):
-        """Extracts a balanced brace block starting at start_index."""
+    def _extract_block(text: str, start_index: int) -> str:
+        """Extracts a balanced brace block starting at `start_index`.
+        
+        Iterates through the string to find the matching closing brace `}` 
+        for the opening brace `{` found at or after `start_index`.
+        
+        Args:
+            text (str): The source text.
+            start_index (int): Index to start searching for the opening brace.
+            
+        Returns:
+            str: The content of the block including outer braces, or None if not found/balanced.
+        """
         count = 0
         found_start = False
         
@@ -112,8 +123,24 @@ class FusionConfig:
         return None
 
     @staticmethod
-    def _lua_to_dict(lua_str):
-        """Robust mini-parser for Lua tables found in Fusion nodes."""
+    def _lua_to_dict(lua_str: str) -> dict:
+        """Robust mini-parser for Lua tables found in Fusion nodes.
+        
+        Parses a subset of Lua syntax commonly used in Fusion clipboard data.
+        Handles:
+        - Nested tables `{ ... }`
+        - Key-Value assignment `Key = Value`
+        - Implicit array indices `{ Val1, Val2 }`
+        - Primitive types (String, Number, Bool)
+        - Fusion-specific structures (`FuID { "Val" }`, `Number { Value = X }`) 
+          by unwrapping them into native Python types where appropriate.
+          
+        Args:
+            lua_str (str): The string content of a Lua table (e.g. `{ Key = ... }`).
+            
+        Returns:
+            dict: The parsed data structure.
+        """
         
         # Tokenizer
         def tokenize(s):
