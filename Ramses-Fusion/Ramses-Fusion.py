@@ -995,10 +995,38 @@ class RamsesFusionApp:
         is_hidden = self._section_states.get(content_id, False)
         return self.ui.VGroup([
             self._create_section_header("ProjectHeader", "PROJECT && SCENE", content_id),
-            self.create_button("SwitchShotButton", "Browse Shots / Tasks", "ramshot.png", accent_color=bg_color, weight=0),
-            self.create_button("SetupSceneButton", "Sync Project Settings", "ramsetupscene.png", accent_color=bg_color, weight=0),
-            self.create_button("OpenButton", "Open Composition", "ramopen.png", accent_color=bg_color, weight=0),
-            self.create_button("RamsesButton", "Open Ramses Client", "ramses.png", accent_color=bg_color, weight=0),
+            self.create_button(
+                "SwitchShotButton", 
+                "Browse Shots / Tasks", 
+                "ramshot.png", 
+                accent_color=bg_color, 
+                weight=0,
+                tooltip="Quickly jump to another shot in this project or create a new one from a template."
+            ),
+            self.create_button(
+                "SetupSceneButton", 
+                "Sync Project Settings", 
+                "ramsetupscene.png", 
+                accent_color=bg_color, 
+                weight=0,
+                tooltip="Automatically set the resolution, FPS, and frame range based on Ramses project settings."
+            ),
+            self.create_button(
+                "OpenButton", 
+                "Open Composition", 
+                "ramopen.png", 
+                accent_color=bg_color, 
+                weight=0,
+                tooltip="Browse and open an existing Ramses composition."
+            ),
+            self.create_button(
+                "RamsesButton", 
+                "Open Ramses Client", 
+                "ramses.png", 
+                accent_color=bg_color, 
+                weight=0,
+                tooltip="Launch the main Ramses Client application."
+            ),
         ])
 
     def _build_pipeline_group(self):
@@ -1007,9 +1035,30 @@ class RamsesFusionApp:
         content_id = "PipelineContent"
         return self.ui.VGroup([
             self._create_section_header("PipelineHeader", "ASSETS && TOOLS", content_id),
-            self.create_button("ImportButton", "Import Published", "ramimport.png", accent_color=bg_color, weight=0),
-            self.create_button("ReplaceButton", "Replace Loader", "ramreplace.png", accent_color=bg_color, weight=0),
-            self.create_button("TemplateButton", "Save as Template", "ramtemplate.png", accent_color=bg_color, weight=0),
+            self.create_button(
+                "ImportButton", 
+                "Import Published", 
+                "ramimport.png", 
+                accent_color=bg_color, 
+                weight=0,
+                tooltip="Import a published asset or render into the current composition."
+            ),
+            self.create_button(
+                "ReplaceButton", 
+                "Replace Loader", 
+                "ramreplace.png", 
+                accent_color=bg_color, 
+                weight=0,
+                tooltip="Replace the selected Loader node with a different version or asset."
+            ),
+            self.create_button(
+                "TemplateButton", 
+                "Save as Template", 
+                "ramtemplate.png", 
+                accent_color=bg_color, 
+                weight=0,
+                tooltip="Save the current composition as a template for other shots in this step."
+            ),
         ])
 
     def _build_working_group(self):
@@ -1018,10 +1067,38 @@ class RamsesFusionApp:
         content_id = "WorkingContent"
         return self.ui.VGroup([
             self._create_section_header("WorkingHeader", "SAVING && ITERATION", content_id),
-            self.create_button("SaveButton", "Save", "ramsave.png", accent_color=bg_color, weight=0),
-            self.create_button("IncrementalSaveButton", "Incremental Save", "ramsaveincremental.png", accent_color=bg_color, weight=0),
-            self.create_button("CommentButton", "Add Note", "ramcomment.png", accent_color=bg_color, weight=0),
-            self.create_button("RetrieveButton", "Version History / Restore", "ramretrieve.png", accent_color=bg_color, weight=0),
+            self.create_button(
+                "SaveButton", 
+                "Save", 
+                "ramsave.png", 
+                accent_color=bg_color, 
+                weight=0,
+                tooltip="Overwrite the current working file version."
+            ),
+            self.create_button(
+                "IncrementalSaveButton", 
+                "Incremental Save", 
+                "ramsaveincremental.png", 
+                accent_color=bg_color, 
+                weight=0,
+                tooltip="Save a new version of the current file (e.g., v001 -> v002)."
+            ),
+            self.create_button(
+                "CommentButton", 
+                "Add Note", 
+                "ramcomment.png", 
+                accent_color=bg_color, 
+                weight=0,
+                tooltip="Add a descriptive note to the current version in the Ramses database."
+            ),
+            self.create_button(
+                "RetrieveButton", 
+                "Version History / Restore", 
+                "ramretrieve.png", 
+                accent_color=bg_color, 
+                weight=0,
+                tooltip="Browse and restore a previous version of this composition."
+            ),
         ])
 
     def _build_publish_group(self):
@@ -1030,7 +1107,14 @@ class RamsesFusionApp:
         content_id = "PublishContent"
         return self.ui.VGroup([
             self._create_section_header("PublishHeader", "REVIEW && PUBLISH", content_id),
-            self.create_button("PreviewButton", "Create Preview", "rampreview.png", accent_color=bg_color, weight=0),
+            self.create_button(
+                "PreviewButton", 
+                "Create Preview", 
+                "rampreview.png", 
+                accent_color=bg_color, 
+                weight=0,
+                tooltip="Generate a preview render for supervisor review."
+            ),
             self.create_button(
                 "UpdateStatusButton", 
                 "Update / Publish", 
@@ -1047,9 +1131,30 @@ class RamsesFusionApp:
         content_id = "SettingsContent"
         return self.ui.VGroup([
             self._create_section_header("SettingsHeader", "SETTINGS && INFO", content_id),
-            self.create_button("PubSettingsButton", "Step Configuration", "rampublishsettings.png", accent_color=bg_color, weight=0),
-            self.create_button("SettingsButton", "Plugin Settings", "ramsettings.png", accent_color=bg_color, weight=0),
-            self.create_button("AboutButton", "About", "ramses.png", accent_color=bg_color, weight=0),
+            self.create_button(
+                "PubSettingsButton", 
+                "Step Configuration", 
+                "rampublishsettings.png", 
+                accent_color=bg_color, 
+                weight=0,
+                tooltip="Configure global YAML automation rules for this pipeline step."
+            ),
+            self.create_button(
+                "SettingsButton", 
+                "Plugin Settings", 
+                "ramsettings.png", 
+                accent_color=bg_color, 
+                weight=0,
+                tooltip="Configure Ramses executable paths, ports, and default frame ranges."
+            ),
+            self.create_button(
+                "AboutButton", 
+                "About", 
+                "ramses.png", 
+                accent_color=bg_color, 
+                weight=0,
+                tooltip="Information about Ramses-Fusion and Overmind Studios."
+            ),
         ])
 
     def create_button(
