@@ -22,7 +22,8 @@ class FusionConfig:
         "BMPFormat": "bmp",
         "PhotoshopFormat": "psd",
         "SoftimageFormat": "pic",
-        "MayaFormat": "iff"
+        "MayaFormat": "iff",
+        "Jpeg2000Format": "jp2"
     }
 
     @staticmethod
