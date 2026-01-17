@@ -16,7 +16,13 @@ class FusionConfig:
         "JpegFormat": "jpg",
         "PngFormat": "png",
         "TargaFormat": "tga",
-        "CineonFormat": "cin"
+        "CineonFormat": "cin",
+        "SGIFormat": "sgi",
+        "AVIFormat": "avi",
+        "BMPFormat": "bmp",
+        "PhotoshopFormat": "psd",
+        "SoftimageFormat": "pic",
+        "MayaFormat": "iff"
     }
 
     @staticmethod
