@@ -1031,7 +1031,14 @@ class RamsesFusionApp:
         return self.ui.VGroup([
             self._create_section_header("PublishHeader", "REVIEW && PUBLISH", content_id),
             self.create_button("PreviewButton", "Create Preview", "rampreview.png", accent_color=bg_color, weight=0),
-            self.create_button("UpdateStatusButton", "Submit / Publish", "ramstatus.png", accent_color=bg_color, weight=0),
+            self.create_button(
+                "UpdateStatusButton", 
+                "Update / Publish", 
+                "ramstatus.png", 
+                tooltip="Change the shot status (e.g., WIP, Review) and optionally publish the final output.",
+                accent_color=bg_color, 
+                weight=0
+            ),
         ])
 
     def _build_settings_group(self):
