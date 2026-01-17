@@ -844,11 +844,12 @@ class RamsesFusionApp:
                                                         "MinimumSize": [48, 48],
                                                         "MaximumSize": [48, 48],
                                                         "IconSize": [32, 32],
-                                                        "Flat": True,
+                                                        "Flat": False,
                                                         "ToolTip": "Manually refresh the context header.",
                                                         "Icon": self._get_icon(
                                                             "ramupdate.png"
                                                         ),
+                                                        "StyleSheet": "QPushButton { border: 1px solid #333; background-color: #1a1a1a; border-radius: 4px; } QPushButton:hover { background-color: #252525; border: 1px solid #444; } QPushButton:pressed { background-color: #111; border: 1px solid #222; }",
                                                     }
                                                 ),
                                             ],
