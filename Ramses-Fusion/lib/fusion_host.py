@@ -180,6 +180,19 @@ class FusionHost(RamHost):
             
         return {}
 
+    def _calculate_padding_str(self) -> str:
+        """Calculates the sequence padding string (zeroes) based on the shot range."""
+        start = RAM_SETTINGS.userSettings.get("compStartFrame", 1001)
+        item = self.currentItem()
+        frames = 0
+        if item:
+            settings = self.collectItemSettings(item)
+            frames = settings.get("frames", 0)
+        
+        end = start + max(0, frames - 1)
+        padding = max(4, len(str(end)))
+        return "0" * padding
+
     def resolvePreviewPath(self) -> str:
         """Resolves the designated preview file path for the current shot.
 
