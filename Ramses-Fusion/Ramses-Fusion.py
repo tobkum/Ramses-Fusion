@@ -283,10 +283,11 @@ class RamsesFusionApp:
                          "Please Save or Setup Scene to fix.</font>"
                      )
 
-            # Group 2: DB Buttons (Require Connection, but not necessarily an Item)
             for btn_id in self.DB_BUTTONS:
                 if btn_id in items:
                     items[btn_id].Enabled = is_online
+            
+            self.resize_to_fit()
         except (AttributeError, KeyError) as e:
             # UI elements may not exist during window transitions
             self.log(f"UI state update skipped: {e}", ram.LogLevel.Debug)
@@ -775,8 +776,15 @@ class RamsesFusionApp:
         # Use RecalcLayout first to ensure internal sizes are correct
         self.dlg.RecalcLayout()
         geom = self.dlg.GetGeometry()
-        # Set to a very small height and let the UIManager expand it to the minimum required
-        self.dlg.SetGeometry([geom[1], geom[2], geom[3], 10])
+        
+        # Fusion UIManager returns a dict with keys 1.0, 2.0, 3.0, 4.0 for x, y, w, h
+        # We snap the height (4.0) to a small value so it shrinks to content minimum
+        if isinstance(geom, dict):
+            self.dlg.SetGeometry([geom[1.0], geom[2.0], geom[3.0], 10])
+        else:
+            # Fallback for list/tuple
+            self.dlg.SetGeometry([geom[0], geom[1], geom[2], 10])
+            
         self.dlg.RecalcLayout()
 
     def show_main_window(self) -> None:
