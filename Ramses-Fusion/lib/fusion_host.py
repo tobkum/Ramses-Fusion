@@ -185,6 +185,7 @@ class FusionHost(RamHost):
 
         Constructs the path using the project's preview folder and the Ramses naming convention.
         Respects custom format/sequence settings from the Step configuration.
+        Uses zeroes (0) for frame padding if an image sequence is configured.
 
         Returns:
             str: The normalized absolute path for the preview file, or empty string on failure.
@@ -221,10 +222,25 @@ class FusionHost(RamHost):
             
             filename = preview_info.fileName()
             
-            # If Image Sequence, create a subfolder with the base name
             if is_sequence:
-                base_name = os.path.splitext(filename)[0]
-                preview_folder = os.path.join(preview_folder, base_name)
+                base, ext_dot = os.path.splitext(filename)
+                
+                # Calculate padding based on render range
+                start = RAM_SETTINGS.userSettings.get("compStartFrame", 1001)
+                item = self.currentItem()
+                frames = 0
+                if item:
+                    settings = self.collectItemSettings(item)
+                    frames = settings.get("frames", 0)
+                
+                end = start + max(0, frames - 1)
+                padding = max(4, len(str(end)))
+                padding_str = "0" * padding
+                
+                # Fusion sequence format: name.0000.ext
+                filename = f"{base}.{padding_str}{ext_dot}"
+                # Sequence subfolder
+                preview_folder = os.path.join(preview_folder, base)
             
             return self.normalizePath(os.path.join(preview_folder, filename))
         except Exception:
@@ -235,6 +251,7 @@ class FusionHost(RamHost):
 
         Attempts to use the project's export path. If not set, falls back to the standard
         publish file path. Respects custom format/sequence settings from the Step configuration.
+        Uses zeroes (0) for frame padding if an image sequence is configured.
 
         Returns:
             str: The normalized absolute path for the final export file, or empty string on failure.
@@ -242,13 +259,8 @@ class FusionHost(RamHost):
         try:
             # STRICT MODE: Rely on the Daemon's active project
             project = RAMSES.project()
-            
             if not project: return ""
             
-            export_folder = project.exportPath()
-            if not export_folder:
-                return self.normalizePath(self.publishFilePath("mov", ""))
-                
             # Determine extension and subfolder logic from Step Config
             ext = "mov"
             is_sequence = False
@@ -263,9 +275,10 @@ class FusionHost(RamHost):
                     custom_ext = FusionConfig.get_extension(fmt)
                     if custom_ext:
                         ext = custom_ext
-                
                 is_sequence = final_cfg.get("image_sequence", False)
 
+            export_folder = project.exportPath()
+            
             pub_info = self.publishInfo()
             final_info = pub_info.copy()
             final_info.version = -1
@@ -275,12 +288,33 @@ class FusionHost(RamHost):
             
             filename = final_info.fileName()
             
-            # If Image Sequence, create a subfolder with the base name
             if is_sequence:
-                base_name = os.path.splitext(filename)[0]
-                export_folder = os.path.join(export_folder, base_name)
-            
-            return self.normalizePath(os.path.join(export_folder, filename))
+                base, ext_dot = os.path.splitext(filename)
+                
+                # Calculate padding based on render range
+                start = RAM_SETTINGS.userSettings.get("compStartFrame", 1001)
+                item = self.currentItem()
+                frames = 0
+                if item:
+                    settings = self.collectItemSettings(item)
+                    frames = settings.get("frames", 0)
+                
+                end = start + max(0, frames - 1)
+                padding = max(4, len(str(end)))
+                padding_str = "0" * padding
+                
+                filename = f"{base}.{padding_str}{ext_dot}"
+                
+                # Use export folder or fallback to publish folder
+                target_folder = export_folder or self.publishFolderPath()
+                # Sequence subfolder
+                target_folder = os.path.join(target_folder, base)
+                return self.normalizePath(os.path.join(target_folder, filename))
+            else:
+                if not export_folder:
+                    return self.normalizePath(self.publishFilePath(ext, ""))
+                return self.normalizePath(os.path.join(export_folder, filename))
+                
         except Exception:
             return ""
 
@@ -650,12 +684,12 @@ class FusionHost(RamHost):
         """Renders a preview using the `_PREVIEW` Saver anchor.
 
         Locates the specific `_PREVIEW` node in the flow, sets its output path,
-        applies the preview render preset (ProRes 422), triggers the render,
+        applies the preview render preset, triggers the render,
         and verifies the output file.
 
         Args:
             previewFolderPath (str): Target directory for the preview.
-            previewFileBaseName (str): Base filename (without extension usually, but handled here).
+            previewFileBaseName (str): Base filename.
             item (RamItem): Context item.
             step (RamStep): Context step.
 
@@ -674,19 +708,15 @@ class FusionHost(RamHost):
             )
             return []
 
-        # 2. Construct the final path (Ramses provides the folder and basename)
-        # Note: We use .mov as our standard preview format
-        filename = (
-            previewFileBaseName
-            if previewFileBaseName.lower().endswith(".mov")
-            else previewFileBaseName + ".mov"
-        )
-        dst = self.normalizePath(os.path.join(previewFolderPath, filename))
+        # 2. Resolve the final path using centralized logic (Respects Step Config)
+        dst = self.resolvePreviewPath()
+        if not dst:
+            self.log("Could not resolve preview path.", LogLevel.Critical)
+            return []
 
         # 3. Armed for render
         self.log(f"Starting preview render to: {dst}", LogLevel.Info)
         preview_node.Clip[1] = dst
-        # Ensure ProRes 422 settings
         self.apply_render_preset(preview_node, "preview")
         preview_node.SetAttrs({"TOOLB_PassThrough": False})
 
