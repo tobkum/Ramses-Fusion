@@ -32,10 +32,12 @@ def requires_connection(func: callable) -> callable:
     Returns:
         callable: The wrapped function.
     """
+
     def wrapper(self, ev):
         if not self._check_connection():
             return
         return func(self, ev)
+
     return wrapper
 
 
@@ -45,6 +47,7 @@ class RamsesFusionApp:
     Manages the UI (Fusion UIManager), maintains connection with the Ramses Daemon,
     caches context (Project/Item/Step), and delegates actions to the Host.
     """
+
     # Button Groups for UI State Management
     PIPELINE_BUTTONS = [
         "SetupSceneButton",
@@ -58,8 +61,8 @@ class RamsesFusionApp:
         "PreviewButton",
         "UpdateStatusButton",
     ]
-    
-    DB_BUTTONS = ["SwitchShotButton", "OpenButton"]
+
+    DB_BUTTONS = ["SwitchShotButton"]
 
     def __init__(self) -> None:
         """Initializes the Ramses App, connecting to the Daemon and Fusion Host."""
@@ -85,9 +88,9 @@ class RamsesFusionApp:
         self._step_cache = None
         self._step_path = ""
         self._last_synced_path = None
-        
+
         # UI State
-        self._section_states = {} # {content_id: is_collapsed}
+        self._section_states = {}  # {content_id: is_collapsed}
 
     def _get_icon(self, icon_name: str) -> object:
         """Retrieves an icon from the cache, loading it if necessary.
@@ -199,14 +202,16 @@ class RamsesFusionApp:
 
         try:
             items = self.dlg.GetItems()
-            
+
             # 1. Update Context Header
             if "ContextLabel" in items:
                 if is_online:
                     items["ContextLabel"].Text = self._get_context_text()
                 else:
-                    items["ContextLabel"].Text = "<font color='#ff4444'><b>CONNECTION ERROR</b></font><br><font color='#999'>Ramses Client is offline</font>"
-            
+                    items[
+                        "ContextLabel"
+                    ].Text = "<font color='#ff4444'><b>CONNECTION ERROR</b></font><br><font color='#999'>Ramses Client is offline</font>"
+
             if "RamsesVersion" in items:
                 items["RamsesVersion"].Text = self._get_footer_text()
 
@@ -214,29 +219,35 @@ class RamsesFusionApp:
             # We need to re-fetch the item ONLY if online to determine pipeline status
             # If offline, item is None, so pipeline buttons are disabled anyway.
             item = self.current_item if is_online else None
-            
+
             # Check Project Mismatch
             is_mismatch = False
             if item and is_online:
                 active_proj = self.ramses.project()
                 # Try to get item project (safe, cached inside item usually)
                 item_proj = item.project()
-                
+
                 # Check 0: Metadata (The Golden Source)
                 meta_uuid = ""
-                try: 
+                try:
                     meta_uuid = self.ramses.host.comp.GetData("Ramses.ProjectUUID")
                 except Exception:
                     pass
-                
+
                 if meta_uuid:
                     if active_proj and str(active_proj.uuid()) != meta_uuid:
-                         self.log(f"Project Mismatch (Metadata): Active={active_proj.uuid()} vs File={meta_uuid}", ram.LogLevel.Warning)
-                         is_mismatch = True
+                        self.log(
+                            f"Project Mismatch (Metadata): Active={active_proj.uuid()} vs File={meta_uuid}",
+                            ram.LogLevel.Warning,
+                        )
+                        is_mismatch = True
                 else:
                     # STRICT MODE: No Metadata = Mismatch/Invalid
                     # Since this is a fresh deployment, valid Ramses files MUST have metadata.
-                    self.log("Identity Error: File lacks Ramses Metadata.", ram.LogLevel.Warning)
+                    self.log(
+                        "Identity Error: File lacks Ramses Metadata.",
+                        ram.LogLevel.Warning,
+                    )
                     is_mismatch = True
 
             is_pipeline = item is not None and bool(item.uuid()) and not is_mismatch
@@ -260,33 +271,37 @@ class RamsesFusionApp:
                         else:
                             # Check if local/single-user
                             try:
-                                all_users = self.ramses.daemonInterface().getObjects("RamUser")
+                                all_users = self.ramses.daemonInterface().getObjects(
+                                    "RamUser"
+                                )
                                 if len(all_users) <= 1:
                                     has_permission = True
                             except Exception:
                                 pass
-                
-                items["PubSettingsButton"].Enabled = is_online and is_pipeline and has_permission
+
+                items["PubSettingsButton"].Enabled = (
+                    is_online and is_pipeline and has_permission
+                )
 
             # Update Header for Mismatch
             if is_mismatch and "ContextLabel" in items:
                 if meta_uuid:
-                     items["ContextLabel"].Text = (
-                         "<font color='#ff4444'><b>PROJECT MISMATCH</b></font><br>"
-                         "<font color='#999'>File belongs to different project.<br>"
-                         "Please switch project in Ramses App.</font>"
-                     )
+                    items["ContextLabel"].Text = (
+                        "<font color='#ff4444'><b>PROJECT MISMATCH</b></font><br>"
+                        "<font color='#999'>File belongs to different project.<br>"
+                        "Please switch project in Ramses App.</font>"
+                    )
                 else:
-                     items["ContextLabel"].Text = (
-                         "<font color='#ff4444'><b>UNKNOWN IDENTITY</b></font><br>"
-                         "<font color='#999'>File lacks Ramses Metadata.<br>"
-                         "Please Save or Setup Scene to fix.</font>"
-                     )
+                    items["ContextLabel"].Text = (
+                        "<font color='#ff4444'><b>UNKNOWN IDENTITY</b></font><br>"
+                        "<font color='#999'>File lacks Ramses Metadata.<br>"
+                        "Please Save or Setup Scene to fix.</font>"
+                    )
 
             for btn_id in self.DB_BUTTONS:
                 if btn_id in items:
                     items[btn_id].Enabled = is_online
-            
+
             self.resize_to_fit()
         except (AttributeError, KeyError) as e:
             # UI elements may not exist during window transitions
@@ -295,7 +310,7 @@ class RamsesFusionApp:
     def _check_connection(self, silent: bool = False) -> bool:
         """Verifies connection to the Ramses Daemon.
 
-        Attempts to reconnect if the Daemon was previously offline. 
+        Attempts to reconnect if the Daemon was previously offline.
         Updates UI state to 'Offline' if connection fails.
 
         Args:
@@ -353,28 +368,28 @@ class RamsesFusionApp:
         project = self._get_project()
         project_name = project.name() if project else item.projectShortName()
         item_name = item.shortName()
-        
+
         # 1. Step with color
         step_name = "No Step"
         if step:
             step_color = step.colorName()
             step_name = f"<font color='{step_color}'>{step.name()}</font>"
-            
+
         # 2. State (Status) with color
         state_label = ""
         priority_suffix = ""
         try:
             status = self.ramses.host.currentStatus()
-            
+
             if status:
                 # Priority Suffix logic
                 prio = int(status.get("priority", 0))
                 if prio == 1:
-                    priority_suffix = " <font color='#ffcc00'>!</font>" # Yellow
+                    priority_suffix = " <font color='#ffcc00'>!</font>"  # Yellow
                 elif prio == 2:
-                    priority_suffix = " <font color='#ff8800'>!!</font>" # Orange
+                    priority_suffix = " <font color='#ff8800'>!!</font>"  # Orange
                 elif prio >= 3:
-                    priority_suffix = " <font color='#ff0000'>!!!</font>" # Deep Red
+                    priority_suffix = " <font color='#ff0000'>!!!</font>"  # Deep Red
 
                 if status.state():
                     state = status.state()
@@ -408,7 +423,9 @@ class RamsesFusionApp:
         """
         return f"<font color='#555'>User: {self._get_user_name()} | Ramses API {self.settings.version}</font>"
 
-    def _build_file_info(self, item_type: int, step: ram.RamStep, short_name: str, extension: str) -> ram.RamFileInfo:
+    def _build_file_info(
+        self, item_type: int, step: ram.RamStep, short_name: str, extension: str
+    ) -> ram.RamFileInfo:
         """Constructs a `RamFileInfo` object for path generation.
 
         Args:
@@ -428,7 +445,9 @@ class RamsesFusionApp:
         nm.extension = extension
         return nm
 
-    def _resolve_shot_path(self, shot: ram.RamShot, step: ram.RamStep) -> tuple[str, bool]:
+    def _resolve_shot_path(
+        self, shot: ram.RamShot, step: ram.RamStep
+    ) -> tuple[str, bool]:
         """Resolves the expected composition path for a specific Shot and Step.
 
         First attempts to find an existing file. If none exists, predicts the path
@@ -447,8 +466,10 @@ class RamsesFusionApp:
             if path and os.path.exists(path):
                 return path, True
         except (AttributeError, TypeError) as e:
-            self.log(f"Could not resolve existing path for shot: {e}", ram.LogLevel.Debug)
-            
+            self.log(
+                f"Could not resolve existing path for shot: {e}", ram.LogLevel.Debug
+            )
+
         # 2. Predict path
         folder = ""
         try:
@@ -458,8 +479,10 @@ class RamsesFusionApp:
 
         if not folder:
             return "", False
-            
-        fn_info = self._build_file_info(ram.ItemType.SHOT, step, shot.shortName(), "comp")
+
+        fn_info = self._build_file_info(
+            ram.ItemType.SHOT, step, shot.shortName(), "comp"
+        )
         predicted_path = os.path.join(folder, fn_info.fileName())
         return predicted_path, False
 
@@ -543,7 +566,9 @@ class RamsesFusionApp:
         finally:
             comp.Unlock()
 
-    def _validate_publish(self, check_preview: bool = True, check_final: bool = True) -> tuple[bool, str, bool]:
+    def _validate_publish(
+        self, check_preview: bool = True, check_final: bool = True
+    ) -> tuple[bool, str, bool]:
         """Validates that the composition settings match the Ramses Database.
 
         Checks:
@@ -638,16 +663,20 @@ class RamsesFusionApp:
             return False, "<br><br>".join(errors), has_hard_errors
         return True, "", False
 
-    def _handle_validation(self, check_preview: bool = True, check_final: bool = True) -> bool:
+    def _handle_validation(
+        self, check_preview: bool = True, check_final: bool = True
+    ) -> bool:
         """Centralized handler for technical validation before critical actions.
 
-        Performs checks and shows either an error dialog (hard error) or 
+        Performs checks and shows either an error dialog (hard error) or
         a warning dialog (soft mismatch).
 
         Returns:
             bool: True if it is safe/allowed to proceed, False otherwise.
         """
-        is_valid, msg, has_hard_error = self._validate_publish(check_preview, check_final)
+        is_valid, msg, has_hard_error = self._validate_publish(
+            check_preview, check_final
+        )
         if is_valid:
             return True
 
@@ -661,31 +690,32 @@ class RamsesFusionApp:
         ]
 
         if has_hard_error:
-            fields.append({
-                "id": "Instr",
-                "label": "Action Required:",
-                "type": "label",
-                "default": "<font color='#ff4444'><b>Critical errors found.</b></font><br>Please resolve the issues above before continuing.",
-            })
+            fields.append(
+                {
+                    "id": "Instr",
+                    "label": "Action Required:",
+                    "type": "label",
+                    "default": "<font color='#ff4444'><b>Critical errors found.</b></font><br>Please resolve the issues above before continuing.",
+                }
+            )
             self.ramses.host._request_input(
-                "Validation Error", 
-                fields, 
-                ok_text="Understood", 
-                cancel_text=None
+                "Validation Error", fields, ok_text="Understood", cancel_text=None
             )
             return False
         else:
-            fields.append({
-                "id": "Instr",
-                "label": "Question:",
-                "type": "label",
-                "default": "<b>Continue anyway?</b><br><font color='#777'>Choosing 'Ignore' may lead to technical rejection.</font>",
-            })
+            fields.append(
+                {
+                    "id": "Instr",
+                    "label": "Question:",
+                    "type": "label",
+                    "default": "<b>Continue anyway?</b><br><font color='#777'>Choosing 'Ignore' may lead to technical rejection.</font>",
+                }
+            )
             res = self.ramses.host._request_input(
-                "Validation Warning", 
-                fields, 
-                ok_text="Ignore && Proceed", 
-                cancel_text="Abort && Fix"
+                "Validation Warning",
+                fields,
+                ok_text="Ignore && Proceed",
+                cancel_text="Abort && Fix",
             )
             return res is not None
 
@@ -711,7 +741,10 @@ class RamsesFusionApp:
                 preview_node = comp.FindTool("_PREVIEW")
                 if preview_node:
                     # Only update if different to avoid dirtying the comp
-                    if self.ramses.host.normalizePath(preview_node.Clip[1]) != preview_path:
+                    if (
+                        self.ramses.host.normalizePath(preview_node.Clip[1])
+                        != preview_path
+                    ):
                         preview_node.Clip[1] = preview_path
                     self.ramses.host.apply_render_preset(preview_node, "preview")
 
@@ -741,7 +774,11 @@ class RamsesFusionApp:
             try:
                 # Performance Gate: Don't refresh if the path hasn't changed unless forced
                 current_path = self.ramses.host.currentFilePath()
-                if not force_full and self._last_synced_path == current_path and self._item_cache:
+                if (
+                    not force_full
+                    and self._last_synced_path == current_path
+                    and self._item_cache
+                ):
                     return
 
                 # Force cache refresh for project and user only if requested
@@ -754,14 +791,14 @@ class RamsesFusionApp:
                 self._item_path = ""
                 self._step_cache = None
                 self._step_path = ""
-                
+
                 # Invalidate the host's status cache to ensure the badge updates
                 self.ramses.host._status_cache = None
 
                 # Sync Savers? ONLY on full manual refresh to avoid dirtying the comp automatically
                 if force_full:
                     self._sync_render_anchors()
-                
+
                 # Update the gate to ensure re-fetching is gated correctly
                 self._last_synced_path = current_path
             except (AttributeError, RuntimeError) as e:
@@ -777,7 +814,7 @@ class RamsesFusionApp:
         # Use RecalcLayout first to ensure internal sizes are correct
         self.dlg.RecalcLayout()
         geom = self.dlg.GetGeometry()
-        
+
         # Fusion UIManager returns a dict with keys 1.0, 2.0, 3.0, 4.0 for x, y, w, h
         # We snap the height (4.0) to a small value so it shrinks to content minimum
         if isinstance(geom, dict):
@@ -785,7 +822,7 @@ class RamsesFusionApp:
         else:
             # Fallback for list/tuple
             self.dlg.SetGeometry([geom[0], geom[1], geom[2], 10])
-            
+
         self.dlg.RecalcLayout()
 
     def show_main_window(self) -> None:
@@ -864,7 +901,7 @@ class RamsesFusionApp:
                                                 self._build_working_group(),
                                                 self._build_publish_group(),
                                                 self._build_settings_group(),
-                                            ]
+                                            ],
                                         ),
                                         # Spacer to push everything up (Takes all remaining weight)
                                         self.ui.VGap(0, 1),
@@ -889,7 +926,9 @@ class RamsesFusionApp:
         )
 
         # Bind Events
-        self.dlg.On.RefreshButton.Clicked = lambda ev: self.refresh_header(force_full=True)
+        self.dlg.On.RefreshButton.Clicked = lambda ev: self.refresh_header(
+            force_full=True
+        )
         self.dlg.On.RamsesButton.Clicked = self.on_run_ramses
         self.dlg.On.SwitchShotButton.Clicked = self.on_switch_shot
         self.dlg.On.ImportButton.Clicked = self.on_import
@@ -901,7 +940,6 @@ class RamsesFusionApp:
         self.dlg.On.PreviewButton.Clicked = self.on_preview
         self.dlg.On.TemplateButton.Clicked = self.on_save_template
         self.dlg.On.SetupSceneButton.Clicked = self.on_setup_scene
-        self.dlg.On.OpenButton.Clicked = self.on_open
         self.dlg.On.RetrieveButton.Clicked = self.on_retrieve
         self.dlg.On.PubSettingsButton.Clicked = self.on_publish_settings
         self.dlg.On.SettingsButton.Clicked = self.show_settings_window
@@ -910,11 +948,16 @@ class RamsesFusionApp:
 
         # Section Button Mapping
         section_map = {
-            "ProjectContent": ["SwitchShotButton", "SetupSceneButton", "OpenButton", "RamsesButton"],
+            "ProjectContent": ["SwitchShotButton", "SetupSceneButton", "RamsesButton"],
             "PipelineContent": ["ImportButton", "ReplaceButton", "TemplateButton"],
-            "WorkingContent": ["SaveButton", "IncrementalSaveButton", "CommentButton", "RetrieveButton"],
+            "WorkingContent": [
+                "SaveButton",
+                "IncrementalSaveButton",
+                "CommentButton",
+                "RetrieveButton",
+            ],
             "PublishContent": ["PreviewButton", "UpdateStatusButton"],
-            "SettingsContent": ["PubSettingsButton", "SettingsButton", "AboutButton"]
+            "SettingsContent": ["PubSettingsButton", "SettingsButton", "AboutButton"],
         }
 
         # Bind Section Toggles
@@ -924,20 +967,20 @@ class RamsesFusionApp:
                 # Toggle internal state
                 is_collapsed = not self._section_states.get(content_id, False)
                 self._section_states[content_id] = is_collapsed
-                
+
                 # Update Header Text
                 prefix = "[ + ]" if is_collapsed else "[ − ]"
                 items[header_id].Text = f"{prefix}  {title}"
-                
+
                 # Manually toggle each button's visibility
                 for btn_id in section_map.get(content_id, []):
                     if btn_id in items:
                         items[btn_id].Hidden = is_collapsed
-                
+
                 self.resize_to_fit()
-            
+
             self.dlg.On[header_id].Clicked = toggle
-            
+
             # Set initial state if collapsed
             if self._section_states.get(content_id, False):
                 items = self.dlg.GetItems()
@@ -953,10 +996,10 @@ class RamsesFusionApp:
 
         self.refresh_header()
         self.dlg.Show()
-        self.resize_to_fit() # Force initial sizing to show footer
+        self.resize_to_fit()  # Force initial sizing to show footer
         self.disp.RunLoop()
         self.dlg.Hide()
-        self.dlg = None # Cleanup reference after exit
+        self.dlg = None  # Cleanup reference after exit
 
     def _create_section_header(self, id_name: str, title: str, content_id: str):
         """Creates a clickable section header that toggles a content group.
@@ -972,190 +1015,204 @@ class RamsesFusionApp:
         # Initial state
         is_collapsed = self._section_states.get(content_id, False)
         prefix = "[ + ]" if is_collapsed else "[ − ]"
-        
+
         ss = "QPushButton { text-align: left; padding-left: 5px; background-color: #1a1a1a; color: #888; border: none; border-top: 1px solid #111; border-bottom: 1px solid #333; }"
         ss += " QPushButton:hover { color: #BBB; background-color: #222; }"
 
-        return self.ui.Button({
-            "ID": id_name,
-            "Text": f"{prefix}  {title}",
-            "Weight": 0,
-            "MinimumSize": [16, 22],
-            "MaximumSize": [2000, 22],
-            "Font": self.ui.Font({"PixelSize": 10, "Bold": True}),
-            "StyleSheet": ss,
-            "Checkable": True,
-            "Checked": is_collapsed
-        })
+        return self.ui.Button(
+            {
+                "ID": id_name,
+                "Text": f"{prefix}  {title}",
+                "Weight": 0,
+                "MinimumSize": [16, 22],
+                "MaximumSize": [2000, 22],
+                "Font": self.ui.Font({"PixelSize": 10, "Bold": True}),
+                "StyleSheet": ss,
+                "Checkable": True,
+                "Checked": is_collapsed,
+            }
+        )
 
     def _build_project_group(self):
         """Builds the 'Project & Scene' UI section."""
         bg_color = "#2a3442"
         content_id = "ProjectContent"
         is_hidden = self._section_states.get(content_id, False)
-        return self.ui.VGroup([
-            self._create_section_header("ProjectHeader", "PROJECT && SCENE", content_id),
-            self.create_button(
-                "SwitchShotButton", 
-                "Browse Shots / Tasks", 
-                "ramshot.png", 
-                accent_color=bg_color, 
-                weight=0,
-                tooltip="Quickly jump to another shot in this project or create a new one from a template."
-            ),
-            self.create_button(
-                "SetupSceneButton", 
-                "Sync Project Settings", 
-                "ramsetupscene.png", 
-                accent_color=bg_color, 
-                weight=0,
-                tooltip="Automatically set the resolution, FPS, and frame range based on Ramses project settings."
-            ),
-            self.create_button(
-                "OpenButton", 
-                "Open Composition", 
-                "ramopen.png", 
-                accent_color=bg_color, 
-                weight=0,
-                tooltip="Browse and open an existing Ramses composition."
-            ),
-            self.create_button(
-                "RamsesButton", 
-                "Open Ramses Client", 
-                "ramses.png", 
-                accent_color=bg_color, 
-                weight=0,
-                tooltip="Launch the main Ramses Client application."
-            ),
-        ])
+        return self.ui.VGroup(
+            [
+                self._create_section_header(
+                    "ProjectHeader", "PROJECT && SCENE", content_id
+                ),
+                self.create_button(
+                    "SwitchShotButton",
+                    "Browse Shots / Tasks",
+                    "ramshot.png",
+                    accent_color=bg_color,
+                    weight=0,
+                    tooltip="Quickly jump to another shot in this project or create a new one from a template.",
+                ),
+                self.create_button(
+                    "SetupSceneButton",
+                    "Sync Project Settings",
+                    "ramsetupscene.png",
+                    accent_color=bg_color,
+                    weight=0,
+                    tooltip="Automatically set the resolution, FPS, and frame range based on Ramses project settings.",
+                ),
+                self.create_button(
+                    "RamsesButton",
+                    "Open Ramses Client",
+                    "ramses.png",
+                    accent_color=bg_color,
+                    weight=0,
+                    tooltip="Launch the main Ramses Client application.",
+                ),
+            ]
+        )
 
     def _build_pipeline_group(self):
         """Builds the 'Assets & Tools' UI section."""
         bg_color = "#342a42"
         content_id = "PipelineContent"
-        return self.ui.VGroup([
-            self._create_section_header("PipelineHeader", "ASSETS && TOOLS", content_id),
-            self.create_button(
-                "ImportButton", 
-                "Import Published", 
-                "ramimport.png", 
-                accent_color=bg_color, 
-                weight=0,
-                tooltip="Import a published asset or render into the current composition."
-            ),
-            self.create_button(
-                "ReplaceButton", 
-                "Replace Loader", 
-                "ramreplace.png", 
-                accent_color=bg_color, 
-                weight=0,
-                tooltip="Replace the selected Loader node with a different version or asset."
-            ),
-            self.create_button(
-                "TemplateButton", 
-                "Save as Template", 
-                "ramtemplate.png", 
-                accent_color=bg_color, 
-                weight=0,
-                tooltip="Save the current composition as a template for other shots in this step."
-            ),
-        ])
+        return self.ui.VGroup(
+            [
+                self._create_section_header(
+                    "PipelineHeader", "ASSETS && TOOLS", content_id
+                ),
+                self.create_button(
+                    "ImportButton",
+                    "Import Published",
+                    "ramimport.png",
+                    accent_color=bg_color,
+                    weight=0,
+                    tooltip="Import a published asset or render into the current composition.",
+                ),
+                self.create_button(
+                    "ReplaceButton",
+                    "Replace Loader",
+                    "ramreplace.png",
+                    accent_color=bg_color,
+                    weight=0,
+                    tooltip="Replace the selected Loader node with a different version or asset.",
+                ),
+                self.create_button(
+                    "TemplateButton",
+                    "Save as Template",
+                    "ramtemplate.png",
+                    accent_color=bg_color,
+                    weight=0,
+                    tooltip="Save the current composition as a template for other shots in this step.",
+                ),
+            ]
+        )
 
     def _build_working_group(self):
         """Builds the 'Saving & Iteration' UI section."""
         bg_color = "#2a423d"
         content_id = "WorkingContent"
-        return self.ui.VGroup([
-            self._create_section_header("WorkingHeader", "SAVING && ITERATION", content_id),
-            self.create_button(
-                "SaveButton", 
-                "Save", 
-                "ramsave.png", 
-                accent_color=bg_color, 
-                weight=0,
-                tooltip="Overwrite the current working file version."
-            ),
-            self.create_button(
-                "IncrementalSaveButton", 
-                "Incremental Save", 
-                "ramsaveincremental.png", 
-                accent_color=bg_color, 
-                weight=0,
-                tooltip="Save a new version of the current file (e.g., v001 -> v002)."
-            ),
-            self.create_button(
-                "CommentButton", 
-                "Add Note", 
-                "ramcomment.png", 
-                accent_color=bg_color, 
-                weight=0,
-                tooltip="Add a descriptive note to the current version in the Ramses database."
-            ),
-            self.create_button(
-                "RetrieveButton", 
-                "Version History / Restore", 
-                "ramretrieve.png", 
-                accent_color=bg_color, 
-                weight=0,
-                tooltip="Browse and restore a previous version of this composition."
-            ),
-        ])
+        return self.ui.VGroup(
+            [
+                self._create_section_header(
+                    "WorkingHeader", "SAVING && ITERATION", content_id
+                ),
+                self.create_button(
+                    "SaveButton",
+                    "Save",
+                    "ramsave.png",
+                    accent_color=bg_color,
+                    weight=0,
+                    tooltip="Overwrite the current working file version.",
+                ),
+                self.create_button(
+                    "IncrementalSaveButton",
+                    "Incremental Save",
+                    "ramsaveincremental.png",
+                    accent_color=bg_color,
+                    weight=0,
+                    tooltip="Save a new version of the current file (e.g., v001 -> v002).",
+                ),
+                self.create_button(
+                    "CommentButton",
+                    "Add Note",
+                    "ramcomment.png",
+                    accent_color=bg_color,
+                    weight=0,
+                    tooltip="Add a descriptive note to the current version in the Ramses database.",
+                ),
+                self.create_button(
+                    "RetrieveButton",
+                    "Version History / Restore",
+                    "ramretrieve.png",
+                    accent_color=bg_color,
+                    weight=0,
+                    tooltip="Browse and restore a previous version of this composition.",
+                ),
+            ]
+        )
 
     def _build_publish_group(self):
         """Builds the 'Review & Publish' UI section."""
         bg_color = "#2a422a"
         content_id = "PublishContent"
-        return self.ui.VGroup([
-            self._create_section_header("PublishHeader", "REVIEW && PUBLISH", content_id),
-            self.create_button(
-                "PreviewButton", 
-                "Create Preview", 
-                "rampreview.png", 
-                accent_color=bg_color, 
-                weight=0,
-                tooltip="Generate a preview render for supervisor review."
-            ),
-            self.create_button(
-                "UpdateStatusButton", 
-                "Update / Publish", 
-                "ramstatus.png", 
-                tooltip="Change the shot status (e.g., WIP, Review) and optionally publish the final output.",
-                accent_color=bg_color, 
-                weight=0
-            ),
-        ])
+        return self.ui.VGroup(
+            [
+                self._create_section_header(
+                    "PublishHeader", "REVIEW && PUBLISH", content_id
+                ),
+                self.create_button(
+                    "PreviewButton",
+                    "Create Preview",
+                    "rampreview.png",
+                    accent_color=bg_color,
+                    weight=0,
+                    tooltip="Generate a preview render for supervisor review.",
+                ),
+                self.create_button(
+                    "UpdateStatusButton",
+                    "Update / Publish",
+                    "ramstatus.png",
+                    tooltip="Change the shot status (e.g., WIP, Review) and optionally publish the final output.",
+                    accent_color=bg_color,
+                    weight=0,
+                ),
+            ]
+        )
 
     def _build_settings_group(self):
         """Builds the 'Settings & Info' UI section."""
         bg_color = "#333333"
         content_id = "SettingsContent"
-        return self.ui.VGroup([
-            self._create_section_header("SettingsHeader", "SETTINGS && INFO", content_id),
-            self.create_button(
-                "PubSettingsButton", 
-                "Step Configuration", 
-                "rampublishsettings.png", 
-                accent_color=bg_color, 
-                weight=0,
-                tooltip="Configure global YAML automation rules for this pipeline step."
-            ),
-            self.create_button(
-                "SettingsButton", 
-                "Plugin Settings", 
-                "ramsettings.png", 
-                accent_color=bg_color, 
-                weight=0,
-                tooltip="Configure Ramses executable paths, ports, and default frame ranges."
-            ),
-            self.create_button(
-                "AboutButton", 
-                "About", 
-                "ramses.png", 
-                accent_color=bg_color, 
-                weight=0,
-                tooltip="Information about Ramses-Fusion and Overmind Studios."
-            ),
-        ])
+        return self.ui.VGroup(
+            [
+                self._create_section_header(
+                    "SettingsHeader", "SETTINGS && INFO", content_id
+                ),
+                self.create_button(
+                    "PubSettingsButton",
+                    "Step Configuration",
+                    "rampublishsettings.png",
+                    accent_color=bg_color,
+                    weight=0,
+                    tooltip="Configure global YAML automation rules for this pipeline step.",
+                ),
+                self.create_button(
+                    "SettingsButton",
+                    "Plugin Settings",
+                    "ramsettings.png",
+                    accent_color=bg_color,
+                    weight=0,
+                    tooltip="Configure Ramses executable paths, ports, and default frame ranges.",
+                ),
+                self.create_button(
+                    "AboutButton",
+                    "About",
+                    "ramses.png",
+                    accent_color=bg_color,
+                    weight=0,
+                    tooltip="Information about Ramses-Fusion and Overmind Studios.",
+                ),
+            ]
+        )
 
     def create_button(
         self,
@@ -1187,10 +1244,10 @@ class RamsesFusionApp:
         """
         # Base Style: Reverted to the original flat 1px solid #222 border
         ss = f"QPushButton {{ text-align: left; padding-left: 12px; border: 1px solid #222; border-radius: 3px;"
-        
+
         if accent_color:
             ss += f" background-color: {accent_color}; }}"
-            
+
             # Calculate Hover (slightly brighter)
             h = accent_color.lstrip("#")
             hr, hg, hb = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
@@ -1203,7 +1260,7 @@ class RamsesFusionApp:
             pressed = "#%02x%02x%02x" % (
                 max(0, hr - 10),
                 max(0, hg - 10),
-                max(0, hb - 10)
+                max(0, hb - 10),
             )
 
             ss += f" QPushButton:hover {{ background-color: {hover}; }}"
@@ -1299,12 +1356,22 @@ class RamsesFusionApp:
                             [
                                 self.ui.HGap(0, 1),
                                 self.ui.Button(
-                                    {"ID": "SaveSettingsButton", "Text": "Save", "Weight": 0, "MinimumSize": [120, 30]}
+                                    {
+                                        "ID": "SaveSettingsButton",
+                                        "Text": "Save",
+                                        "Weight": 0,
+                                        "MinimumSize": [120, 30],
+                                    }
                                 ),
                                 self.ui.Button(
-                                    {"ID": "CloseSettingsButton", "Text": "Close", "Weight": 0, "MinimumSize": [120, 30]}
+                                    {
+                                        "ID": "CloseSettingsButton",
+                                        "Text": "Close",
+                                        "Weight": 0,
+                                        "MinimumSize": [120, 30],
+                                    }
                                 ),
-                            ]
+                            ],
                         ),
                     ],
                 )
@@ -1403,9 +1470,16 @@ class RamsesFusionApp:
                             {"Weight": 0},
                             [
                                 self.ui.HGap(0, 1),
-                                self.ui.Button({"ID": "AboutCloseButton", "Text": "Close", "Weight": 0, "MinimumSize": [120, 30]}),
+                                self.ui.Button(
+                                    {
+                                        "ID": "AboutCloseButton",
+                                        "Text": "Close",
+                                        "Weight": 0,
+                                        "MinimumSize": [120, 30],
+                                    }
+                                ),
                                 self.ui.HGap(0, 1),
-                            ]
+                            ],
                         ),
                     ],
                 )
@@ -1511,12 +1585,14 @@ class RamsesFusionApp:
                             ui.HGroup(
                                 [
                                     ui.Label({"Text": "Project:", "Weight": 0.25}),
-                                    ui.Label({
-                                        "ID": "ProjLabel", 
-                                        "Text": active_project.name(), 
-                                        "Weight": 0.75,
-                                        "StyleSheet": "font-weight: bold; font-size: 14px;"
-                                    }),
+                                    ui.Label(
+                                        {
+                                            "ID": "ProjLabel",
+                                            "Text": active_project.name(),
+                                            "Weight": 0.75,
+                                            "StyleSheet": "font-weight: bold; font-size: 14px;",
+                                        }
+                                    ),
                                 ]
                             ),
                             ui.HGroup(
@@ -1538,11 +1614,23 @@ class RamsesFusionApp:
                         {"Weight": 0},
                         [
                             ui.HGap(0, 1),
-                            ui.Button({"ID": "OkBtn", "Text": "OK", "Weight": 0, "MinimumSize": [120, 30]}),
                             ui.Button(
-                                {"ID": "CancelBtn", "Text": "Cancel", "Weight": 0, "MinimumSize": [120, 30]}
+                                {
+                                    "ID": "OkBtn",
+                                    "Text": "OK",
+                                    "Weight": 0,
+                                    "MinimumSize": [120, 30],
+                                }
                             ),
-                        ]
+                            ui.Button(
+                                {
+                                    "ID": "CancelBtn",
+                                    "Text": "Cancel",
+                                    "Weight": 0,
+                                    "MinimumSize": [120, 30],
+                                }
+                            ),
+                        ],
                     ),
                     ui.VGap(5),
                 ]
@@ -1576,16 +1664,22 @@ class RamsesFusionApp:
 
                 # 2. Parallel Fetch (ThreadPoolExecutor)
                 if missing_keys:
+
                     def fetch_status_task(args):
                         s_obj, s_stp = args
                         try:
                             # Return ((key), result)
-                            return (str(s_obj.uuid()), str(s_stp.uuid())), s_obj.currentStatus(s_stp)
+                            return (
+                                str(s_obj.uuid()),
+                                str(s_stp.uuid()),
+                            ), s_obj.currentStatus(s_stp)
                         except Exception:
                             return (str(s_obj.uuid()), str(s_stp.uuid())), None
 
                     # Use max_workers=20 to speed up I/O bound socket calls
-                    with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
+                    with concurrent.futures.ThreadPoolExecutor(
+                        max_workers=20
+                    ) as executor:
                         results = executor.map(fetch_status_task, missing_keys)
                         for key, status in results:
                             session_cache["status_cache"][key] = status
@@ -1594,7 +1688,7 @@ class RamsesFusionApp:
                 valid_options = []
                 for shot in shots:
                     shot_uuid = str(shot.uuid())
-                    
+
                     cache_key = (shot_uuid, step_uuid)
                     status = session_cache["status_cache"].get(cache_key)
 
@@ -1605,7 +1699,9 @@ class RamsesFusionApp:
 
                     # Resolve expected path using helper
                     try:
-                        expected_path, exists = self._resolve_shot_path(shot, selected_step)
+                        expected_path, exists = self._resolve_shot_path(
+                            shot, selected_step
+                        )
                     except Exception as e:
                         print(f"Error resolving path for shot {shot.name()}: {e}")
                         continue
@@ -1615,7 +1711,11 @@ class RamsesFusionApp:
                     )
 
                     if exists:
-                        state_name = status.state().name() if status and status.state() else "WIP"
+                        state_name = (
+                            status.state().name()
+                            if status and status.state()
+                            else "WIP"
+                        )
                         label = f"{seq_name} / {shot.shortName()} [{state_name}]"
                     else:
                         label = f"{seq_name} / {shot.shortName()} [EMPTY - Create New]"
@@ -1703,8 +1803,6 @@ class RamsesFusionApp:
                 update_shots()
             except Exception as e:
                 self.log(f"Error updating steps: {e}", ram.LogLevel.Critical)
-
-
 
         # 4. Event Binding
         dlg.On.StepCombo.CurrentIndexChanged = (
@@ -1855,14 +1953,25 @@ class RamsesFusionApp:
                         try:
                             status = host.currentStatus()
                             target_state = self.ramses.defaultState()
-                            
-                            if status and target_state and status.state().shortName() != target_state.shortName():
+
+                            if (
+                                status
+                                and target_state
+                                and status.state().shortName()
+                                != target_state.shortName()
+                            ):
                                 status.setState(target_state)
                                 status.setComment("Initial creation")
                                 status.setVersion(host.currentVersion())
-                                self.log(f"Auto-updated status to {target_state.name()}", ram.LogLevel.Info)
+                                self.log(
+                                    f"Auto-updated status to {target_state.name()}",
+                                    ram.LogLevel.Info,
+                                )
                         except Exception as e:
-                            self.log(f"Could not auto-update status: {e}", ram.LogLevel.Warning)
+                            self.log(
+                                f"Could not auto-update status: {e}",
+                                ram.LogLevel.Warning,
+                            )
 
                         self.refresh_header()
                         self.log(
@@ -1871,7 +1980,7 @@ class RamsesFusionApp:
                 else:
                     target_path = host.normalizePath(shot_data["path"])
                     current_path = host.currentFilePath()
-                    
+
                     # Manual dirty check to bypass the base RamHost.open() prompt if not needed
                     if current_path == target_path:
                         # Already there, no need to open/prompt
@@ -2057,7 +2166,7 @@ class RamsesFusionApp:
             return
 
         name = re.sub(r"[^a-zA-Z0-9\- ]", "", res["Name"])
-        
+
         tpl_folder = step.templatesFolderPath()
         if not tpl_folder:
             self.log(
@@ -2099,18 +2208,6 @@ class RamsesFusionApp:
         self.ramses.host._setupCurrentFile(item, step, settings)
         self._create_render_anchors()
         self.refresh_header()
-
-    @requires_connection
-    def on_open(self, ev: object) -> None:
-        """Handler for 'Open' button.
-
-        Opens the Ramses open file dialog.
-
-        Args:
-            ev: The event object (unused).
-        """
-        if self.ramses.host.open():
-            self.refresh_header()
 
     def on_retrieve(self, ev: object) -> None:
         """Handler for 'Retrieve Version' button.
