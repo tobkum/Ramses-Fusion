@@ -2230,9 +2230,8 @@ class RamsesFusionApp:
         
         # Helper to build a column
         def build_col(title, id_prefix, cfg):
-            return ui.VGroup({"Weight": 1, "Spacing": 5}, [
-                ui.Label({"Text": f"<b>{title}</b>", "Alignment": {"AlignHCenter": True}}),
-                ui.VGap(5),
+            return ui.VGroup({"Weight": 1, "Spacing": 5, "Margin": 0}, [
+                ui.Label({"Text": f"<b>{title}</b>", "Alignment": {"AlignHCenter": True}, "Weight": 0}),
                 ui.Label({"Text": "Paste Saver Node Text:", "Weight": 0}),
                 ui.TextEdit({
                     "ID": f"{id_prefix}Txt",
@@ -2254,16 +2253,18 @@ class RamsesFusionApp:
                 "Geometry": [450, 450, 700, 500],
             },
             [
-                ui.VGroup({"Weight": 1}, [
-                    ui.HGroup({"Weight": 1, "Spacing": 15}, [
+                ui.VGroup({"Weight": 1, "Margin": 10, "Spacing": 10}, [
+                    ui.HGroup({"Weight": 10, "Spacing": 15}, [
                         build_col("PREVIEW", "Prev", prev_cfg),
-                        # Vertical Separator (simulated with thin VGroup)
+                        # Vertical Separator
                         ui.Label({"Text": "|", "Weight": 0, "StyleSheet": "color: #444;"}), 
                         build_col("FINAL", "Final", final_cfg)
                     ]),
-                    ui.VGap(15),
-                    ui.Label({"Text": "<i>Paste the content of a Saver node (Ctrl+C) into the text fields above.</i>", "Alignment": {"AlignHCenter": True}}),
-                    ui.VGap(15),
+                    ui.Label({
+                        "Text": "<i>Paste the content of a Saver node (Ctrl+C) into the text fields above.</i>", 
+                        "Alignment": {"AlignHCenter": True},
+                        "Weight": 0
+                    }),
                     ui.HGroup({"Weight": 0}, [
                         ui.HGap(0, 1),
                         ui.Button({"ID": "OkBtn", "Text": "Generate Config", "Weight": 0, "MinimumSize": [120, 30]}),
