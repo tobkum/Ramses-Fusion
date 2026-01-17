@@ -19,7 +19,7 @@ class FusionHost(RamHost):
     }
 
     def __init__(self, fusion_obj: object) -> None:
-        super(FusionHost, self).__init__()
+        super().__init__()
         self.fusion = fusion_obj
         self.hostName = "Fusion"
         

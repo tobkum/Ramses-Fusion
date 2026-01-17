@@ -128,6 +128,9 @@ class TestRamsesFusionApp(unittest.TestCase):
         self.app.ramses.host.resolvePreviewPath = MagicMock(return_value="D:/Previews/Shot_Preview.mov")
         self.app.ramses.host.resolveFinalPath = MagicMock(return_value="D:/Renders/Shot_Final.mov")
         
+        # Patch apply_render_preset to avoid complex logic/hangs
+        self.app.ramses.host.apply_render_preset = MagicMock()
+        
         self.app._create_render_anchors()
         
         comp = self.mock_fusion.GetCurrentComp()
@@ -139,6 +142,9 @@ class TestRamsesFusionApp(unittest.TestCase):
         
         self.assertEqual(preview_node.Clip[1], "D:/Previews/Shot_Preview.mov")
         self.assertEqual(final_node.Clip[1], "D:/Renders/Shot_Final.mov")
+        
+        # Verify preset was called
+        self.assertEqual(self.app.ramses.host.apply_render_preset.call_count, 2)
         
         # Verify they are disabled by default
         self.assertTrue(preview_node.attrs.get("TOOLB_PassThrough"))

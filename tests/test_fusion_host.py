@@ -25,6 +25,12 @@ if lib_path not in sys.path:
 import ramses.ramses
 ramses.ramses.Ramses.connect = MagicMock(return_value=False)
 
+# Mock ramses.yaml to satisfy imports in fusion_host
+sys.modules["ramses.yaml"] = MagicMock()
+sys.modules["yaml"] = MagicMock()
+# We need actual yaml behavior for some tests, or at least a working safe_load mock
+sys.modules["yaml"].safe_load.side_effect = lambda x: x # Simple pass-through or mock return
+
 # --- 3. Import Code Under Test ---
 from fusion_host import FusionHost
 from tests.mocks import MockFusion
@@ -38,6 +44,10 @@ class TestFusionHost(unittest.TestCase):
         import fusion_host
         fusion_host.bmd = sys.modules["bmd"]
         fusion_host.fusionscript = sys.modules["fusionscript"]
+        
+        # Ensure yaml is mocked inside the module if it was already imported
+        fusion_host.yaml = sys.modules["yaml"]
+        
         self.host = FusionHost(self.mock_fusion)
 
     def test_initialization(self):
@@ -174,6 +184,11 @@ class TestFusionHost(unittest.TestCase):
         folder = "D:/Previews"
         basename = "TEST_S_Shot01_COMP"
         
+        # Mock Step Settings to ensure fallback logic runs (empty settings)
+        mock_step = MagicMock()
+        mock_step.publishSettings.return_value = {} # Return dict directly as per new logic
+        self.host.currentStep = MagicMock(return_value=mock_step)
+        
         with MagicMock() as mock_os:
             # We need to ensure the verify check passes
             self.host._verify_render_output = MagicMock(return_value=True)
@@ -235,6 +250,9 @@ class TestFusionHost(unittest.TestCase):
         """Verify that metadata and presets only write if values actually changed."""
         mock_item = MagicMock()
         mock_item.uuid.return_value = "fixed-uuid"
+        
+        # Avoid Ramses context lookup
+        self.host.currentStep = MagicMock(return_value=None)
         
         comp = self.mock_fusion.GetCurrentComp()
         comp.SetData("Ramses.ItemUUID", "fixed-uuid")
