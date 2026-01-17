@@ -903,52 +903,54 @@ class FusionHost(RamHost):
             # 1. Automated Final Render
             # Find the _FINAL anchor node
             final_node = self.comp.FindTool("_FINAL")
-            if final_node:
-                self.log("Starting final master render...", LogLevel.Info)
-                # Enable the node
-                final_node.SetAttrs({"TOOLB_PassThrough": False})
-                render_success = False
-                render_path = ""
-                try:
-                    # Execute render - comp.Render returns True only on success
-                    if self.comp.Render(True):
-                        render_path = self.normalizePath(final_node.Clip[1])
-                        # Secondary Verification: Check file existence and size
-                        if self._verify_render_output(render_path):
-                            self.log(
-                                f"Final render complete and verified: {render_path}",
-                                LogLevel.Info,
-                            )
-                            render_success = True
-                            published_files.append(render_path)
-                        else:
-                            self.log(
-                                f"Final render produced an invalid file: {render_path}",
-                                LogLevel.Critical,
-                            )
+            if not final_node:
+                self.log(
+                    "Publish ABORTED: No _FINAL anchor found. Use 'Setup Scene' to add one.",
+                    LogLevel.Critical,
+                )
+                return []
+
+            self.log("Starting final master render...", LogLevel.Info)
+            # Enable the node
+            final_node.SetAttrs({"TOOLB_PassThrough": False})
+            render_success = False
+            render_path = ""
+            try:
+                # Execute render - comp.Render returns True only on success
+                if self.comp.Render(True):
+                    render_path = self.normalizePath(final_node.Clip[1])
+                    # Secondary Verification: Check file existence and size
+                    if self._verify_render_output(render_path):
+                        self.log(
+                            f"Final render complete and verified: {render_path}",
+                            LogLevel.Info,
+                        )
+                        render_success = True
+                        published_files.append(render_path)
                     else:
                         self.log(
-                            "Final render failed or was cancelled by user.",
-                            LogLevel.Warning,
+                            f"Final render produced an invalid file: {render_path}",
+                            LogLevel.Critical,
                         )
-                finally:
-                    # Always disarm
-                    final_node.SetAttrs({"TOOLB_PassThrough": True})
-
-                # GATEKEEPER: If render was attempted but failed/invalid, abort everything
-                if not render_success:
+                else:
                     self.log(
-                        "Publish ABORTED: Render failed. No files will be published.",
-                        LogLevel.Critical,
+                        "Final render failed or was cancelled by user.",
+                        LogLevel.Warning,
                     )
-                    return []
-            else:
+            finally:
+                # Always disarm
+                final_node.SetAttrs({"TOOLB_PassThrough": True})
+
+            # GATEKEEPER: If render failed or was invalid, abort everything
+            if not render_success:
                 self.log(
-                    "No _FINAL anchor found. Skipping final render.", LogLevel.Warning
+                    "Publish ABORTED: Render failed. No files will be published.",
+                    LogLevel.Critical,
                 )
+                return []
 
             # 2. Perform Comp File Backup (standard Ramses publish)
-            # This only happens if there was no final_node OR if final_node render succeeded.
+            # This only happens if final_node render succeeded.
             if self._saveAs(dst, None, None, -1, "", False):
                 self.log(f"Comp backup published to: {dst}", LogLevel.Info)
                 published_files.append(dst)

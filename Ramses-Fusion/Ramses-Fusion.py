@@ -24,10 +24,7 @@ except ImportError:
     import yaml
 
 import fusion_host
-try:
-    import fusion_config
-except ImportError:
-    pass
+import fusion_config
 from fusion_config import FusionConfig
 
 

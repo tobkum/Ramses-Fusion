@@ -222,6 +222,54 @@ class TestFusionHost(unittest.TestCase):
         self.assertIn("D:/Renders/TEST_S_Shot01_COMP.mov", published)
         self.assertIn("D:/Projects/Published/TEST_S_Shot01_COMP.comp", published)
 
+    def test_publish_aborts_on_missing_anchor(self):
+        """Verify that publish is aborted if no _FINAL anchor is present."""
+        comp = self.mock_fusion.GetCurrentComp()
+        # Ensure clean state (no tools)
+        comp.tools = {} 
+        comp.SetAttrs({"COMPS_FileName": "D:/Projects/WIP/TEST_S_Shot01_COMP_v001.comp"})
+
+        mock_info = MagicMock()
+        published = self.host._publish(mock_info, {})
+
+        # Should return empty list (aborted)
+        self.assertEqual(published, [])
+
+    def test_publish_aborts_on_render_failure(self):
+        """Verify that publish is aborted if the render command fails."""
+        comp = self.mock_fusion.GetCurrentComp()
+        comp.SetAttrs({"COMPS_FileName": "D:/Projects/WIP/TEST_S_Shot01_COMP_v001.comp"})
+        
+        final_node = comp.AddTool("Saver", 0, 0)
+        final_node.SetAttrs({"TOOLS_Name": "_FINAL"})
+
+        # Mock Render failure
+        comp.Render = MagicMock(return_value=False)
+
+        mock_info = MagicMock()
+        published = self.host._publish(mock_info, {})
+
+        # Should return empty list (aborted)
+        self.assertEqual(published, [])
+
+    def test_publish_aborts_on_invalid_render_file(self):
+        """Verify that publish is aborted if the rendered file is invalid (missing/size 0)."""
+        comp = self.mock_fusion.GetCurrentComp()
+        comp.SetAttrs({"COMPS_FileName": "D:/Projects/WIP/TEST_S_Shot01_COMP_v001.comp"})
+        
+        final_node = comp.AddTool("Saver", 0, 0)
+        final_node.SetAttrs({"TOOLS_Name": "_FINAL"})
+        
+        # Mock Render success but Verification failure
+        comp.Render = MagicMock(return_value=True)
+        self.host._verify_render_output = MagicMock(return_value=False)
+
+        mock_info = MagicMock()
+        published = self.host._publish(mock_info, {})
+
+        # Should return empty list (aborted)
+        self.assertEqual(published, [])
+
     def test_logging(self):
         """Verifies that the logger outputs to stdout for INFO and above."""
         from io import StringIO
