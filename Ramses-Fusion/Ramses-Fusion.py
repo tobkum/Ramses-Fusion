@@ -2259,7 +2259,7 @@ class RamsesFusionApp:
                 "Geometry": [450, 450, 700, 500],
             },
             [
-                ui.VGroup([
+                ui.VGroup({"Weight": 1}, [
                     ui.HGroup({"Weight": 1, "Spacing": 15}, [
                         build_col("PREVIEW", "Prev", prev_cfg),
                         # Vertical Separator (simulated with thin VGroup)
