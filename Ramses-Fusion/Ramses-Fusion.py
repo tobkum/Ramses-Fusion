@@ -62,8 +62,6 @@ class RamsesFusionApp:
         "UpdateStatusButton",
     ]
 
-    DB_BUTTONS = ["SwitchShotButton"]
-
     def __init__(self) -> None:
         """Initializes the Ramses App, connecting to the Daemon and Fusion Host."""
         self.ramses = ram.Ramses.instance()
