@@ -470,7 +470,7 @@ class FusionHost(RamHost):
         if not self.comp: return False
         return self.comp.SetAttrs({'COMPS_FileName': self.normalizePath(fileName)})
 
-    def save(self, incremental:bool=False, comment:str=None, setupFile:bool=True) -> bool:
+    def save(self, incremental:bool=False, comment:str=None, setupFile:bool=True, state:RamState=None) -> bool:
         """Saves the current file, optionally creating a new version or setting up the scene.
 
         Overridden to bypass the base class implementation of `__collectItemSettings` which
@@ -481,6 +481,7 @@ class FusionHost(RamHost):
             incremental (bool, optional): If True, increments the version number. Defaults to False.
             comment (str, optional): A comment describing the version. Defaults to None.
             setupFile (bool, optional): If True, applies project settings (FPS, res) to the comp. Defaults to True.
+            state (RamState, optional): The target state for the version name. Defaults to None.
 
         Returns:
             bool: True on success, False on failure.
@@ -497,9 +498,19 @@ class FusionHost(RamHost):
             if item:
                 self._store_ramses_metadata(item)
 
-        # Calling super().save with setupFile=False avoids the API's __collectItemSettings 
-        # Calling super().save with setupFile=False avoids the API's __collectItemSettings 
-        # while safely calling the private __save method without name-mangling.
+        # We call the internal __save method directly if we have a state override,
+        # otherwise we fallback to the super().save() which handles default logic.
+        if state or incremental or comment:
+            saveFilePath = self.saveFilePath()
+            if saveFilePath == "":
+                from ramses import Log
+                self.log(Log.MalformedName, LogLevel.Critical)
+                return self.saveAs()
+            
+            # Name mangling for private method in parent class
+            state_short = state.shortName() if state else None
+            return self._RamHost__save(saveFilePath, incremental, comment, state_short)
+
         return super(FusionHost, self).save(incremental=incremental, comment=comment, setupFile=False)
 
     # -------------------------------------------------------------------------
@@ -946,9 +957,9 @@ class FusionHost(RamHost):
 
         # 3. Step 1 of Transaction: Save and Increment Version
         # This creates the physical version on disk that we will either publish or keep as WIP.
-        # We call save(incremental=True) which calls the private __save method.
+        # We pass the state to ensure the filename matches the new status.
         save_comment = comment if comment else "Status change"
-        if not self.save(incremental=True, comment=save_comment):
+        if not self.save(incremental=True, comment=save_comment, state=state):
             self.log("Failed to save new version for status update.", LogLevel.Critical)
             return False
 
@@ -1403,7 +1414,7 @@ class FusionHost(RamHost):
         def_idx = next((i for i, s in enumerate(states) if s.shortName() == cur_short), 0)
 
         res = self._request_input("Update Status", [
-            {'id': 'Comment', 'label': 'Version Note:', 'type': 'text', 'default': "", 'lines': 6},
+            {'id': 'Comment', 'label': 'Note:', 'type': 'text', 'default': cur_comment, 'lines': 6},
             {'id': 'State', 'label': 'New State:', 'type': 'combo', 'options': state_opts, 'default': def_idx},
             {'id': 'Publish', 'label': 'Publish Final:', 'type': 'checkbox', 'default': False}
         ])

@@ -2057,24 +2057,24 @@ class RamsesFusionApp:
         Args:
             ev: The event object (unused).
         """
-        res = self.ramses.host._request_input(
-            "Add Comment",
+        host = self.ramses.host
+        status = host.currentStatus()
+        current_note = status.comment() if status else ""
+
+        res = host._request_input(
+            "Add Note",
             [
                 {
                     "id": "Comment",
-                    "label": "Comment:",
+                    "label": "Note:",
                     "type": "text",
-                    "default": "",
+                    "default": current_note,
                     "lines": 5,
                 }
             ],
         )
-        if res and res["Comment"]:
-            host = self.ramses.host
+        if res is not None and res["Comment"] != current_note:
             has_project = self.ramses.project() is not None
-
-            # Cache the status before save if possible (less network hit than currentStatus after save)
-            status = host.currentStatus()
 
             if host.save(comment=res["Comment"], setupFile=has_project):
                 # 1. Update Database Status
