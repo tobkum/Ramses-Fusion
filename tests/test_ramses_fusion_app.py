@@ -197,6 +197,9 @@ class TestRamsesFusionApp(unittest.TestCase):
         self.app.ramses.host.currentFilePath = MagicMock(return_value="D:/Path/A.comp")
         self.app.ramses.host.currentItem = MagicMock(return_value=MagicMock(name="ItemA"))
         
+        # Reset call count (app init calls it once)
+        self.app.ramses.host.currentItem.reset_mock()
+
         # First call
         path1 = self.app._update_context()
         self.assertEqual(path1, "D:/Path/A.comp")
@@ -214,16 +217,15 @@ class TestRamsesFusionApp(unittest.TestCase):
     def test_requires_connection_decorator(self):
         """Verify that the @requires_connection decorator blocks handlers when the Ramses Daemon is offline."""
         # 1. Force offline
-        self.app.ramses.daemonInterface().online.return_value = False
-        ramses.Ramses.instance().online = MagicMock(return_value=False)
-        
-        # 2. Try to call a decorated method
-        # We'll use on_import as it's decorated
-        self.app.ramses.host.importItem = MagicMock()
-        self.app.on_import(None)
-        
-        # Should NOT have been called
-        self.app.ramses.host.importItem.assert_not_called()
+        with patch.object(self.app.ramses.daemonInterface(), 'online', return_value=False):
+            with patch.object(ramses.Ramses.instance(), 'online', return_value=False):
+                # 2. Try to call a decorated method
+                # We'll use on_import as it's decorated
+                self.app.ramses.host.importItem = MagicMock()
+                self.app.on_import(None)
+                
+                # Should NOT have been called
+                self.app.ramses.host.importItem.assert_not_called()
 
     def test_incremental_save_handler(self):
         """Verify that the Incremental Save handler triggers anchor synchronization and version increment."""
@@ -231,11 +233,48 @@ class TestRamsesFusionApp(unittest.TestCase):
         self.app.ramses.host.save = MagicMock(return_value=True)
         self.app.refresh_header = MagicMock()
         
-        self.app.on_incremental_save(None)
+        # Mock status/state for propagation check
+        mock_state = MagicMock()
+        mock_status = MagicMock()
+        mock_status.state.return_value = mock_state
         
-        self.app._sync_render_anchors.assert_called_once()
-        self.app.ramses.host.save.assert_called_once_with(incremental=True, setupFile=True)
-        self.app.refresh_header.assert_called_once()
+        with patch.object(self.app.ramses.host, 'currentStatus', return_value=mock_status):
+            self.app.on_incremental_save(None)
+            
+            self.app._sync_render_anchors.assert_called_once()
+            # Verify state propagation
+            self.app.ramses.host.save.assert_called_once_with(incremental=True, setupFile=True, state=mock_state)
+            self.app.refresh_header.assert_called_once()
+
+    def test_on_note_logic(self):
+        """Verify that 'Add Note' pre-fills correctly and only saves on change."""
+        host = self.app.ramses.host
+        mock_status = MagicMock()
+        mock_status.comment.return_value = "Old Note"
+        mock_state = MagicMock()
+        mock_status.state.return_value = mock_state
+        host.save = MagicMock(return_value=True)
+        
+        # Mock version and refresh to avoid real API/filesystem hits
+        host.currentVersion = MagicMock(return_value=1)
+        
+        with patch.object(self.app, 'refresh_header'):
+            with patch.object(host, 'currentStatus', return_value=mock_status):
+                # 1. Test Cancellation (no save)
+                with patch.object(host, '_request_input', return_value=None):
+                    self.app.on_comment(None)
+                    host.save.assert_not_called()
+                
+                # 2. Test No Change (no save)
+                with patch.object(host, '_request_input', return_value={"Comment": "Old Note"}):
+                    self.app.on_comment(None)
+                    host.save.assert_not_called()
+                
+                # 3. Test Change (Save triggered with state propagation)
+                with patch.object(host, '_request_input', return_value={"Comment": "New Note"}):
+                    self.app.on_comment(None)
+                    host.save.assert_called_with(comment="New Note", setupFile=True, state=mock_state)
+                    self.app.refresh_header.assert_called_once()
 
     def test_role_based_ui_state(self):
         """Verify that Step Configuration is enabled/disabled based on role and users count."""
@@ -252,36 +291,36 @@ class TestRamsesFusionApp(unittest.TestCase):
         mock_user = MagicMock()
         mock_user.role.return_value = ramses.UserRole.STANDARD
         self.app.ramses.user = MagicMock(return_value=mock_user)
-        self.app.ramses.daemonInterface().getObjects.return_value = [mock_user, MagicMock()] # 2 users
         
-        # Mock valid pipeline context
-        mock_item = MagicMock()
-        mock_item.uuid.return_value = "item-uuid"
-        # Project mismatch check needs data
-        mock_project = MagicMock()
-        mock_project.uuid.return_value = "proj-uuid"
-        self.app.ramses.project = MagicMock(return_value=mock_project)
+        with patch.object(self.app.ramses.daemonInterface(), 'getObjects', return_value=[mock_user, MagicMock()]):
+            # Mock valid pipeline context
+            mock_item = MagicMock()
+            mock_item.uuid.return_value = "item-uuid"
+            # Project mismatch check needs data
+            mock_project = MagicMock()
+            mock_project.uuid.return_value = "proj-uuid"
+            self.app.ramses.project = MagicMock(return_value=mock_project)
 
-        with patch.object(self.app.ramses.host.comp, 'GetData', return_value="proj-uuid"):
-            with patch.object(RamsesFusionApp, 'current_item', new_callable=PropertyMock) as mock_prop:
-                mock_prop.return_value = mock_item
-                self.app._update_ui_state(True)
-                self.assertFalse(mock_items["PubSettingsButton"].Enabled)
+            with patch.object(self.app.ramses.host.comp, 'GetData', return_value="proj-uuid"):
+                with patch.object(RamsesFusionApp, 'current_item', new_callable=PropertyMock) as mock_prop:
+                    mock_prop.return_value = mock_item
+                    self.app._update_ui_state(True)
+                    self.assertFalse(mock_items["PubSettingsButton"].Enabled)
 
-            # 2. Lead Role, Multi-User -> Enabled
-            mock_user.role.return_value = ramses.UserRole.LEAD
-            with patch.object(RamsesFusionApp, 'current_item', new_callable=PropertyMock) as mock_prop:
-                mock_prop.return_value = mock_item
-                self.app._update_ui_state(True)
-                self.assertTrue(mock_items["PubSettingsButton"].Enabled)
+                # 2. Lead Role, Multi-User -> Enabled
+                mock_user.role.return_value = ramses.UserRole.LEAD
+                with patch.object(RamsesFusionApp, 'current_item', new_callable=PropertyMock) as mock_prop:
+                    mock_prop.return_value = mock_item
+                    self.app._update_ui_state(True)
+                    self.assertTrue(mock_items["PubSettingsButton"].Enabled)
 
-            # 3. Standard Role, Single-User -> Enabled
-            mock_user.role.return_value = ramses.UserRole.STANDARD
-            self.app.ramses.daemonInterface().getObjects.return_value = [mock_user] # 1 user
-            with patch.object(RamsesFusionApp, 'current_item', new_callable=PropertyMock) as mock_prop:
-                mock_prop.return_value = mock_item
-                self.app._update_ui_state(True)
-                self.assertTrue(mock_items["PubSettingsButton"].Enabled)
+                # 3. Standard Role, Single-User -> Enabled
+                mock_user.role.return_value = ramses.UserRole.STANDARD
+                with patch.object(self.app.ramses.daemonInterface(), 'getObjects', return_value=[mock_user]): # 1 user
+                    with patch.object(RamsesFusionApp, 'current_item', new_callable=PropertyMock) as mock_prop:
+                        mock_prop.return_value = mock_item
+                        self.app._update_ui_state(True)
+                        self.assertTrue(mock_items["PubSettingsButton"].Enabled)
 
     def test_priority_and_color_rendering(self):
         """Verify that the header renders priority suffixes and Ramses colors."""

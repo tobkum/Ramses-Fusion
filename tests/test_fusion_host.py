@@ -1,7 +1,7 @@
 import sys
 import os
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 # --- 1. Setup Environment Mocks ---
 # We must mock modules that don't exist in standard Python but are expected by the plugin
@@ -388,12 +388,12 @@ class TestFusionHost(unittest.TestCase):
         self.host.testDaemonConnection = MagicMock(return_value=True)
         self.host.currentItem = MagicMock(return_value=MagicMock())
         
-        # Mock Status UI result
+        # Mock Status UI result (using new 'note' key)
         mock_state = MagicMock()
         mock_state.completionRatio.return_value = 100
         self.host._statusUI = MagicMock(return_value={
             "publish": True,
-            "comment": "Final Render",
+            "note": "Final Render",
             "state": mock_state,
             "completionRatio": 100
         })
@@ -409,8 +409,9 @@ class TestFusionHost(unittest.TestCase):
         success = self.host.updateStatus()
         
         self.assertTrue(success)
-        self.host.save.assert_called_with(incremental=True, comment="Status change")
-        self.host.publish.assert_called_with(False, incrementVersion=False)
+        # Verify synchronized state propagation
+        self.host.save.assert_called_with(incremental=True, comment="Final Render", state=mock_state)
+        self.host.publish.assert_called_with(False, incrementVersion=False, state=mock_state)
         mock_status.setState.assert_called_with(mock_state)
         mock_status.setVersion.assert_called_with(5)
 
@@ -424,6 +425,63 @@ class TestFusionHost(unittest.TestCase):
         self.host.publish.return_value = False
         success = self.host.updateStatus()
         self.assertFalse(success)
+
+    def test_current_item_metadata_resolution(self):
+        """Verify that currentItem prioritizes metadata UUIDs over file paths."""
+        comp = self.mock_fusion.GetCurrentComp()
+        comp.SetData("Ramses.ItemUUID", "metadata-uuid-789")
+        
+        # We need to mock the DAEMON.getData call which RamObject.__init__ (via RamShot) will call
+        # if create=False (default) and we provide a UUID.
+        # But even better, we can mock currentItem on the super() or just mock the RamItem.fromPath
+        
+        from ramses import RamShot
+        with patch("fusion_host.RamItem.fromPath") as mock_from_path:
+            # Setup a real-ish object
+            mock_item = MagicMock(spec=RamShot)
+            mock_item.uuid.return_value = "metadata-uuid-789"
+            
+            # We mock the constructor of RamItem/RamShot if we can, 
+            # but let's just mock the daemon response for the UUID
+            with patch("ramses.daemon_interface.RamDaemonInterface.instance") as mock_inst:
+                mock_daemon = mock_inst.return_value
+                # Mock getStatus or getData to return something valid
+                mock_daemon.getData.return_value = {"name": "TestShot", "shortName": "TS"}
+                
+                item = self.host.currentItem()
+                
+                # Should have prioritized the metadata UUID
+                self.assertEqual(str(item.uuid()), "metadata-uuid-789")
+
+    def test_is_fusion_step(self):
+        """Verify DCC detection logic for Fusion steps."""
+        mock_step = MagicMock()
+        
+        # 1. Test by Application Link
+        mock_step.data.return_value = {"applications": ["app-uuid"]}
+        with patch("ramses.daemon_interface.RamDaemonInterface.instance") as mock_inst:
+            mock_daemon = mock_inst.return_value
+            mock_daemon.getData.return_value = {"name": "Blackmagic Fusion"}
+            
+            # Ensure RAMSES.daemonInterface() returns our mock
+            import ramses
+            with patch.object(ramses.RAMSES, "daemonInterface", return_value=mock_daemon):
+                self.assertTrue(self.host.isFusionStep(mock_step))
+            
+        # 2. Test by Naming
+        mock_step.data.return_value = {}
+        mock_step.shortName.return_value = "FUSION_COMP"
+        self.assertTrue(self.host.isFusionStep(mock_step))
+        
+        # 3. Test by YAML settings
+        mock_step.shortName.return_value = "Generic"
+        mock_step.generalSettings.return_value = {"application": "Fusion"}
+        self.assertTrue(self.host.isFusionStep(mock_step))
+        
+        # 4. Negative test
+        mock_step.generalSettings.return_value = {"application": "Maya"}
+        mock_step.shortName.return_value = "Modeling"
+        self.assertFalse(self.host.isFusionStep(mock_step))
 
 if __name__ == "__main__":
     unittest.main()
