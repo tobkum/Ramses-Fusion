@@ -1187,11 +1187,10 @@ class RamHost(object):
             showPublishUI = newStatusDict.get("showPublishUI", False)
 
         # Save and Update the state in the version
-        save_comment = comment if comment else "Status change"
         self.__save(
             self.saveFilePath(),
             incrementVersion=True,
-            comment=save_comment,
+            comment="Status change",
             newStateShortName=status.state().shortName()
         )
 

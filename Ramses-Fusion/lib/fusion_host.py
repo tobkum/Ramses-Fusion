@@ -1235,9 +1235,10 @@ class FusionHost(RamHost):
 
         # Apply Resolution, Rate and Aspect Ratio via Prefs (batched for efficiency)
         new_prefs = {}
-        if curr_w != int(width):
+        # Use a small tolerance (0.1) for resolution to avoid sub-pixel dirtying
+        if abs(curr_w - int(width)) > 0.1:
             new_prefs["Comp.FrameFormat.Width"] = int(width)
-        if curr_h != int(height):
+        if abs(curr_h - int(height)) > 0.1:
             new_prefs["Comp.FrameFormat.Height"] = int(height)
         if abs(curr_fps - float(fps)) > 0.001:
             new_prefs["Comp.FrameFormat.Rate"] = float(fps)

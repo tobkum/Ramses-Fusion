@@ -35,7 +35,7 @@ class RamFileManager():
     __writingThreads = []
 
     @staticmethod
-    def copy( originPath, destinationPath, separateThread=False ):
+    def copy( originPath, destinationPath, separateThread=True ):
         """Copies a file, in a separated thread if separateThread is True"""
         if separateThread:
             t = Thread( target=RamFileManager.copy, args=(originPath, destinationPath, False) )
@@ -393,15 +393,15 @@ class RamFileManager():
             foundNM = RamFileInfo()
             if not foundNM.setFileName( foundFile ):
                 continue
-            if foundNM.project.lower() != nm.project.lower():
+            if foundNM.project != nm.project:
                 continue
-            if foundNM.ramType.lower() != nm.ramType.lower():
+            if foundNM.ramType != nm.ramType:
                 continue
-            if foundNM.shortName.lower() != nm.shortName.lower():
+            if foundNM.shortName != nm.shortName:
                 continue
-            if foundNM.step.lower() != nm.step.lower():
+            if foundNM.step != nm.step:
                 continue
-            if foundNM.resource.lower() != nm.resource.lower():
+            if foundNM.resource != nm.resource:
                 continue
             if foundNM.version == -1:
                 continue
@@ -439,15 +439,15 @@ class RamFileManager():
             foundNM = RamFileInfo()
             if not foundNM.setFileName( foundFile ):
                 continue
-            if foundNM.project.lower() != nm.project.lower():
+            if foundNM.project != nm.project:
                 continue
-            if foundNM.ramType.lower() != nm.ramType.lower():
+            if foundNM.ramType != nm.ramType:
                 continue
-            if foundNM.shortName.lower() != nm.shortName.lower():
+            if foundNM.shortName != nm.shortName:
                 continue
-            if foundNM.step.lower() != nm.step.lower():
+            if foundNM.step != nm.step:
                 continue
-            if foundNM.resource.lower() != nm.resource.lower():
+            if foundNM.resource != nm.resource:
                 continue
 
             versionFiles.append( foundFilePath )
@@ -558,7 +558,7 @@ class RamFileManager():
     @staticmethod
     def validateShortName( name ):
         """Checks if the name is valid, respects the Ramses naming scheme"""
-        regex = re.compile('^[a-z0-9+-]{1,256}$', re.IGNORECASE)
+        regex = re.compile('^[a-z0-9+-]{1,10}$', re.IGNORECASE)
         if re.match(regex, name):
             return True
         return False
