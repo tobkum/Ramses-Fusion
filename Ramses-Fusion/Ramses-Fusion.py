@@ -89,9 +89,8 @@ class RamsesFusionApp:
 
         # Context Caching
         self._item_cache = None
-        self._item_path = ""
         self._step_cache = None
-        self._step_path = ""
+        self._context_path = ""
         self._last_synced_path = None
 
         # UI State
@@ -140,10 +139,9 @@ class RamsesFusionApp:
             str: The current file path.
         """
         path = self.ramses.host.currentFilePath()
-        if path != self._item_path or not self._item_cache or not self._step_cache:
-            self._item_path = path
+        if path != self._context_path or not self._item_cache or not self._step_cache:
+            self._context_path = path
             self._item_cache = self.ramses.host.currentItem()
-            self._step_path = path
             self._step_cache = self.ramses.host.currentStep()
         return path
 
@@ -1753,38 +1751,7 @@ class RamsesFusionApp:
                 itm["StepCombo"].Clear()
 
                 all_steps = session_cache["current_steps"]
-                fusion_steps = []
-                for s in all_steps:
-                    s_data = s.data()
-                    is_fusion = False
-
-                    # DCC Detection (Broadened for studio compatibility)
-                    apps = s_data.get("applications", [])
-                    if isinstance(apps, list):
-                        for app_uuid in apps:
-                            app_data = daemon.getData(str(app_uuid), "RamApplication")
-                            app_name = str(app_data.get("name", "")).upper()
-                            if "FUSION" in app_name or "BMF" in app_name:
-                                is_fusion = True
-                                break
-
-                    if not is_fusion:
-                        for key in ["application", "software", "app", "dcc"]:
-                            val = str(s_data.get(key, "")).upper()
-                            if "FUSION" in val or "BMF" in val:
-                                is_fusion = True
-                                break
-                        if not is_fusion and "FUSION" in s.shortName().upper():
-                            is_fusion = True
-                        if not is_fusion:
-                            stgs = s.generalSettings("yaml")
-                            if isinstance(stgs, dict):
-                                stg_val = str(stgs.get("application", "")).upper()
-                                if "FUSION" in stg_val or "BMF" in stg_val:
-                                    is_fusion = True
-
-                    if is_fusion:
-                        fusion_steps.append(s)
+                fusion_steps = [s for s in all_steps if host.isFusionStep(s)]
 
                 if not fusion_steps:
                     fusion_steps = all_steps
@@ -1981,17 +1948,9 @@ class RamsesFusionApp:
                             f"New shot initialized: {selected_path}", ram.LogLevel.Info
                         )
                 else:
-                    target_path = host.normalizePath(shot_data["path"])
-                    current_path = host.currentFilePath()
-
-                    # Manual dirty check to bypass the base RamHost.open() prompt if not needed
-                    if current_path == target_path:
-                        # Already there, no need to open/prompt
+                    # Let RamHost handle the open/prompt logic (handles dirty checks internally)
+                    if host.open(shot_data["path"]):
                         self.refresh_header()
-                    else:
-                        # Different path, let RamHost handle the open/prompt logic
-                        if host.open(shot_data["path"]):
-                            self.refresh_header()
 
     @requires_connection
     def on_import(self, ev: object) -> None:
@@ -2057,9 +2016,9 @@ class RamsesFusionApp:
 
     @requires_connection
     def on_comment(self, ev: object) -> None:
-        """Handler for 'Comment' button.
+        """Handler for 'Add Note' button.
 
-        Shows a dialog to add a comment to the current version in the Ramses DB.
+        Shows a dialog to add a descriptive note to the current version in the Ramses DB.
 
         Args:
             ev: The event object (unused).

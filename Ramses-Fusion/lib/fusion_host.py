@@ -218,6 +218,94 @@ class FusionHost(RamHost):
             safe_name = "R_" + safe_name
         return safe_name
 
+    def currentItem(self) -> RamItem:
+        """Gets the current working Item, prioritizing metadata over file path.
+
+        Returns:
+            RamItem: The resolved item or a virtual one if not found.
+        """
+        if not self.comp:
+            return None
+
+        # 1. Try Metadata (Identity Persistence)
+        item_uuid = self.comp.GetData("Ramses.ItemUUID")
+        if item_uuid:
+            try:
+                # Use the UUID to fetch the object directly
+                from ramses import RamItem
+                item = RamItem(item_uuid)
+                if item and item.uuid():
+                    return item
+            except Exception:
+                pass
+
+        # 2. Fallback to File Path (API Default)
+        return super().currentItem()
+
+    def currentStep(self) -> RamStep:
+        """Gets the current working Step, prioritizing metadata over file path.
+
+        Returns:
+            RamStep: The resolved step or None.
+        """
+        if not self.comp:
+            return None
+
+        # 1. Try Metadata (via Item's linked identity if possible, or future StepUUID)
+        # For now, we rely on the Item + Path fallback provided by the API,
+        # but we could store StepUUID in metadata too if needed.
+        
+        # 2. API Default
+        return super().currentStep()
+
+    def isFusionStep(self, step: RamStep) -> bool:
+        """Determines if a given Step is configured for Fusion.
+
+        Checks:
+        1. Linked Applications (via Ramses Daemon).
+        2. Software-specific metadata/settings.
+        3. Step naming conventions.
+
+        Args:
+            step (RamStep): The step to check.
+
+        Returns:
+            bool: True if it's a Fusion-related step.
+        """
+        if not step:
+            return False
+            
+        daemon = RAMSES.daemonInterface()
+        s_data = step.data()
+        
+        # 1. Linked Applications
+        apps = s_data.get("applications", [])
+        if isinstance(apps, list):
+            for app_uuid in apps:
+                app_data = daemon.getData(str(app_uuid), "RamApplication")
+                app_name = str(app_data.get("name", "")).upper()
+                if "FUSION" in app_name or "BMF" in app_name:
+                    return True
+
+        # 2. Metadata / Legacy Settings
+        for key in ["application", "software", "app", "dcc"]:
+            val = str(s_data.get(key, "")).upper()
+            if "FUSION" in val or "BMF" in val:
+                return True
+                
+        # 3. Step Naming
+        if "FUSION" in step.shortName().upper():
+            return True
+            
+        # 4. YAML General Settings
+        stgs = step.generalSettings("yaml")
+        if isinstance(stgs, dict):
+            stg_val = str(stgs.get("application", "")).upper()
+            if "FUSION" in stg_val or "BMF" in stg_val:
+                return True
+                
+        return False
+
     def collectItemSettings(self, item: RamItem) -> dict:
         """Collects resolution and timing settings for the given item.
 
@@ -947,11 +1035,10 @@ class FusionHost(RamHost):
         3. Updates the database status ONLY if publish succeeds (or wasn't requested).
         4. Generates a preview (optional).
 
-        Args:
-            state (RamState, optional): The target state. If None, shows UI.
-            comment (str, optional): Comment for the version.
-            completionRatio (int, optional): Progress percentage (0-100).
-            savePreview (bool, optional): Whether to generate a preview render.
+                Args:
+                    state (RamState, optional): The target state. If None, shows UI.
+                    comment (str, optional): Note describing the version changes.
+                    completionRatio (int, optional): Progress percentage (0-100).            savePreview (bool, optional): Whether to generate a preview render.
             publish (bool, optional): Whether to publish the file.
             showPublishUI (bool, optional): Whether to force the publish UI.
 
@@ -974,7 +1061,7 @@ class FusionHost(RamHost):
 
             publish = newStatusDict.get("publish", False)
             savePreview = newStatusDict.get("savePreview", False)
-            comment = newStatusDict.get("comment", "")
+            comment = newStatusDict.get("note", "")
             completionRatio = newStatusDict.get("completionRatio", 50)
             state = newStatusDict.get("state", RAMSES.defaultState)
             showPublishUI = newStatusDict.get("showPublishUI", False)
@@ -1420,25 +1507,25 @@ class FusionHost(RamHost):
         return True
 
     def _statusUI(self, currentStatus:RamStatus = None) -> dict:
-        """Shows the dialog to update status, comment, and publish settings.
+        """Shows the dialog to update status, note, and publish settings.
 
         Args:
             currentStatus (RamStatus, optional): The current status object.
 
         Returns:
-            dict: Dictionary with keys 'comment', 'completionRatio', 'publish', 'state', 'showPublishUI', 'savePreview'.
+            dict: Dictionary with keys 'note', 'completionRatio', 'publish', 'state', 'showPublishUI', 'savePreview'.
                   Returns None if cancelled.
         """
         states = RAMSES.states()
         if not states: return None
         state_opts = {str(i): s.name() for i, s in enumerate(states)}
         
-        cur_comment = currentStatus.comment() if currentStatus else ""
+        cur_note = currentStatus.comment() if currentStatus else ""
         cur_short = currentStatus.state().shortName() if currentStatus else "WIP"
         def_idx = next((i for i, s in enumerate(states) if s.shortName() == cur_short), 0)
 
         res = self._request_input("Update Status", [
-            {'id': 'Comment', 'label': 'Note:', 'type': 'text', 'default': cur_comment, 'lines': 6},
+            {'id': 'Comment', 'label': 'Note:', 'type': 'text', 'default': cur_note, 'lines': 6},
             {'id': 'State', 'label': 'New State:', 'type': 'combo', 'options': state_opts, 'default': def_idx},
             {'id': 'Publish', 'label': 'Publish Final:', 'type': 'checkbox', 'default': False}
         ])
@@ -1448,7 +1535,7 @@ class FusionHost(RamHost):
         selected_state = states[res['State']]
         
         return {
-            "comment": res['Comment'], 
+            "note": res['Comment'], 
             "completionRatio": int(selected_state.completionRatio()), 
             "publish": res['Publish'], 
             "state": selected_state, 
