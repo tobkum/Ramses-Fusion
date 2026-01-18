@@ -99,6 +99,24 @@ if not hasattr(RamFileManager, "_fusion_patched"):
     # Apply the patch to the class method (handling private name mangling)
     RamDaemonInterface._RamDaemonInterface__post = _patched_post
 
+    # 4. Fix Metadata Deletion in RamMetaDataManager
+    # The API's auto-deletion logic is prone to race conditions and path mismatches.
+    def _patched_getMetaData(folderPath):
+        meta_file = RamMetaDataManager.getMetaDataFile(folderPath)
+        if not os.path.exists(meta_file): return {}
+        try:
+            with open(meta_file, 'r') as f:
+                return json.load(f)
+        except Exception:
+            return {}
+
+    def _patched_getFileMetaData(filePath):
+        data = RamMetaDataManager.getMetaData(filePath)
+        return data.get(os.path.basename(filePath), {})
+
+    RamMetaDataManager.getMetaData = staticmethod(_patched_getMetaData)
+    RamMetaDataManager.getFileMetaData = staticmethod(_patched_getFileMetaData)
+
 # =============================================================================
 
 class FusionHost(RamHost):
