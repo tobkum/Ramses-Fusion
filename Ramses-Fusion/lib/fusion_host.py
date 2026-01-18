@@ -2,7 +2,9 @@
 import os
 import re
 import json
-from ramses import RamHost, RamItem, RamStep, RamStatus, RamFileInfo, LogLevel, ItemType, RAMSES, RAM_SETTINGS, RamMetaDataManager, RamState
+import threading
+import socket
+from ramses import RamHost, RamItem, RamStep, RamStatus, RamFileInfo, LogLevel, ItemType, RAMSES, RAM_SETTINGS, RamMetaDataManager, RamState, RamDaemonInterface
 try:
     import ramses.yaml as yaml
 except ImportError:
@@ -20,7 +22,6 @@ if not hasattr(RamFileManager, "_fusion_patched"):
     RamFileManager._fusion_patched = True
 
     # 1. Fix Race Condition: Disable background threads for copies.
-    # This ensures files exist on disk before metadata is written.
     original_copy = RamFileManager.copy
     def _patched_copy(originPath, destinationPath, separateThread=False):
         return original_copy(originPath, destinationPath, separateThread)
@@ -41,7 +42,6 @@ if not hasattr(RamFileManager, "_fusion_patched"):
             if not os.path.isfile(path): continue
             fnm = RamFileInfo()
             if not fnm.setFileName(f): continue
-            # Case-insensitive identity check
             if any([
                 fnm.project.lower() != nm.project.lower(),
                 fnm.ramType.lower() != nm.ramType.lower(),
@@ -68,7 +68,6 @@ if not hasattr(RamFileManager, "_fusion_patched"):
             if not os.path.isfile(path): continue
             fnm = RamFileInfo()
             if not fnm.setFileName(f): continue
-            # Case-insensitive identity check
             if any([
                 fnm.project.lower() != nm.project.lower(),
                 fnm.ramType.lower() != nm.ramType.lower(),
@@ -82,6 +81,23 @@ if not hasattr(RamFileManager, "_fusion_patched"):
 
     RamFileManager.getLatestVersionFilePath = staticmethod(_patched_getLatestVersionFilePath)
     RamFileManager.getVersionFilePaths = staticmethod(_patched_getVersionFilePaths)
+
+    # 3. Thread-Safe Socket Communication for RamDaemonInterface
+    # We add a lock to the Singleton instance
+    daemon = RamDaemonInterface.instance()
+    if not hasattr(daemon, "_lock"):
+        daemon._lock = threading.Lock()
+    
+    original_post = getattr(daemon, "_RamDaemonInterface__post")
+    
+    def _patched_post(self, query, bufsize=0):
+        with self._lock:
+            # We must use the original method which handles the actual socket logic
+            # Since it's a private method, we call it via the mangled name on the instance
+            return original_post(query, bufsize)
+            
+    # Apply the patch to the class method (handling private name mangling)
+    RamDaemonInterface._RamDaemonInterface__post = _patched_post
 
 # =============================================================================
 
@@ -1369,7 +1385,7 @@ class FusionHost(RamHost):
         def_idx = next((i for i, s in enumerate(states) if s.shortName() == cur_short), 0)
 
         res = self._request_input("Update Status", [
-            {'id': 'Comment', 'label': 'Version Note:', 'type': 'text', 'default': cur_comment, 'lines': 6},
+            {'id': 'Comment', 'label': 'Version Note:', 'type': 'text', 'default': "", 'lines': 6},
             {'id': 'State', 'label': 'New State:', 'type': 'combo', 'options': state_opts, 'default': def_idx},
             {'id': 'Publish', 'label': 'Publish Final:', 'type': 'checkbox', 'default': False}
         ])
