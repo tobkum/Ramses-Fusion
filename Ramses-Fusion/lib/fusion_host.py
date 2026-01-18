@@ -834,7 +834,8 @@ class FusionHost(RamHost):
         # 3. Step 1 of Transaction: Save and Increment Version
         # This creates the physical version on disk that we will either publish or keep as WIP.
         # We call save(incremental=True) which calls the private __save method.
-        if not self.save(incremental=True, comment="Status change"):
+        save_comment = comment if comment else "Status change"
+        if not self.save(incremental=True, comment=save_comment):
             self.log("Failed to save new version for status update.", LogLevel.Critical)
             return False
 
