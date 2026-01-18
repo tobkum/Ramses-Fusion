@@ -568,9 +568,10 @@ class FusionHost(RamHost):
 
         Args:
             incremental (bool, optional): If True, increments the version number. Defaults to False.
-            comment (str, optional): A comment describing the version. Defaults to None.
+            comment (str, optional): Note describing the version changes. Defaults to None.
             setupFile (bool, optional): If True, applies project settings (FPS, res) to the comp. Defaults to True.
-            state (RamState, optional): The target state for the version name. Defaults to None.
+            state (RamState, optional): The target state for the version name. Ensures the archived 
+                                        filename matches the database status immediately.
 
         Returns:
             bool: True on success, False on failure.
@@ -998,11 +999,15 @@ class FusionHost(RamHost):
     def publish(self, forceShowPublishUI:bool=False, incrementVersion:bool=True, publishOptions:dict=None, state:RamState=None) -> bool:
         """Publishes the current item, ensuring the version file reflects the correct state.
 
+        Overridden to propagate the target state during the publish render cycle, 
+        preventing archived versions from reverting to legacy state names.
+
         Args:
             forceShowPublishUI (bool): Whether to force the UI.
             incrementVersion (bool): Whether to increment the version after publish.
             publishOptions (dict): Custom options.
-            state (RamState, optional): Target state for the version name.
+            state (RamState, optional): Target state for the version name. 
+                                        If None, fetches the current state from DB.
 
         Returns:
             bool: True on success.

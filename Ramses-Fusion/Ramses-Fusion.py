@@ -134,6 +134,8 @@ class RamsesFusionApp:
         """Syncs the internal Item/Step cache with the Fusion Host.
 
         Optimized to only query the database if the file path has changed.
+        Leverages the Host's metadata-based resolution to maintain shot identity 
+        even if the file is moved or renamed.
 
         Returns:
             str: The current file path.
@@ -2053,10 +2055,11 @@ class RamsesFusionApp:
 
     @requires_connection
     def on_update_status(self, ev: object) -> None:
-        """Handler for 'Update Status' button.
+        """Handler for 'Update / Publish' button.
 
-        Validates the scene for publishing, then opens the Status Update dialog.
-        Handles atomic publish + status update logic.
+        Validates the scene, then opens the Status Update dialog.
+        Handles the atomic publish + synchronized status/note update logic, 
+        ensuring disk filenames match the database state.
 
         Args:
             ev: The event object (unused).
