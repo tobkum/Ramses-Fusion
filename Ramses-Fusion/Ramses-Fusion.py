@@ -1952,11 +1952,11 @@ class RamsesFusionApp:
                     else:
                         host.comp.Save(host.normalizePath(selected_path))
 
-                    if host.save(comment="Initial creation", setupFile=True):
+                    target_state = self.ramses.defaultState()
+                    if host.save(comment="Initial creation", setupFile=True, state=target_state):
                         # Auto-update status to WIP if needed
                         try:
                             status = host.currentStatus()
-                            target_state = self.ramses.defaultState()
 
                             if (
                                 status
@@ -2029,8 +2029,12 @@ class RamsesFusionApp:
         self._sync_render_anchors()
 
         # Let the API decide if setup is needed based on project existence
+        host = self.ramses.host
         has_project = self._get_project() is not None
-        if self.ramses.host.save(setupFile=has_project):
+        status = host.currentStatus()
+        state = status.state() if status else None
+
+        if host.save(setupFile=has_project, state=state):
             self.refresh_header()
 
     @requires_connection
@@ -2044,8 +2048,12 @@ class RamsesFusionApp:
         """
         self._sync_render_anchors()
 
+        host = self.ramses.host
         has_project = self._get_project() is not None
-        if self.ramses.host.save(incremental=True, setupFile=has_project):
+        status = host.currentStatus()
+        state = status.state() if status else None
+
+        if host.save(incremental=True, setupFile=has_project, state=state):
             self.refresh_header()
 
     @requires_connection
@@ -2060,6 +2068,7 @@ class RamsesFusionApp:
         host = self.ramses.host
         status = host.currentStatus()
         current_note = status.comment() if status else ""
+        state = status.state() if status else None
 
         res = host._request_input(
             "Add Note",
@@ -2076,7 +2085,7 @@ class RamsesFusionApp:
         if res is not None and res["Comment"] != current_note:
             has_project = self.ramses.project() is not None
 
-            if host.save(comment=res["Comment"], setupFile=has_project):
+            if host.save(comment=res["Comment"], setupFile=has_project, state=state):
                 # 1. Update Database Status
                 if status:
                     status.setComment(res["Comment"])

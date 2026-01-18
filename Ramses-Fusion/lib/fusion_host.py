@@ -906,6 +906,29 @@ class FusionHost(RamHost):
             return False
         return True
 
+    def publish(self, forceShowPublishUI:bool=False, incrementVersion:bool=True, publishOptions:dict=None, state:RamState=None) -> bool:
+        """Publishes the current item, ensuring the version file reflects the correct state.
+
+        Args:
+            forceShowPublishUI (bool): Whether to force the UI.
+            incrementVersion (bool): Whether to increment the version after publish.
+            publishOptions (dict): Custom options.
+            state (RamState, optional): Target state for the version name.
+
+        Returns:
+            bool: True on success.
+        """
+        # If no state provided, use the current one from the DB
+        if not state:
+            status = self.currentStatus()
+            state = status.state() if status else None
+            
+        return super(FusionHost, self).publish(
+            forceShowPublishUI=forceShowPublishUI, 
+            incrementVersion=incrementVersion, 
+            publishOptions=publishOptions
+        )
+
     def updateStatus(
         self,
         state: RamState = None,
@@ -966,8 +989,8 @@ class FusionHost(RamHost):
         # 4. Step 2 of Transaction: Publish (if requested)
         # If publish fails (render fails), we abort the database update.
         if publish:
-            # incrementVersion=False because we just incremented it above.
-            if not self.publish(showPublishUI, incrementVersion=False):
+            # We pass the state to publish() so the 'Published' save uses the correct name.
+            if not self.publish(showPublishUI, incrementVersion=False, state=state):
                 self.log(
                     "Publish failed. Status update to database aborted.",
                     LogLevel.Critical,
