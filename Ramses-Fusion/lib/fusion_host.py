@@ -1,11 +1,110 @@
 # -*- coding: utf-8 -*-
 import os
+import re
 from ramses import RamHost, RamItem, RamStep, RamStatus, RamFileInfo, LogLevel, ItemType, RAMSES, RAM_SETTINGS, RamMetaDataManager, RamState
 try:
     import ramses.yaml as yaml
 except ImportError:
     import yaml
 from fusion_config import FusionConfig
+
+# =============================================================================
+# MONKEY-PATCHING RAMSES API (Fixes versioning/naming without touching files)
+# =============================================================================
+
+# 1. Fix 10-character limit in RamFileInfo
+def _patched_getRamsesNameRegEx(self):
+    if RamFileInfo._RamFileInfo__nameRe is not None:
+        return RamFileInfo._RamFileInfo__nameRe
+    version_regex = self._RamFileInfo___getVersionRegExStr()
+    # Increased limits from 10 to 256
+    regex_str = '^([a-z0-9+-]{1,256})_(?:([ASG])_((?!(?:' + version_regex + ')[0-9]+)[a-z0-9+-]{1,256}))(?:_((?!(?:' + version_regex + ')[0-9]+)[a-z0-9+-]+))?(?:_((?!(?:' + version_regex + ')[0-9]+)[a-z0-9+\\s-]+))?(?:_(' + version_regex + ')?([0-9]+))?(?:\\.([a-z0-9.]+))?$'
+    regex = re.compile(regex_str, re.IGNORECASE)
+    RamFileInfo._RamFileInfo__nameRe = regex
+    return regex
+
+RamFileInfo._RamFileInfo__getRamsesNameRegEx = _patched_getRamsesNameRegEx
+
+from ramses import RamFileManager
+# 2. Fix Race Condition in RamFileManager (Disable background threads by default)
+original_copy = RamFileManager.copy
+def _patched_copy(originPath, destinationPath, separateThread=False):
+    return original_copy(originPath, destinationPath, separateThread)
+RamFileManager.copy = staticmethod(_patched_copy)
+
+# 3. Fix Case Sensitivity and validateShortName in RamFileManager
+def _patched_getLatestVersionFilePath(filePath, previous=False):
+    fileName = os.path.basename(filePath)
+    nm = RamFileInfo()
+    if not nm.setFileName(fileName): return ''
+    versionsFolder = RamFileManager.getVersionFolder(filePath)
+    foundFiles = os.listdir(versionsFolder)
+    highestVersion = 0
+    versionFilePath = ''
+    prevVersionFilePath = ''
+    for foundFile in foundFiles:
+        if not os.path.isfile(os.path.join(versionsFolder, foundFile)): continue
+        foundNM = RamFileInfo()
+        if not foundNM.setFileName(foundFile): continue
+        # CASE-INSENSITIVE COMPARISON
+        if foundNM.project.lower() != nm.project.lower(): continue
+        if foundNM.ramType.lower() != nm.ramType.lower(): continue
+        if foundNM.shortName.lower() != nm.shortName.lower(): continue
+        if foundNM.step.lower() != nm.step.lower(): continue
+        if foundNM.resource.lower() != nm.resource.lower(): continue
+        if foundNM.version == -1: continue
+        version = foundNM.version
+        if version > highestVersion:
+            highestVersion = version
+            prevVersionFilePath = versionFilePath
+            versionFilePath = os.path.join(versionsFolder, foundFile)
+    return prevVersionFilePath if previous else versionFilePath
+
+def _patched_getVersionFilePaths(filePath):
+    fileName = os.path.basename(filePath)
+    nm = RamFileInfo()
+    if not nm.setFileName(fileName): return []
+    versionsFolder = RamFileManager.getVersionFolder(filePath)
+    foundFiles = os.listdir(versionsFolder)
+    versionFiles = []
+    for foundFile in foundFiles:
+        foundFilePath = os.path.join(versionsFolder, foundFile)
+        if not os.path.isfile(foundFilePath): continue
+        foundNM = RamFileInfo()
+        if not foundNM.setFileName(foundFile): continue
+        # CASE-INSENSITIVE COMPARISON
+        if foundNM.project.lower() != nm.project.lower(): continue
+        if foundNM.ramType.lower() != nm.ramType.lower(): continue
+        if foundNM.shortName.lower() != nm.shortName.lower(): continue
+        if foundNM.step.lower() != nm.step.lower(): continue
+        if foundNM.resource.lower() != nm.resource.lower(): continue
+        versionFiles.append(foundFilePath)
+    versionFiles.sort(key=RamFileManager._versionFilesSorter)
+    return versionFiles
+
+def _patched_validateShortName(name):
+    regex = re.compile('^[a-z0-9+-]{1,256}$', re.IGNORECASE)
+    return bool(re.match(regex, name))
+
+RamFileManager.getLatestVersionFilePath = staticmethod(_patched_getLatestVersionFilePath)
+RamFileManager.getVersionFilePaths = staticmethod(_patched_getVersionFilePaths)
+RamFileManager.validateShortName = staticmethod(_patched_validateShortName)
+
+# 4. Fix Metadata Deletion in RamMetaDataManager
+def _patched_getMetaData(folderPath):
+    file = RamMetaDataManager.getMetaDataFile(folderPath)
+    if not os.path.exists(file): return {}
+    try:
+        with open(file, 'r') as f:
+            data = json.load(f)
+    except: return {}
+    # REMOVED: Auto-deletion of entries for missing files
+    return data
+
+import json
+RamMetaDataManager.getMetaData = staticmethod(_patched_getMetaData)
+
+# =============================================================================
 
 class FusionHost(RamHost):
     """
