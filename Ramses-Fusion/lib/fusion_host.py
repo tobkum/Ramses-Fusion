@@ -218,45 +218,70 @@ class FusionHost(RamHost):
             safe_name = "R_" + safe_name
         return safe_name
 
-    def currentItem(self) -> RamItem:
-        """Gets the current working Item, prioritizing metadata over file path.
+    def currentStatus(self) -> RamStatus:
+        """Gets the current status, with safety guards for non-pipeline files.
 
         Returns:
-            RamItem: The resolved item or a virtual one if not found.
+            RamStatus: The current status or None.
+        """
+        item = self.currentItem()
+        step = self.currentStep()
+        if not item or not step:
+            return None
+            
+        # Only query if we have a valid item/step pair to avoid API crashes
+        try:
+            return item.currentStatus(step)
+        except Exception:
+            return None
+
+    def currentItem(self) -> RamItem:
+        """Gets the current working Item, prioritizing DB-registered path first, 
+        then falling back to Metadata UUID if the path is unregistered (moved file).
         """
         if not self.comp:
             return None
 
-        # 1. Try Metadata (Identity Persistence)
-        item_uuid = self.comp.GetData("Ramses.ItemUUID")
-        if item_uuid:
-            try:
-                # Use the UUID to fetch the object directly
-                from ramses import RamItem
-                item = RamItem(item_uuid)
-                if item and item.uuid():
-                    return item
-            except Exception:
-                pass
-
-        # 2. Fallback to File Path (API Default)
-        return super().currentItem()
+        # 1. Try Path-based resolution first (Standard API behavior)
+        # This returns a correctly typed RamShot/RamAsset if the path is in the DB.
+        # If not, it returns a 'virtual' item based on filename.
+        item = super().currentItem()
+        
+        # 2. If the item is virtual (not in DB), try to recover identity from Metadata
+        if item and item.virtual():
+            item_uuid = self.comp.GetData("Ramses.ItemUUID")
+            if item_uuid:
+                from ramses import RamShot, RamAsset, ItemType
+                # Use the virtual item's type as a hint for the real object
+                try:
+                    target_type = item.itemType()
+                    if target_type == ItemType.SHOT:
+                        real_item = RamShot(item_uuid)
+                    elif target_type == ItemType.ASSET:
+                        real_item = RamAsset(item_uuid)
+                    else:
+                        real_item = RamItem(item_uuid)
+                    
+                    # Verify the real item actually exists in DB by checking shortName
+                    if real_item.shortName() != "Unknown":
+                        return real_item
+                except Exception:
+                    pass
+        
+        return item
 
     def currentStep(self) -> RamStep:
-        """Gets the current working Step, prioritizing metadata over file path.
-
-        Returns:
-            RamStep: The resolved step or None.
-        """
+        """Gets the current working Step, prioritizing path-based resolution."""
         if not self.comp:
             return None
 
-        # 1. Try Metadata (via Item's linked identity if possible, or future StepUUID)
-        # For now, we rely on the Item + Path fallback provided by the API,
-        # but we could store StepUUID in metadata too if needed.
+        # Standard API behavior (path-based)
+        step = super().currentStep()
         
-        # 2. API Default
-        return super().currentStep()
+        # Note: If the file is moved, step will be None. 
+        # In the future, we could store StepUUID in metadata to resolve this.
+        
+        return step
 
     def isFusionStep(self, step: RamStep) -> bool:
         """Determines if a given Step is configured for Fusion.
@@ -1023,6 +1048,39 @@ class FusionHost(RamHost):
             publishOptions=publishOptions
         )
 
+    def saveAs(self, setupFile:bool=True, state:RamState=None) -> bool:
+        """Saves the current file as a new Item-Step, propagating state to the first version.
+
+        Args:
+            setupFile (bool): Whether to apply project settings.
+            state (RamState, optional): Target state for the initial version.
+
+        Returns:
+            bool: True on success.
+        """
+        # We handle setupFile ourselves to use optimized Fusion logic
+        if setupFile:
+            res = self._saveAsUI() # Base API shows UI
+            if not res: return False
+            
+            # Re-apply the logic from save() but for the new context
+            item, step = res.get("item"), res.get("step")
+            if item:
+                settings = self.collectItemSettings(item)
+                self._setupCurrentFile(item, step, settings)
+                self._store_ramses_metadata(item)
+        
+        # Call base saveAs - it will eventually call our _saveAs and copyToVersion
+        # Note: RamHost.saveAs doesn't support state propagation, so we manually
+        # increment the version after save if a state is provided.
+        success = super().saveAs(setupFile=False)
+        
+        if success and state:
+            # Force a correctly named version immediately
+            self.save(incremental=False, state=state, setupFile=False)
+            
+        return success
+
     def updateStatus(
         self,
         state: RamState = None,
@@ -1085,8 +1143,13 @@ class FusionHost(RamHost):
             # We pass the state to publish() so the 'Published' save uses the correct name.
             if not self.publish(showPublishUI, incrementVersion=False, state=state):
                 self.log(
-                    "Publish failed. Status update to database aborted.",
+                    "Publish failed. STATUS UPDATE ABORTED.",
                     LogLevel.Critical,
+                )
+                self.log(
+                    "CRITICAL: A new version was saved to disk, but the database remains unchanged. "
+                    "Please update status manually to fix the desync.",
+                    LogLevel.Warning
                 )
                 return False
 

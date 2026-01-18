@@ -246,6 +246,9 @@ class RamsesFusionApp:
                             ram.LogLevel.Warning,
                         )
                         is_mismatch = True
+                    elif not active_proj:
+                        # Logged out or no project active - mismatch by default if file has metadata
+                        is_mismatch = True
                 else:
                     # STRICT MODE: No Metadata = Mismatch/Invalid
                     # Since this is a fresh deployment, valid Ramses files MUST have metadata.
