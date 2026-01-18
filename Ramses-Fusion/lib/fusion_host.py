@@ -134,6 +134,7 @@ class FusionHost(RamHost):
         super().__init__()
         self.fusion = fusion_obj
         self.hostName = "Fusion"
+        self._status_cache = None # Used for UI badge caching
         
         try:
             self.hostVersion = str(self.fusion.GetAttrs().get('FUSION_Version', 'Unknown'))
@@ -141,17 +142,17 @@ class FusionHost(RamHost):
             self.hostVersion = "Unknown"
 
     @staticmethod
-    def normalizePath(path: str) -> str:
+    def normalizePath(path: object) -> str:
         """Centralized path normalization for Fusion (forward slashes).
 
         Args:
-            path (str): The file path to normalize.
+            path (object): The file path to normalize.
 
         Returns:
             str: The normalized path with forward slashes, or empty string if input is None/empty.
         """
         if not path: return ""
-        return path.replace("\\", "/")
+        return str(path).replace("\\", "/")
 
     @property
     def comp(self) -> object:

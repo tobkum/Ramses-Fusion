@@ -745,20 +745,18 @@ class RamsesFusionApp:
             try:
                 preview_node = comp.FindTool("_PREVIEW")
                 if preview_node:
-                    # Only update if different to avoid dirtying the comp
-                    if (
-                        self.ramses.host.normalizePath(preview_node.Clip[1])
-                        != preview_path
-                    ):
+                    # Explicit string conversion and normalization for robust comparison
+                    curr_p = self.ramses.host.normalizePath(preview_node.Clip[1])
+                    if curr_p != preview_path:
                         preview_node.Clip[1] = preview_path
-                    self.ramses.host.apply_render_preset(preview_node, "preview")
+                        self.ramses.host.apply_render_preset(preview_node, "preview")
 
                 final_node = comp.FindTool("_FINAL")
                 if final_node:
-                    # Only update if different to avoid dirtying the comp
-                    if self.ramses.host.normalizePath(final_node.Clip[1]) != final_path:
+                    curr_f = self.ramses.host.normalizePath(final_node.Clip[1])
+                    if curr_f != final_path:
                         final_node.Clip[1] = final_path
-                    self.ramses.host.apply_render_preset(final_node, "final")
+                        self.ramses.host.apply_render_preset(final_node, "final")
             finally:
                 comp.Unlock()
         except (AttributeError, RuntimeError) as e:
@@ -798,11 +796,12 @@ class RamsesFusionApp:
                 self._step_path = ""
 
                 # Invalidate the host's status cache to ensure the badge updates
-                self.ramses.host._status_cache = None
+                if hasattr(self.ramses.host, "_status_cache"):
+                    self.ramses.host._status_cache = None
 
-                # Sync Savers? ONLY on full manual refresh to avoid dirtying the comp automatically
-                if force_full:
-                    self._sync_render_anchors()
+                # Sync Savers? Safe to do on every refresh because _sync_render_anchors 
+                # only modifies them if the path actually changed (avoids dirtying the comp).
+                self._sync_render_anchors()
 
                 # Update the gate to ensure re-fetching is gated correctly
                 self._last_synced_path = current_path
@@ -1707,7 +1706,7 @@ class RamsesFusionApp:
                             shot, selected_step
                         )
                     except Exception as e:
-                        print(f"Error resolving path for shot {shot.name()}: {e}")
+                        self.log(f"Error resolving path for shot {shot.name()}: {e}", ram.LogLevel.Warning)
                         continue
 
                     seq_name = seq_map.get(
