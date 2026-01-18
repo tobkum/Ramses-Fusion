@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import os
 import re
+import json
 from ramses import RamHost, RamItem, RamStep, RamStatus, RamFileInfo, LogLevel, ItemType, RAMSES, RAM_SETTINGS, RamMetaDataManager, RamState
 try:
     import ramses.yaml as yaml
@@ -9,100 +10,78 @@ except ImportError:
 from fusion_config import FusionConfig
 
 # =============================================================================
-# MONKEY-PATCHING RAMSES API (Fixes versioning/naming without touching files)
+# MONKEY-PATCHING RAMSES API (Fixes critical environment bugs only)
 # =============================================================================
 
-# 1. Fix 10-character limit in RamFileInfo
-def _patched_getRamsesNameRegEx(self):
-    if RamFileInfo._RamFileInfo__nameRe is not None:
-        return RamFileInfo._RamFileInfo__nameRe
-    version_regex = self._RamFileInfo___getVersionRegExStr()
-    # Increased limits from 10 to 256
-    regex_str = '^([a-z0-9+-]{1,256})_(?:([ASG])_((?!(?:' + version_regex + ')[0-9]+)[a-z0-9+-]{1,256}))(?:_((?!(?:' + version_regex + ')[0-9]+)[a-z0-9+-]+))?(?:_((?!(?:' + version_regex + ')[0-9]+)[a-z0-9+\\s-]+))?(?:_(' + version_regex + ')?([0-9]+))?(?:\\.([a-z0-9.]+))?$'
-    regex = re.compile(regex_str, re.IGNORECASE)
-    RamFileInfo._RamFileInfo__nameRe = regex
-    return regex
-
-RamFileInfo._RamFileInfo__getRamsesNameRegEx = _patched_getRamsesNameRegEx
-
 from ramses import RamFileManager
-# 2. Fix Race Condition in RamFileManager (Disable background threads by default)
-original_copy = RamFileManager.copy
-def _patched_copy(originPath, destinationPath, separateThread=False):
-    return original_copy(originPath, destinationPath, separateThread)
-RamFileManager.copy = staticmethod(_patched_copy)
 
-# 3. Fix Case Sensitivity and validateShortName in RamFileManager
-def _patched_getLatestVersionFilePath(filePath, previous=False):
-    fileName = os.path.basename(filePath)
-    nm = RamFileInfo()
-    if not nm.setFileName(fileName): return ''
-    versionsFolder = RamFileManager.getVersionFolder(filePath)
-    foundFiles = os.listdir(versionsFolder)
-    highestVersion = 0
-    versionFilePath = ''
-    prevVersionFilePath = ''
-    for foundFile in foundFiles:
-        if not os.path.isfile(os.path.join(versionsFolder, foundFile)): continue
-        foundNM = RamFileInfo()
-        if not foundNM.setFileName(foundFile): continue
-        # CASE-INSENSITIVE COMPARISON
-        if foundNM.project.lower() != nm.project.lower(): continue
-        if foundNM.ramType.lower() != nm.ramType.lower(): continue
-        if foundNM.shortName.lower() != nm.shortName.lower(): continue
-        if foundNM.step.lower() != nm.step.lower(): continue
-        if foundNM.resource.lower() != nm.resource.lower(): continue
-        if foundNM.version == -1: continue
-        version = foundNM.version
-        if version > highestVersion:
-            highestVersion = version
-            prevVersionFilePath = versionFilePath
-            versionFilePath = os.path.join(versionsFolder, foundFile)
-    return prevVersionFilePath if previous else versionFilePath
+# Use a flag to ensure patches are only applied once
+if not hasattr(RamFileManager, "_fusion_patched"):
+    RamFileManager._fusion_patched = True
 
-def _patched_getVersionFilePaths(filePath):
-    fileName = os.path.basename(filePath)
-    nm = RamFileInfo()
-    if not nm.setFileName(fileName): return []
-    versionsFolder = RamFileManager.getVersionFolder(filePath)
-    foundFiles = os.listdir(versionsFolder)
-    versionFiles = []
-    for foundFile in foundFiles:
-        foundFilePath = os.path.join(versionsFolder, foundFile)
-        if not os.path.isfile(foundFilePath): continue
-        foundNM = RamFileInfo()
-        if not foundNM.setFileName(foundFile): continue
-        # CASE-INSENSITIVE COMPARISON
-        if foundNM.project.lower() != nm.project.lower(): continue
-        if foundNM.ramType.lower() != nm.ramType.lower(): continue
-        if foundNM.shortName.lower() != nm.shortName.lower(): continue
-        if foundNM.step.lower() != nm.step.lower(): continue
-        if foundNM.resource.lower() != nm.resource.lower(): continue
-        versionFiles.append(foundFilePath)
-    versionFiles.sort(key=RamFileManager._versionFilesSorter)
-    return versionFiles
+    # 1. Fix Race Condition: Disable background threads for copies.
+    # This ensures files exist on disk before metadata is written.
+    original_copy = RamFileManager.copy
+    def _patched_copy(originPath, destinationPath, separateThread=False):
+        return original_copy(originPath, destinationPath, separateThread)
+    RamFileManager.copy = staticmethod(_patched_copy)
 
-def _patched_validateShortName(name):
-    regex = re.compile('^[a-z0-9+-]{1,256}$', re.IGNORECASE)
-    return bool(re.match(regex, name))
+    # 2. Fix Case Sensitivity for version matching on Windows.
+    def _patched_getLatestVersionFilePath(filePath, previous=False):
+        fileName = os.path.basename(filePath)
+        nm = RamFileInfo()
+        if not nm.setFileName(fileName): return ''
+        versionsFolder = RamFileManager.getVersionFolder(filePath)
+        if not os.path.isdir(versionsFolder): return ''
+        highestVersion = 0
+        versionFilePath = ''
+        prevVersionFilePath = ''
+        for f in os.listdir(versionsFolder):
+            path = os.path.join(versionsFolder, f)
+            if not os.path.isfile(path): continue
+            fnm = RamFileInfo()
+            if not fnm.setFileName(f): continue
+            # Case-insensitive identity check
+            if any([
+                fnm.project.lower() != nm.project.lower(),
+                fnm.ramType.lower() != nm.ramType.lower(),
+                fnm.shortName.lower() != nm.shortName.lower(),
+                fnm.step.lower() != nm.step.lower(),
+                fnm.resource.lower() != nm.resource.lower(),
+                fnm.version == -1
+            ]): continue
+            if fnm.version > highestVersion:
+                highestVersion = fnm.version
+                prevVersionFilePath = versionFilePath
+                versionFilePath = path
+        return prevVersionFilePath if previous else versionFilePath
 
-RamFileManager.getLatestVersionFilePath = staticmethod(_patched_getLatestVersionFilePath)
-RamFileManager.getVersionFilePaths = staticmethod(_patched_getVersionFilePaths)
-RamFileManager.validateShortName = staticmethod(_patched_validateShortName)
+    def _patched_getVersionFilePaths(filePath):
+        fileName = os.path.basename(filePath)
+        nm = RamFileInfo()
+        if not nm.setFileName(fileName): return []
+        versionsFolder = RamFileManager.getVersionFolder(filePath)
+        if not os.path.isdir(versionsFolder): return []
+        versionFiles = []
+        for f in os.listdir(versionsFolder):
+            path = os.path.join(versionsFolder, f)
+            if not os.path.isfile(path): continue
+            fnm = RamFileInfo()
+            if not fnm.setFileName(f): continue
+            # Case-insensitive identity check
+            if any([
+                fnm.project.lower() != nm.project.lower(),
+                fnm.ramType.lower() != nm.ramType.lower(),
+                fnm.shortName.lower() != nm.shortName.lower(),
+                fnm.step.lower() != nm.step.lower(),
+                fnm.resource.lower() != nm.resource.lower()
+            ]): continue
+            versionFiles.append(path)
+        versionFiles.sort(key=RamFileManager._versionFilesSorter)
+        return versionFiles
 
-# 4. Fix Metadata Deletion in RamMetaDataManager
-def _patched_getMetaData(folderPath):
-    file = RamMetaDataManager.getMetaDataFile(folderPath)
-    if not os.path.exists(file): return {}
-    try:
-        with open(file, 'r') as f:
-            data = json.load(f)
-    except: return {}
-    # REMOVED: Auto-deletion of entries for missing files
-    return data
-
-import json
-RamMetaDataManager.getMetaData = staticmethod(_patched_getMetaData)
+    RamFileManager.getLatestVersionFilePath = staticmethod(_patched_getLatestVersionFilePath)
+    RamFileManager.getVersionFilePaths = staticmethod(_patched_getVersionFilePaths)
 
 # =============================================================================
 
@@ -485,8 +464,9 @@ class FusionHost(RamHost):
                 self._store_ramses_metadata(item)
 
         # Calling super().save with setupFile=False avoids the API's __collectItemSettings 
+        # Calling super().save with setupFile=False avoids the API's __collectItemSettings 
         # while safely calling the private __save method without name-mangling.
-        return super(FusionHost, self).save(incremental, comment, setupFile=False)
+        return super(FusionHost, self).save(incremental=incremental, comment=comment, setupFile=False)
 
     # -------------------------------------------------------------------------
     # UI Implementation helpers using UIManager
