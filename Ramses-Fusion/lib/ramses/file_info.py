@@ -66,7 +66,7 @@ class RamFileInfo():
 
         regexStr = self.___getVersionRegExStr()
 
-        regexStr = '^([a-z0-9+-]{1,10})_(?:([ASG])_((?!(?:' + regexStr + ')[0-9]+)[a-z0-9+-]{1,10}))(?:_((?!(?:' + regexStr + ')[0-9]+)[a-z0-9+-]+))?(?:_((?!(?:' + regexStr + ')[0-9]+)[a-z0-9+\\s-]+))?(?:_(' + regexStr + ')?([0-9]+))?(?:\\.([a-z0-9.]+))?$'
+        regexStr = '^([a-z0-9+-]{1,256})_(?:([ASG])_((?!(?:' + regexStr + ')[0-9]+)[a-z0-9+-]{1,256}))(?:_((?!(?:' + regexStr + ')[0-9]+)[a-z0-9+-]+))?(?:_((?!(?:' + regexStr + ')[0-9]+)[a-z0-9+\\s-]+))?(?:_(' + regexStr + ')?([0-9]+))?(?:\\.([a-z0-9.]+))?$'
 
         log("Here's my regex for the names:\n" + regexStr, LogLevel.Debug)
 

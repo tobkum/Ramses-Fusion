@@ -184,14 +184,8 @@ class RamMetaDataManager():
         if os.path.isfile(folderPath):
             folder = os.path.dirname(folderPath)
         
-        for fileName in dict(data):
-            test = RamFileManager.buildPath((
-                folder,
-                fileName
-            ))
-            if not os.path.isfile(test):
-                del data[fileName]
-        
+        # Don't delete entries for missing files - this is dangerous during concurrent operations
+        # and doesn't belong in the getter.
         
         return data
 
