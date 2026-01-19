@@ -178,14 +178,14 @@ class TestPipelineScenario(unittest.TestCase):
 
             # User adds a note
             self.host._request_input = MagicMock(
-                return_value={"Comment": "Added motion blur"}
+                return_value={"Comment": "Added motion blur", "Incremental": False}
             )
 
             # Verify that save was called with the note AND state preservation
             with patch.object(self.host, "save", return_value=True) as mock_save_iter:
                 self.app.on_comment(None)
                 mock_save_iter.assert_called_with(
-                    comment="Added motion blur", setupFile=True, state=mock_wip_state
+                    comment="Added motion blur", setupFile=True, incremental=False, state=mock_wip_state
                 )
 
             # --- PHASE 4: Delivery (Status Update + Publish) ---
