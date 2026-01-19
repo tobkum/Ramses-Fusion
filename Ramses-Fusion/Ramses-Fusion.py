@@ -1862,6 +1862,17 @@ class RamsesFusionApp:
 
                 if not shot_data["exists"]:
                     selected_path = shot_data["path"]
+
+                    # Ensure the target directory exists before saving
+                    target_dir = os.path.dirname(selected_path)
+                    if target_dir and not os.path.exists(target_dir):
+                        try:
+                            os.makedirs(target_dir)
+                            self.log(f"Created directory: {target_dir}", ram.LogLevel.Debug)
+                        except OSError as e:
+                            self.log(f"Failed to create directory: {e}", ram.LogLevel.Critical)
+                            return
+
                     use_template = None
                     tpl_folder = selected_step.templatesFolderPath()
                     template_files = []
