@@ -32,7 +32,7 @@ sys.modules["yaml"] = MagicMock()
 sys.modules["yaml"].safe_load.side_effect = lambda x: x # Simple pass-through or mock return
 
 # --- 3. Import Code Under Test ---
-from fusion_host import FusionHost
+from fusion_host import FusionHost, FORMAT_QUICKTIME, CODEC_PRORES_422, CODEC_PRORES_422_HQ
 from tests.mocks import MockFusion
 from ramses import LogLevel
 
@@ -205,7 +205,7 @@ class TestFusionHost(unittest.TestCase):
         self.assertEqual(results[0], "D:/Previews/TEST_S_Shot01_COMP.mov")
         self.assertEqual(preview_node.Clip[1], "D:/Previews/TEST_S_Shot01_COMP.mov")
         # Verify ProRes preset was applied
-        self.assertEqual(preview_node.GetInput("QuickTimeMovies.Compression"), "Apple ProRes 422_apcn")
+        self.assertEqual(preview_node.GetInput(f"{FORMAT_QUICKTIME}.Compression"), CODEC_PRORES_422)
 
     def test_publish_logic_split(self):
         """Verify the 'Split Publish' workflow (Master Render + Comp File Backup)."""
@@ -391,8 +391,8 @@ class TestFusionHost(unittest.TestCase):
         
         # 2. Render Preset check
         saver = comp.AddTool("Saver", 0, 0)
-        saver.SetInput("OutputFormat", "QuickTimeMovies", 0)
-        saver.SetInput("QuickTimeMovies.Compression", "Apple ProRes 422_apcn", 0)
+        saver.SetInput("OutputFormat", FORMAT_QUICKTIME, 0)
+        saver.SetInput(f"{FORMAT_QUICKTIME}.Compression", CODEC_PRORES_422, 0)
         comp.Modified = False # Reset again
         
         self.host.apply_render_preset(saver, "preview")

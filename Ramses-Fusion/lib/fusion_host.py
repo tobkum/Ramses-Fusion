@@ -11,6 +11,15 @@ except ImportError:
     import yaml
 from fusion_config import FusionConfig
 
+__all__ = ["FusionHost"]
+
+# =============================================================================
+# RENDER FORMAT CONSTANTS
+# =============================================================================
+FORMAT_QUICKTIME = "QuickTimeMovies"
+CODEC_PRORES_422 = "Apple ProRes 422_apcn"
+CODEC_PRORES_422_HQ = "Apple ProRes 422 HQ_apch"
+
 # =============================================================================
 # MONKEY-PATCHING RAMSES API (Fixes critical environment bugs only)
 # =============================================================================
@@ -1577,19 +1586,17 @@ class FusionHost(RamHost):
             self.log(f"Failed to apply Step Render Preset: {e}", LogLevel.Warning)
 
         # 2. Fallback to Hardcoded Defaults (ProRes)
-        target_format = "QuickTimeMovies"
-        if node.GetInput("OutputFormat") != target_format:
-            node.SetInput("OutputFormat", target_format, 0)
-        
+        if node.GetInput("OutputFormat") != FORMAT_QUICKTIME:
+            node.SetInput("OutputFormat", FORMAT_QUICKTIME, 0)
+
+        compression_key = f"{FORMAT_QUICKTIME}.Compression"
         if preset_name == "preview":
-            target_codec = "Apple ProRes 422_apcn"
-            if node.GetInput("QuickTimeMovies.Compression") != target_codec:
-                node.SetInput("QuickTimeMovies.Compression", target_codec, 0)
+            if node.GetInput(compression_key) != CODEC_PRORES_422:
+                node.SetInput(compression_key, CODEC_PRORES_422, 0)
         else:
             # Final / default: Apple ProRes 422 HQ
-            target_codec = "Apple ProRes 422 HQ_apch"
-            if node.GetInput("QuickTimeMovies.Compression") != target_codec:
-                node.SetInput("QuickTimeMovies.Compression", target_codec, 0)
+            if node.GetInput(compression_key) != CODEC_PRORES_422_HQ:
+                node.SetInput(compression_key, CODEC_PRORES_422_HQ, 0)
 
     def _store_ramses_metadata(self, item: RamItem) -> None:
         """Embeds Ramses identity (Project/Item UUIDs) into Fusion composition metadata.
