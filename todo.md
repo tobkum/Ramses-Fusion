@@ -29,11 +29,17 @@
 - [ ] **Atomic File Operations**
     - Implement transaction-like saves: write to temp file first, then rename to ensure no corruption on crash.
 - [ ] **File Locking / Conflict Detection**
-    - [ ] **Mechanism**: "Soft Locking" via hidden sidecar files (`.~filename.comp.lock`) containing User/Machine info.
-    - [ ] **Hooks**:
-        - `on_open`: Check for lock. If exists -> Prompt (Read-Only / Console / Steal).
-        - `on_close`: Release lock.
-    - [ ] **UX**: Visual indicator (🔓/🔒) in header. Heartbeat to prevent stale locks.
+    - [ ] **Mechanism**: "Soft Locking" via hidden sidecar files (`.~filename.comp.lock`) containing User/Machine/PID/Timestamp.
+    - [ ] **Global Watchdog (Heartbeat)**:
+        - Implement a singleton background thread (`Watchdog`) that runs every 30-60s.
+        - **Logic**: 
+            1. Query `fusion.GetCompList()` to find *all* open compositions (active and background tabs).
+            2. **Maintain**: For every open file, update its lock timestamp ("heartbeat").
+            3. **Release**: Identify files that were previously locked but are no longer in the open list (User closed the tab) and delete their lock files.
+            4. **Acquire**: If a user opens a new file (via File>Open), automatically attempt to acquire a lock.
+    - [ ] **Stale Lock Handling**:
+        - If a lock's timestamp is > 2 minutes old (meaning the Watchdog crashed), treat it as "Stale" and allow the new user to overwrite/steal it.
+    - [ ] **UX**: Visual indicator (🔓/🔒) in header. Prompt user on Open if a valid lock exists (Read-Only / Force Unlock).
 - [ ] **Write Permission Validation**
     - Pre-check write permissions on target directories before attempting render/save/publish actions.
 
