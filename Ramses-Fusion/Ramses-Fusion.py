@@ -18,6 +18,7 @@ if lib_path not in sys.path:
     sys.path.append(lib_path)
 
 import ramses as ram
+
 try:
     import ramses.yaml as yaml
 except ImportError:
@@ -133,7 +134,7 @@ class RamsesFusionApp:
         """Syncs the internal Item/Step cache with the Fusion Host.
 
         Optimized to only query the database if the file path has changed.
-        Leverages the Host's metadata-based resolution to maintain shot identity 
+        Leverages the Host's metadata-based resolution to maintain shot identity
         even if the file is moved or renamed.
 
         Returns:
@@ -382,7 +383,9 @@ class RamsesFusionApp:
             try:
                 seq = item.sequence()
                 if seq:
-                    seq_prefix = f"<font color='#666'><b>{seq.shortName()}</b> | </font>"
+                    seq_prefix = (
+                        f"<font color='#666'><b>{seq.shortName()}</b> | </font>"
+                    )
             except Exception:
                 pass
 
@@ -810,7 +813,7 @@ class RamsesFusionApp:
                 if hasattr(self.ramses.host, "_status_cache"):
                     self.ramses.host._status_cache = None
 
-                # Sync Savers? Safe to do on every refresh because _sync_render_anchors 
+                # Sync Savers? Safe to do on every refresh because _sync_render_anchors
                 # only modifies them if the path actually changed (avoids dirtying the comp).
                 self._sync_render_anchors()
 
@@ -894,7 +897,10 @@ class RamsesFusionApp:
                                                                 },
                                                                 "WordWrap": True,
                                                                 "Weight": 1,
-                                                                "MinimumSize": [220, 70],
+                                                                "MinimumSize": [
+                                                                    220,
+                                                                    70,
+                                                                ],
                                                             }
                                                         ),
                                                     ],
@@ -1126,28 +1132,28 @@ class RamsesFusionApp:
                     "PipelineHeader", "ASSETS && TOOLS", content_id
                 ),
                 self.create_button(
-                    "ImportButton", 
-                    "Import Published", 
-                    "ramimport.png", 
-                    accent_color=bg_color, 
+                    "ImportButton",
+                    "Import Published",
+                    "ramimport.png",
+                    accent_color=bg_color,
                     weight=0,
-                    tooltip="Import a published asset or render into the current composition."
+                    tooltip="Import a published asset or render into the current composition.",
                 ),
                 self.create_button(
-                    "ReplaceButton", 
-                    "Replace Loader", 
-                    "ramreplace.png", 
-                    accent_color=bg_color, 
+                    "ReplaceButton",
+                    "Replace Loader",
+                    "ramreplace.png",
+                    accent_color=bg_color,
                     weight=0,
-                    tooltip="Replace the selected Loader node with a different version or asset."
+                    tooltip="Replace the selected Loader node with a different version or asset.",
                 ),
                 self.create_button(
-                    "TemplateButton", 
-                    "Save as Template", 
-                    "ramtemplate.png", 
-                    accent_color=bg_color, 
+                    "TemplateButton",
+                    "Save as Template",
+                    "ramtemplate.png",
+                    accent_color=bg_color,
                     weight=0,
-                    tooltip="Save the current composition as a template for other shots in this step."
+                    tooltip="Save the current composition as a template for other shots in this step.",
                 ),
             ]
         )
@@ -1162,36 +1168,36 @@ class RamsesFusionApp:
                     "WorkingHeader", "SAVING && ITERATION", content_id
                 ),
                 self.create_button(
-                    "SaveButton", 
-                    "Save", 
-                    "ramsave.png", 
-                    accent_color=bg_color, 
+                    "SaveButton",
+                    "Save",
+                    "ramsave.png",
+                    accent_color=bg_color,
                     weight=0,
-                    tooltip="Overwrite the current working file version."
+                    tooltip="Overwrite the current working file version.",
                 ),
                 self.create_button(
-                    "IncrementalSaveButton", 
-                    "Incremental Save", 
-                    "ramsaveincremental.png", 
-                    accent_color=bg_color, 
+                    "IncrementalSaveButton",
+                    "Incremental Save",
+                    "ramsaveincremental.png",
+                    accent_color=bg_color,
                     weight=0,
-                    tooltip="Save a new version of the current file (e.g., v001 -> v002)."
+                    tooltip="Save a new version of the current file (e.g., v001 -> v002).",
                 ),
                 self.create_button(
-                    "CommentButton", 
-                    "Add Note", 
-                    "ramcomment.png", 
-                    accent_color=bg_color, 
+                    "CommentButton",
+                    "Add Note",
+                    "ramcomment.png",
+                    accent_color=bg_color,
                     weight=0,
-                    tooltip="Add a descriptive note to the current version in the Ramses database."
+                    tooltip="Add a descriptive note to the current version in the Ramses database.",
                 ),
                 self.create_button(
-                    "RetrieveButton", 
-                    "Version History / Restore", 
-                    "ramretrieve.png", 
-                    accent_color=bg_color, 
+                    "RetrieveButton",
+                    "Version History / Restore",
+                    "ramretrieve.png",
+                    accent_color=bg_color,
                     weight=0,
-                    tooltip="Browse and restore a previous version of this composition."
+                    tooltip="Browse and restore a previous version of this composition.",
                 ),
             ]
         )
@@ -1206,20 +1212,20 @@ class RamsesFusionApp:
                     "PublishHeader", "REVIEW && PUBLISH", content_id
                 ),
                 self.create_button(
-                    "PreviewButton", 
-                    "Create Preview", 
-                    "rampreview.png", 
-                    accent_color=bg_color, 
+                    "PreviewButton",
+                    "Create Preview",
+                    "rampreview.png",
+                    accent_color=bg_color,
                     weight=0,
-                    tooltip="Generate a preview render for supervisor review."
+                    tooltip="Generate a preview render for supervisor review.",
                 ),
                 self.create_button(
-                    "UpdateStatusButton", 
-                    "Update / Publish", 
-                    "ramstatus.png", 
+                    "UpdateStatusButton",
+                    "Update / Publish",
+                    "ramstatus.png",
                     tooltip="Change the shot status (e.g., WIP, Review) and optionally publish the final output.",
-                    accent_color=bg_color, 
-                    weight=0
+                    accent_color=bg_color,
+                    weight=0,
                 ),
             ]
         )
@@ -1749,7 +1755,10 @@ class RamsesFusionApp:
                             shot, selected_step
                         )
                     except Exception as e:
-                        self.log(f"Error resolving path for shot {shot.name()}: {e}", ram.LogLevel.Warning)
+                        self.log(
+                            f"Error resolving path for shot {shot.name()}: {e}",
+                            ram.LogLevel.Warning,
+                        )
                         continue
 
                     seq_name = seq_map.get(
@@ -1905,9 +1914,14 @@ class RamsesFusionApp:
                     if target_dir and not os.path.exists(target_dir):
                         try:
                             os.makedirs(target_dir)
-                            self.log(f"Created directory: {target_dir}", ram.LogLevel.Debug)
+                            self.log(
+                                f"Created directory: {target_dir}", ram.LogLevel.Debug
+                            )
                         except OSError as e:
-                            self.log(f"Failed to create directory: {e}", ram.LogLevel.Critical)
+                            self.log(
+                                f"Failed to create directory: {e}",
+                                ram.LogLevel.Critical,
+                            )
                             return
 
                     use_template = None
@@ -1975,7 +1989,9 @@ class RamsesFusionApp:
                         host.comp.Save(host.normalizePath(selected_path))
 
                     target_state = self.ramses.defaultState()
-                    if host.save(comment="Initial creation", setupFile=True, state=target_state):
+                    if host.save(
+                        comment="Initial creation", setupFile=True, state=target_state
+                    ):
                         # Auto-update status to WIP if needed
                         try:
                             status = host.currentStatus()
@@ -2112,7 +2128,7 @@ class RamsesFusionApp:
         """Handler for 'Update / Publish' button.
 
         Validates the scene, then opens the Status Update dialog.
-        Handles the atomic publish + synchronized status/note update logic, 
+        Handles the atomic publish + synchronized status/note update logic,
         ensuring disk filenames match the database state.
 
         Args:
@@ -2152,11 +2168,11 @@ class RamsesFusionApp:
             return
 
         current_yaml = step.publishSettings()
-        
+
         # We build a custom window to support the Wizard button
         win_id = f"StepConfig_{int(os.getpid())}"
         ui = self.ui
-        
+
         dlg = self.disp.AddWindow(
             {
                 "WindowTitle": f"Step Config: {step.name()}",
@@ -2164,28 +2180,59 @@ class RamsesFusionApp:
                 "Geometry": [400, 400, 600, 500],
             },
             [
-                ui.VGroup([
-                    ui.Label({"Text": "Publish Configuration (YAML):", "Weight": 0}),
-                    ui.TextEdit({
-                        "ID": "YAML",
-                        "Text": current_yaml or "",
-                        "Lexer": "yaml",
-                        "Weight": 1,
-                        "Font": ui.Font({"Family": "Consolas", "PixelSize": 12})
-                    }),
-                    ui.VGap(10),
-                    ui.HGroup({"Weight": 0}, [
-                        ui.Button({"ID": "WizardBtn", "Text": "Fusion Render Wizard...", "Weight": 0}),
-                        ui.HGap(0, 1), # Spacer
-                        ui.Button({"ID": "SaveBtn", "Text": "Save", "Weight": 0, "MinimumSize": [100, 30]}),
-                        ui.Button({"ID": "CancelBtn", "Text": "Cancel", "Weight": 0, "MinimumSize": [100, 30]}),
-                    ])
-                ])
-            ]
+                ui.VGroup(
+                    [
+                        ui.Label(
+                            {"Text": "Publish Configuration (YAML):", "Weight": 0}
+                        ),
+                        ui.TextEdit(
+                            {
+                                "ID": "YAML",
+                                "Text": current_yaml or "",
+                                "Lexer": "yaml",
+                                "Weight": 1,
+                                "Font": ui.Font(
+                                    {"Family": "Consolas", "PixelSize": 12}
+                                ),
+                            }
+                        ),
+                        ui.VGap(10),
+                        ui.HGroup(
+                            {"Weight": 0},
+                            [
+                                ui.Button(
+                                    {
+                                        "ID": "WizardBtn",
+                                        "Text": "Fusion Render Wizard...",
+                                        "Weight": 0,
+                                    }
+                                ),
+                                ui.HGap(0, 1),  # Spacer
+                                ui.Button(
+                                    {
+                                        "ID": "SaveBtn",
+                                        "Text": "Save",
+                                        "Weight": 0,
+                                        "MinimumSize": [100, 30],
+                                    }
+                                ),
+                                ui.Button(
+                                    {
+                                        "ID": "CancelBtn",
+                                        "Text": "Cancel",
+                                        "Weight": 0,
+                                        "MinimumSize": [100, 30],
+                                    }
+                                ),
+                            ],
+                        ),
+                    ]
+                )
+            ],
         )
-        
+
         itm = dlg.GetItems()
-        
+
         def on_wizard(ev):
             # Parse current YAML to pass existing settings
             try:
@@ -2194,7 +2241,7 @@ class RamsesFusionApp:
             except Exception as e:
                 self.log(f"Failed to parse existing YAML: {e}", ram.LogLevel.Debug)
                 data = {}
-            
+
             new_data = self._show_step_config_wizard(step, data)
             if new_data:
                 # Update Text Area
@@ -2213,20 +2260,28 @@ class RamsesFusionApp:
                 step.setPublishSettings(new_yaml)
                 self.log("Step configuration updated.", ram.LogLevel.Info)
             except Exception as e:
-                self.ramses.host._request_input("YAML Error", [
-                    {"id": "Err", "label": "Invalid YAML:", "type": "label", "default": f"<font color='#ff4444'>{str(e)}</font>"}
-                ])
-                return # Don't close
+                self.ramses.host._request_input(
+                    "YAML Error",
+                    [
+                        {
+                            "id": "Err",
+                            "label": "Invalid YAML:",
+                            "type": "label",
+                            "default": f"<font color='#ff4444'>{str(e)}</font>",
+                        }
+                    ],
+                )
+                return  # Don't close
             self.disp.ExitLoop()
 
         def on_cancel(ev):
             self.disp.ExitLoop()
-            
+
         dlg.On.WizardBtn.Clicked = on_wizard
         dlg.On.SaveBtn.Clicked = on_save
         dlg.On.CancelBtn.Clicked = on_cancel
         dlg.On[win_id].Close = on_cancel
-        
+
         self.dlg.Enabled = False
         try:
             dlg.Show()
@@ -2247,31 +2302,46 @@ class RamsesFusionApp:
         """
         ui = self.ui
         win_id = f"Wizard_{int(os.getpid())}"
-        
+
         # Extract existing Fusion settings
-        fusion_cfg = current_data.get("fusion", {}) if isinstance(current_data, dict) else {}
+        fusion_cfg = (
+            current_data.get("fusion", {}) if isinstance(current_data, dict) else {}
+        )
         prev_cfg = fusion_cfg.get("preview", {})
         final_cfg = fusion_cfg.get("final", {})
-        
+
         # Helper to build a column
         def build_col(title, id_prefix, cfg, color):
-            return ui.VGroup({"Spacing": 10, "Weight": 1}, [
-                ui.Label({"Text": f"<b><font color='{color}'>{title}</font></b>", "Alignment": {"AlignHCenter": True}, "Weight": 0}),
-                ui.Label({"Text": "Paste Saver Node Text:", "Weight": 0}),
-                ui.TextEdit({
-                    "ID": f"{id_prefix}Txt",
-                    "PlaceholderText": "Copy a Saver node in Fusion and paste here...",
-                    "Weight": 1,
-                    "Lexer": "lua",
-                    "Font": ui.Font({"Family": "Consolas"})
-                }),
-                ui.Label({
-                    "ID": f"{id_prefix}Info",
-                    "Text": f"Current: {cfg.get('format', 'Default')}",
-                    "Weight": 0,
-                    "StyleSheet": "color: #888;"
-                })
-            ])
+            return ui.VGroup(
+                {"Spacing": 10, "Weight": 1},
+                [
+                    ui.Label(
+                        {
+                            "Text": f"<b><font color='{color}'>{title}</font></b>",
+                            "Alignment": {"AlignHCenter": True},
+                            "Weight": 0,
+                        }
+                    ),
+                    ui.Label({"Text": "Paste Saver Node Text:", "Weight": 0}),
+                    ui.TextEdit(
+                        {
+                            "ID": f"{id_prefix}Txt",
+                            "PlaceholderText": "Copy a Saver node in Fusion and paste here...",
+                            "Weight": 1,
+                            "Lexer": "lua",
+                            "Font": ui.Font({"Family": "Consolas"}),
+                        }
+                    ),
+                    ui.Label(
+                        {
+                            "ID": f"{id_prefix}Info",
+                            "Text": f"Current: {cfg.get('format', 'Default')}",
+                            "Weight": 0,
+                            "StyleSheet": "color: #888;",
+                        }
+                    ),
+                ],
+            )
 
         dlg = self.disp.AddWindow(
             {
@@ -2280,93 +2350,148 @@ class RamsesFusionApp:
                 "Geometry": [400, 400, 1000, 800],
             },
             [
-                ui.VGroup({"Spacing": 0, "Weight": 1}, [
-                    ui.VGap(20),
-                    ui.HGroup({"Weight": 1}, [
-                        ui.HGap(20),
-                        ui.VGroup({"Spacing": 15, "Weight": 1}, [
-                            # Main Columns
-                            ui.HGroup({"Weight": 1, "Spacing": 40}, [
-                                build_col("PREVIEW", "Prev", prev_cfg, "#4CB24C"),
-                                # Vertical Separator
-                                ui.Label({"Text": "", "StyleSheet": "background-color: #333;", "MaximumSize": [1, 2000], "MinimumSize": [1, 10]}),
-                                build_col("FINAL", "Final", final_cfg, "#B24C4C")
-                            ]),
-                            # Instructions
-                            ui.Label({
-                                "Text": "<i>Paste the content of a Saver node (Ctrl+C) into the text fields above.</i>", 
-                                "Alignment": {"AlignHCenter": True},
-                                "Weight": 0
-                            }),
-                            ui.VGap(10),
-                            # Buttons
-                            ui.HGroup({"Weight": 0}, [
-                                ui.HGap(0, 1),
-                                ui.Button({"ID": "OkBtn", "Text": "Generate Config", "Weight": 0, "MinimumSize": [120, 30]}),
-                                ui.Button({"ID": "CancelBtn", "Text": "Cancel", "Weight": 0, "MinimumSize": [120, 30]}),
-                            ])
-                        ]),
-                        ui.HGap(20),
-                    ]),
-                    ui.VGap(20),
-                ])
-            ]
+                ui.VGroup(
+                    {"Spacing": 0, "Weight": 1},
+                    [
+                        ui.VGap(20),
+                        ui.HGroup(
+                            {"Weight": 1},
+                            [
+                                ui.HGap(20),
+                                ui.VGroup(
+                                    {"Spacing": 15, "Weight": 1},
+                                    [
+                                        # Main Columns
+                                        ui.HGroup(
+                                            {"Weight": 1, "Spacing": 40},
+                                            [
+                                                build_col(
+                                                    "PREVIEW",
+                                                    "Prev",
+                                                    prev_cfg,
+                                                    "#4CB24C",
+                                                ),
+                                                # Vertical Separator
+                                                ui.Label(
+                                                    {
+                                                        "Text": "",
+                                                        "StyleSheet": "background-color: #333;",
+                                                        "MaximumSize": [1, 2000],
+                                                        "MinimumSize": [1, 10],
+                                                    }
+                                                ),
+                                                build_col(
+                                                    "FINAL",
+                                                    "Final",
+                                                    final_cfg,
+                                                    "#B24C4C",
+                                                ),
+                                            ],
+                                        ),
+                                        # Instructions
+                                        ui.Label(
+                                            {
+                                                "Text": "<i>Paste the content of a Saver node (Ctrl+C) into the text fields above.</i>",
+                                                "Alignment": {"AlignHCenter": True},
+                                                "Weight": 0,
+                                            }
+                                        ),
+                                        ui.VGap(10),
+                                        # Buttons
+                                        ui.HGroup(
+                                            {"Weight": 0},
+                                            [
+                                                ui.HGap(0, 1),
+                                                ui.Button(
+                                                    {
+                                                        "ID": "OkBtn",
+                                                        "Text": "Generate Config",
+                                                        "Weight": 0,
+                                                        "MinimumSize": [120, 30],
+                                                    }
+                                                ),
+                                                ui.Button(
+                                                    {
+                                                        "ID": "CancelBtn",
+                                                        "Text": "Cancel",
+                                                        "Weight": 0,
+                                                        "MinimumSize": [120, 30],
+                                                    }
+                                                ),
+                                            ],
+                                        ),
+                                    ],
+                                ),
+                                ui.HGap(20),
+                            ],
+                        ),
+                        ui.VGap(20),
+                    ],
+                )
+            ],
         )
-        
+
         itm = dlg.GetItems()
         result = [None]
-        
+
         def on_ok(ev):
             # 1. Preview Parsing
             p_text = itm["PrevTxt"].PlainText
             p_parsed = FusionConfig.parse_saver_node(p_text)
-            
+
             # If text provided but parsing failed
             if p_text.strip() and not p_parsed:
                 itm["PrevInfo"].Text = "<font color='#ff4444'>Invalid Saver Node</font>"
                 return
-            
+
             # 2. Final Parsing
             f_text = itm["FinalTxt"].PlainText
             f_parsed = FusionConfig.parse_saver_node(f_text)
-            
+
             if f_text.strip() and not f_parsed:
-                itm["FinalInfo"].Text = "<font color='#ff4444'>Invalid Saver Node</font>"
+                itm[
+                    "FinalInfo"
+                ].Text = "<font color='#ff4444'>Invalid Saver Node</font>"
                 return
 
             # 3. Construct Data
             # Start with existing config to preserve other keys
             new_data = current_data.copy()
-            if "fusion" not in new_data: new_data["fusion"] = {}
-            
+            if "fusion" not in new_data:
+                new_data["fusion"] = {}
+
             # Merge Preview
             if p_parsed:
                 new_data["fusion"]["preview"] = p_parsed
                 # Automate Image Sequence detection
-                new_data["fusion"]["preview"]["image_sequence"] = FusionConfig.is_sequence(p_parsed.get("format"))
-                 
+                new_data["fusion"]["preview"]["image_sequence"] = (
+                    FusionConfig.is_sequence(p_parsed.get("format"))
+                )
+
             # Merge Final
             if f_parsed:
                 new_data["fusion"]["final"] = f_parsed
                 # Automate Image Sequence detection
-                new_data["fusion"]["final"]["image_sequence"] = FusionConfig.is_sequence(f_parsed.get("format"))
+                new_data["fusion"]["final"]["image_sequence"] = (
+                    FusionConfig.is_sequence(f_parsed.get("format"))
+                )
 
             result[0] = new_data
             self.disp.ExitLoop()
 
         def on_cancel(ev):
             self.disp.ExitLoop()
-            
+
         dlg.On.OkBtn.Clicked = on_ok
         dlg.On.CancelBtn.Clicked = on_cancel
         dlg.On[win_id].Close = on_cancel
-        
+
         try:
             dlg.Show()
             self.disp.RunLoop()
         finally:
             dlg.Hide()
-            
+
         return result[0]
 
     @requires_connection
@@ -2465,9 +2590,11 @@ class RamsesFusionApp:
 if __name__ == "__main__":
     # Force reload dependencies when running in Fusion
     import importlib
+
     importlib.reload(fusion_host)
     try:
         import fusion_config
+
         importlib.reload(fusion_config)
     except Exception:
         pass

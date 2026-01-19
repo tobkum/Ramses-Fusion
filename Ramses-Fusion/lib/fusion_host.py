@@ -4,7 +4,21 @@ import re
 import json
 import threading
 import glob
-from ramses import RamHost, RamItem, RamStep, RamStatus, RamFileInfo, LogLevel, ItemType, RAMSES, RAM_SETTINGS, RamMetaDataManager, RamState, RamDaemonInterface
+from ramses import (
+    RamHost,
+    RamItem,
+    RamStep,
+    RamStatus,
+    RamFileInfo,
+    LogLevel,
+    ItemType,
+    RAMSES,
+    RAM_SETTINGS,
+    RamMetaDataManager,
+    RamState,
+    RamDaemonInterface,
+)
+
 try:
     import ramses.yaml as yaml
 except ImportError:
@@ -32,9 +46,11 @@ if not hasattr(RamFileManager, "_fusion_patched"):
 
     # 1. Fix Race Condition: Disable background threads for copies.
     original_copy = RamFileManager.copy
+
     def _patched_copy(originPath, destinationPath, separateThread=False):
         """Forces synchronous file copying to prevent race conditions in Fusion's environment."""
         return original_copy(originPath, destinationPath, separateThread)
+
     RamFileManager.copy = staticmethod(_patched_copy)
 
     # 2. Fix Case Sensitivity and robust matching for version files on Windows.
@@ -42,57 +58,66 @@ if not hasattr(RamFileManager, "_fusion_patched"):
         """Resolves the latest version file path using a robust, case-insensitive identity match."""
         fileName = os.path.basename(filePath)
         # Strip extension and any existing version block (_v001, _WIP001, etc)
-        name_no_ext = fileName.split('.')[0]
-        clean_name = re.sub(r'_[a-zA-Z]*\d+$', '', name_no_ext)
+        name_no_ext = fileName.split(".")[0]
+        clean_name = re.sub(r"_[a-zA-Z]*\d+$", "", name_no_ext)
         base_id = clean_name.lower() + "_"
 
         versionsFolder = RamFileManager.getVersionFolder(filePath)
-        if not os.path.isdir(versionsFolder): return ''
-        
+        if not os.path.isdir(versionsFolder):
+            return ""
+
         candidates = []
         for f in os.listdir(versionsFolder):
-            if not f.lower().startswith(base_id): continue
+            if not f.lower().startswith(base_id):
+                continue
             path = os.path.join(versionsFolder, f)
-            if not os.path.isfile(path): continue
-            
+            if not os.path.isfile(path):
+                continue
+
             # Extract version from the end: ...STATE001.comp
-            m = re.search(r'(\d+)\.[^.]+$', f)
+            m = re.search(r"(\d+)\.[^.]+$", f)
             if m:
                 version = int(m.group(1))
                 candidates.append((version, path))
-        
-        if not candidates: return ''
-        candidates.sort() # Sort by version number
-        
+
+        if not candidates:
+            return ""
+        candidates.sort()  # Sort by version number
+
         if previous:
-            return candidates[-2][1] if len(candidates) > 1 else ''
+            return candidates[-2][1] if len(candidates) > 1 else ""
         return candidates[-1][1]
 
     def _patched_getVersionFilePaths(filePath):
         """Returns a list of all version files associated with the current composition's identity."""
         fileName = os.path.basename(filePath)
-        name_no_ext = fileName.split('.')[0]
-        clean_name = re.sub(r'_[a-zA-Z]*\d+$', '', name_no_ext)
+        name_no_ext = fileName.split(".")[0]
+        clean_name = re.sub(r"_[a-zA-Z]*\d+$", "", name_no_ext)
         base_id = clean_name.lower() + "_"
 
         versionsFolder = RamFileManager.getVersionFolder(filePath)
-        if not os.path.isdir(versionsFolder): return []
-        
+        if not os.path.isdir(versionsFolder):
+            return []
+
         candidates = []
         for f in os.listdir(versionsFolder):
-            if not f.lower().startswith(base_id): continue
+            if not f.lower().startswith(base_id):
+                continue
             path = os.path.join(versionsFolder, f)
-            if not os.path.isfile(path): continue
-            
-            m = re.search(r'(\d+)\.[^.]+$', f)
+            if not os.path.isfile(path):
+                continue
+
+            m = re.search(r"(\d+)\.[^.]+$", f)
             if m:
                 version = int(m.group(1))
                 candidates.append((version, path))
-        
+
         candidates.sort()
         return [c[1] for c in candidates]
 
-    RamFileManager.getLatestVersionFilePath = staticmethod(_patched_getLatestVersionFilePath)
+    RamFileManager.getLatestVersionFilePath = staticmethod(
+        _patched_getLatestVersionFilePath
+    )
     RamFileManager.getVersionFilePaths = staticmethod(_patched_getVersionFilePaths)
 
     # 3. Thread-Safe Socket Communication for RamDaemonInterface
@@ -100,15 +125,15 @@ if not hasattr(RamFileManager, "_fusion_patched"):
     daemon = RamDaemonInterface.instance()
     if not hasattr(daemon, "_lock"):
         daemon._lock = threading.Lock()
-    
+
     original_post = getattr(daemon, "_RamDaemonInterface__post")
-    
+
     def _patched_post(self, query, bufsize=0):
         with self._lock:
             # We must use the original method which handles the actual socket logic
             # Since it's a private method, we call it via the mangled name on the instance
             return original_post(query, bufsize)
-            
+
     # Apply the patch to the class method (handling private name mangling)
     RamDaemonInterface._RamDaemonInterface__post = _patched_post
 
@@ -116,9 +141,10 @@ if not hasattr(RamFileManager, "_fusion_patched"):
     # The API's auto-deletion logic is prone to race conditions and path mismatches.
     def _patched_getMetaData(folderPath):
         meta_file = RamMetaDataManager.getMetaDataFile(folderPath)
-        if not os.path.exists(meta_file): return {}
+        if not os.path.exists(meta_file):
+            return {}
         try:
-            with open(meta_file, 'r') as f:
+            with open(meta_file, "r") as f:
                 return json.load(f)
         except Exception:
             return {}
@@ -131,44 +157,59 @@ if not hasattr(RamFileManager, "_fusion_patched"):
     RamMetaDataManager.getFileMetaData = staticmethod(_patched_getFileMetaData)
 
     # 5. Fix Side-Effect: Prevent automatic directory creation during path resolution.
-    # The API's default behavior creates _versions and _published folders just by 
+    # The API's default behavior creates _versions and _published folders just by
     # checking paths, which clutters the filesystem during UI refreshes.
     def _patched_getVersionFolder(filePath):
         """Resolves the versions subfolder path without automatically creating it."""
         fileFolder = os.path.dirname(filePath)
         from ramses import RAM_SETTINGS
+
         versionsFolderName = RAM_SETTINGS.folderNames.versions
         if RamFileManager.inVersionsFolder(filePath):
             return fileFolder
-        elif RamFileManager.inPublishFolder(filePath) or RamFileManager.inPreviewFolder(filePath):
-            return os.path.join(os.path.dirname(fileFolder), versionsFolderName).replace("\\", "/")
+        elif RamFileManager.inPublishFolder(filePath) or RamFileManager.inPreviewFolder(
+            filePath
+        ):
+            return os.path.join(
+                os.path.dirname(fileFolder), versionsFolderName
+            ).replace("\\", "/")
         return os.path.join(fileFolder, versionsFolderName).replace("\\", "/")
 
     def _patched_getPublishFolder(filePath):
         """Resolves the published subfolder path without automatically creating it."""
         fileFolder = os.path.dirname(filePath)
         from ramses import RAM_SETTINGS
+
         publishFolderName = RAM_SETTINGS.folderNames.publish
         if RamFileManager.inPublishFolder(filePath):
             return fileFolder
-        elif RamFileManager.inVersionsFolder(filePath) or RamFileManager.inPreviewFolder(filePath):
-            return os.path.join(os.path.dirname(fileFolder), publishFolderName).replace("\\", "/")
+        elif RamFileManager.inVersionsFolder(
+            filePath
+        ) or RamFileManager.inPreviewFolder(filePath):
+            return os.path.join(os.path.dirname(fileFolder), publishFolderName).replace(
+                "\\", "/"
+            )
         return os.path.join(fileFolder, publishFolderName).replace("\\", "/")
 
     def _patched_getPublishInfo(filePath):
         """Resolves publish metadata for a file without creating any directories on disk."""
-        if not os.path.isfile(filePath): return RamFileInfo()
+        if not os.path.isfile(filePath):
+            return RamFileInfo()
         fileInfo = RamFileInfo()
         fileInfo.setFilePath(filePath)
         publishFolder = RamFileManager.getPublishFolder(filePath)
         versionInfo = RamFileManager.getLatestVersionInfo(filePath)
         versionFolder = ""
-        if versionInfo.resource != "": versionFolder = versionInfo.resource + "_"
+        if versionInfo.resource != "":
+            versionFolder = versionInfo.resource + "_"
         from ramses.utils import intToStr
+
         versionFolder += intToStr(max(1, versionInfo.version))
         if versionInfo.state != "" and versionInfo.state.lower() != "v":
             versionFolder += "_" + versionInfo.state
-        newFilePath = os.path.join(publishFolder, versionFolder, fileInfo.fileName()).replace("\\", "/")
+        newFilePath = os.path.join(
+            publishFolder, versionFolder, fileInfo.fileName()
+        ).replace("\\", "/")
         publishedInfo = RamFileInfo()
         publishedInfo.setFilePath(newFilePath)
         publishedInfo.date = fileInfo.date
@@ -182,67 +223,101 @@ if not hasattr(RamFileManager, "_fusion_patched"):
     RamFileManager.getPublishInfo = staticmethod(_patched_getPublishInfo)
 
     # 6. Fix State Reversion: Allow passing target state to publish process.
-    def _patched_publish(self, forceShowPublishUI=False, incrementVersion=True, publishOptions=None, state=None):
+    def _patched_publish(
+        self,
+        forceShowPublishUI=False,
+        incrementVersion=True,
+        publishOptions=None,
+        state=None,
+    ):
         """Extended publish process that supports state propagation to prevent archive status reversion."""
         item = self.currentItem()
         step = self.currentStep()
-        if not item or not step: return False
-        
+        if not item or not step:
+            return False
+
         # Save with correct state to prevent reversion
         state_short = state.shortName() if state else None
-        self._RamHost__save(self.saveFilePath(), comment="Published", newStateShortName=state_short)
-        
+        self._RamHost__save(
+            self.saveFilePath(), comment="Published", newStateShortName=state_short
+        )
+
         publishInfo = self.publishInfo()
-        if not publishOptions: publishOptions = step.publishSettings('yaml')
+        if not publishOptions:
+            publishOptions = step.publishSettings("yaml")
         publishOptions = self._publishOptions(publishOptions, forceShowPublishUI)
-        if publishOptions is False or publishOptions is None: return False
-        
-        ramPublishOptions = publishOptions.get('ramsesPublishOptions', {})
-        if ramPublishOptions.get('useTempFile', False): self.createTempWorkingFile()
-        
-        if not self._RamHost__runUserScripts("before_pre_publish", publishInfo, publishOptions, item, step): return False
+        if publishOptions is False or publishOptions is None:
+            return False
+
+        ramPublishOptions = publishOptions.get("ramsesPublishOptions", {})
+        if ramPublishOptions.get("useTempFile", False):
+            self.createTempWorkingFile()
+
+        if not self._RamHost__runUserScripts(
+            "before_pre_publish", publishInfo, publishOptions, item, step
+        ):
+            return False
         publishOptions = self._prePublish(publishInfo, publishOptions)
-        if publishOptions is False or publishOptions is None: return False
-        
-        if ramPublishOptions.get('backupFile', False): self._RamHost__backupPublishedFile(publishInfo)
-        if not self._RamHost__runUserScripts("before_publish", publishInfo, item, step, publishOptions): return False
-        
+        if publishOptions is False or publishOptions is None:
+            return False
+
+        if ramPublishOptions.get("backupFile", False):
+            self._RamHost__backupPublishedFile(publishInfo)
+        if not self._RamHost__runUserScripts(
+            "before_publish", publishInfo, item, step, publishOptions
+        ):
+            return False
+
         published_files = self._publish(publishInfo, publishOptions)
-        if not published_files: return False
-        for file in published_files: self._RamHost__setPublishMetadata(file, publishInfo)
-        if not self._RamHost__runUserScripts("on_publish", published_files, publishInfo, item, step, publishOptions): return False
-        
+        if not published_files:
+            return False
+        for file in published_files:
+            self._RamHost__setPublishMetadata(file, publishInfo)
+        if not self._RamHost__runUserScripts(
+            "on_publish", published_files, publishInfo, item, step, publishOptions
+        ):
+            return False
+
         status = self.currentStatus()
-        if status: status.setPublished(True)
+        if status:
+            status.setPublished(True)
         self.closeTempWorkingFile()
-        
+
         if incrementVersion:
-            self._RamHost__save(self.saveFilePath(), incrementVersion=True, newStateShortName=state_short)
+            self._RamHost__save(
+                self.saveFilePath(),
+                incrementVersion=True,
+                newStateShortName=state_short,
+            )
         return True
 
     RamHost.publish = _patched_publish
 
 # =============================================================================
 
+
 class FusionHost(RamHost):
     """
     Ramses Host implementation for Blackmagic Fusion.
     """
+
     LOG_PREFIXES = {
         LogLevel.Info: "INFO",
         LogLevel.Warning: "WARNING",
         LogLevel.Critical: "ERROR",
-        LogLevel.Debug: "DEBUG"
+        LogLevel.Debug: "DEBUG",
     }
 
     def __init__(self, fusion_obj: object) -> None:
         super().__init__()
         self.fusion = fusion_obj
         self.hostName = "Fusion"
-        self._status_cache = None # Used for UI badge caching
-        
+        self._status_cache = None  # Used for UI badge caching
+
         try:
-            self.hostVersion = str(self.fusion.GetAttrs().get('FUSION_Version', 'Unknown'))
+            self.hostVersion = str(
+                self.fusion.GetAttrs().get("FUSION_Version", "Unknown")
+            )
         except Exception:
             self.hostVersion = "Unknown"
 
@@ -256,7 +331,8 @@ class FusionHost(RamHost):
         Returns:
             str: The normalized path with forward slashes, or empty string if input is None/empty.
         """
-        if not path: return ""
+        if not path:
+            return ""
         return str(path).replace("\\", "/")
 
     @property
@@ -274,8 +350,9 @@ class FusionHost(RamHost):
         Returns:
             str: The normalized full path to the current composition file, or empty string if not saved.
         """
-        if not self.comp: return ""
-        path = self.comp.GetAttrs().get('COMPS_FileName', '')
+        if not self.comp:
+            return ""
+        path = self.comp.GetAttrs().get("COMPS_FileName", "")
         return self.normalizePath(path)
 
     def _isDirty(self) -> bool:
@@ -284,21 +361,22 @@ class FusionHost(RamHost):
         Returns:
             bool: True if the composition is modified (dirty), False otherwise.
         """
-        if not self.comp: return False
-        return self.comp.GetAttrs().get('COMPB_Modified', False)
+        if not self.comp:
+            return False
+        return self.comp.GetAttrs().get("COMPB_Modified", False)
 
     def _log(self, message: str, level: int) -> None:
         """Logs a message to the Fusion console.
 
         Args:
             message (str): The message to log.
-            level (int): The severity level (from Ramses LogLevel). 
+            level (int): The severity level (from Ramses LogLevel).
                          Levels below Info are ignored.
         """
         # Silence anything below Info level (0=Debug, -1=DataSent, -2=DataReceived)
         if level < LogLevel.Info:
             return
-            
+
         prefix = self.LOG_PREFIXES.get(level, "LOG")
         print(f"[Ramses][{prefix}] {str(message)}")
 
@@ -333,7 +411,7 @@ class FusionHost(RamHost):
         step = self.currentStep()
         if not item or not step:
             return None
-            
+
         # Only query if we have a valid item/step pair to avoid API crashes
         try:
             return item.currentStatus(step)
@@ -342,7 +420,7 @@ class FusionHost(RamHost):
             return None
 
     def currentItem(self) -> RamItem:
-        """Gets the current working Item, prioritizing DB-registered path first, 
+        """Gets the current working Item, prioritizing DB-registered path first,
         then falling back to Metadata UUID if the path is unregistered (moved file).
         """
         if not self.comp:
@@ -352,12 +430,13 @@ class FusionHost(RamHost):
         # This returns a correctly typed RamShot/RamAsset if the path is in the DB.
         # If not, it returns a 'virtual' item based on filename.
         item = super().currentItem()
-        
+
         # 2. If the item is virtual (not in DB), try to recover identity from Metadata
         if item and item.virtual():
             item_uuid = self.comp.GetData("Ramses.ItemUUID")
             if item_uuid:
                 from ramses import RamShot, RamAsset, ItemType
+
                 # Use the virtual item's type as a hint for the real object
                 try:
                     target_type = item.itemType()
@@ -367,13 +446,13 @@ class FusionHost(RamHost):
                         real_item = RamAsset(item_uuid)
                     else:
                         real_item = RamItem(item_uuid)
-                    
+
                     # Verify the real item actually exists in DB by checking shortName
                     if real_item.shortName() != "Unknown":
                         return real_item
                 except Exception as e:
                     self._log(f"Metadata UUID recovery failed: {e}", LogLevel.Debug)
-        
+
         return item
 
     def currentStep(self) -> RamStep:
@@ -383,10 +462,10 @@ class FusionHost(RamHost):
 
         # Standard API behavior (path-based)
         step = super().currentStep()
-        
-        # Note: If the file is moved, step will be None. 
+
+        # Note: If the file is moved, step will be None.
         # In the future, we could store StepUUID in metadata to resolve this.
-        
+
         return step
 
     def isFusionStep(self, step: RamStep) -> bool:
@@ -405,10 +484,10 @@ class FusionHost(RamHost):
         """
         if not step:
             return False
-            
+
         daemon = RAMSES.daemonInterface()
         s_data = step.data()
-        
+
         # 1. Linked Applications
         apps = s_data.get("applications", [])
         if isinstance(apps, list):
@@ -423,18 +502,18 @@ class FusionHost(RamHost):
             val = str(s_data.get(key, "")).upper()
             if "FUSION" in val or "BMF" in val:
                 return True
-                
+
         # 3. Step Naming
         if "FUSION" in step.shortName().upper():
             return True
-            
+
         # 4. YAML General Settings
         stgs = step.generalSettings("yaml")
         if isinstance(stgs, dict):
             stg_val = str(stgs.get("application", "")).upper()
             if "FUSION" in stg_val or "BMF" in stg_val:
                 return True
-                
+
         return False
 
     def collectItemSettings(self, item: RamItem) -> dict:
@@ -448,7 +527,7 @@ class FusionHost(RamHost):
             item (RamItem): The item to collect settings for.
 
         Returns:
-            dict: A dictionary containing 'width', 'height', 'framerate', 'duration', 
+            dict: A dictionary containing 'width', 'height', 'framerate', 'duration',
                   'pixelAspectRatio', and optionally 'frames'.
         """
         if not item:
@@ -477,7 +556,9 @@ class FusionHost(RamHost):
             settings["duration"] = float(shot.duration())
             # Calculate frames manually using Project FPS (currently in settings['framerate'])
             # We use round() to avoid truncation errors present in the API's shot.frames() which uses int()
-            settings["frames"] = int(round(settings["duration"] * settings["framerate"]))
+            settings["frames"] = int(
+                round(settings["duration"] * settings["framerate"])
+            )
 
             seq = shot.sequence()
             if seq:
@@ -490,8 +571,8 @@ class FusionHost(RamHost):
 
     def _get_fusion_settings(self, step) -> dict:
         """Helper to safely retrieve Fusion settings from a Step.
-        
-        The Ramses API 'publishSettings("yaml")' automatically parses the stored 
+
+        The Ramses API 'publishSettings("yaml")' automatically parses the stored
         YAML string into a Python dictionary.
         """
         if not step:
@@ -502,31 +583,31 @@ class FusionHost(RamHost):
                 return data.get("fusion", {})
         except Exception as e:
             self.log(f"Error retrieving Step settings: {e}", LogLevel.Warning)
-            
+
         return {}
 
     def _get_preset_settings(self, preset_name: str) -> tuple:
         """Resolves extension and sequence settings for a given preset.
-        
+
         Returns:
             tuple: (extension: str, is_sequence: bool)
         """
         ext = "mov"
         is_sequence = False
-        
+
         step = self.currentStep()
         fusion_cfg = self._get_fusion_settings(step)
         preset_cfg = fusion_cfg.get(preset_name, {})
-        
+
         if preset_cfg:
             fmt = preset_cfg.get("format", "")
             if fmt:
                 custom_ext = FusionConfig.get_extension(fmt)
                 if custom_ext:
                     ext = custom_ext
-            
+
             is_sequence = preset_cfg.get("image_sequence", False)
-            
+
         return ext, is_sequence
 
     def _calculate_padding_str(self) -> str:
@@ -537,7 +618,7 @@ class FusionHost(RamHost):
         if item:
             settings = self.collectItemSettings(item)
             frames = settings.get("frames", 0)
-        
+
         end = start + max(0, frames - 1)
         padding = max(4, len(str(end)))
         return "0" * padding
@@ -568,10 +649,10 @@ class FusionHost(RamHost):
             preview_info.version = -1
             preview_info.state = ""
             preview_info.resource = ""
-            preview_info.extension = "" # Exclude from base filename for sequence logic
-            
+            preview_info.extension = ""  # Exclude from base filename for sequence logic
+
             base_filename = preview_info.fileName().rstrip(".")
-            
+
             if is_sequence:
                 padding_str = self._calculate_padding_str()
                 # Fusion sequence format: name.0000.ext
@@ -580,7 +661,7 @@ class FusionHost(RamHost):
                 preview_folder = os.path.join(preview_folder, base_filename)
             else:
                 filename = f"{base_filename}.{ext}"
-            
+
             return self.normalizePath(os.path.join(preview_folder, filename))
         except Exception as e:
             self._log(f"Failed to resolve preview path: {e}", LogLevel.Debug)
@@ -599,20 +680,21 @@ class FusionHost(RamHost):
         try:
             # STRICT MODE: Rely on the Daemon's active project
             project = RAMSES.project()
-            if not project: return ""
-            
+            if not project:
+                return ""
+
             ext, is_sequence = self._get_preset_settings("final")
 
             export_folder = project.exportPath()
-            
+
             # 1. Resolve Base Filename and Target Directory
             pub_info = self.publishInfo()
-            
+
             if export_folder:
                 # Master Render (No versioning in filename)
                 master_info = pub_info.copy()
                 master_info.version = -1
-                master_info.extension = "" 
+                master_info.extension = ""
                 base_filename = master_info.fileName().rstrip(".")
                 target_dir = export_folder
             else:
@@ -631,14 +713,22 @@ class FusionHost(RamHost):
                 target_dir = os.path.join(target_dir, base_filename)
             else:
                 filename = f"{base_filename}.{ext}"
-            
+
             return self.normalizePath(os.path.join(target_dir, filename))
 
         except Exception as e:
             self._log(f"Failed to resolve final path: {e}", LogLevel.Debug)
             return ""
 
-    def _saveAs(self, filePath:str, item:RamItem, step:RamStep, version:int, comment:str, incremented:bool) -> bool:
+    def _saveAs(
+        self,
+        filePath: str,
+        item: RamItem,
+        step: RamStep,
+        version: int,
+        comment: str,
+        incremented: bool,
+    ) -> bool:
         """Internal implementation to save the composition to a specific path.
 
         Args:
@@ -652,7 +742,8 @@ class FusionHost(RamHost):
         Returns:
             bool: True on success, False on failure.
         """
-        if not self.comp: return False
+        if not self.comp:
+            return False
         # Normalize path for Fusion
         filePath = self.normalizePath(filePath)
         try:
@@ -662,7 +753,7 @@ class FusionHost(RamHost):
             self.log(f"Failed to save: {e}", LogLevel.Critical)
             return False
 
-    def _open(self, filePath:str, item:RamItem, step:RamStep) -> bool:
+    def _open(self, filePath: str, item: RamItem, step: RamStep) -> bool:
         """Internal implementation to open a composition file.
 
         Args:
@@ -678,8 +769,8 @@ class FusionHost(RamHost):
             self.fusion.LoadComp(self.normalizePath(filePath))
             return True
         return False
-    
-    def _setFileName(self, fileName:str ) -> bool:
+
+    def _setFileName(self, fileName: str) -> bool:
         """Sets the internal file name of the composition without saving to disk.
 
         Args:
@@ -688,10 +779,17 @@ class FusionHost(RamHost):
         Returns:
             bool: True on success, False if no composition is active.
         """
-        if not self.comp: return False
-        return self.comp.SetAttrs({'COMPS_FileName': self.normalizePath(fileName)})
+        if not self.comp:
+            return False
+        return self.comp.SetAttrs({"COMPS_FileName": self.normalizePath(fileName)})
 
-    def save(self, incremental:bool=False, comment:str=None, setupFile:bool=True, state:RamState=None) -> bool:
+    def save(
+        self,
+        incremental: bool = False,
+        comment: str = None,
+        setupFile: bool = True,
+        state: RamState = None,
+    ) -> bool:
         """Saves the current file, optionally creating a new version or setting up the scene.
 
         Overridden to bypass the base class implementation of `__collectItemSettings` which
@@ -702,7 +800,7 @@ class FusionHost(RamHost):
             incremental (bool, optional): If True, increments the version number. Defaults to False.
             comment (str, optional): Note describing the version changes. Defaults to None.
             setupFile (bool, optional): If True, applies project settings (FPS, res) to the comp. Defaults to True.
-            state (RamState, optional): The target state for the version name. Ensures the archived 
+            state (RamState, optional): The target state for the version name. Ensures the archived
                                         filename matches the database status immediately.
 
         Returns:
@@ -713,7 +811,7 @@ class FusionHost(RamHost):
             if item:
                 settings = self.collectItemSettings(item)
                 self._setupCurrentFile(item, self.currentStep(), settings)
-        
+
         # Always persist identity metadata before saving
         if not setupFile:
             item = self.currentItem()
@@ -726,20 +824,25 @@ class FusionHost(RamHost):
             saveFilePath = self.saveFilePath()
             if saveFilePath == "":
                 from ramses import Log
+
                 self.log(Log.MalformedName, LogLevel.Critical)
                 return self.saveAs()
-            
+
             # Name mangling for private method in parent class
             state_short = state.shortName() if state else None
             return self._RamHost__save(saveFilePath, incremental, comment, state_short)
 
-        return super(FusionHost, self).save(incremental=incremental, comment=comment, setupFile=False)
+        return super(FusionHost, self).save(
+            incremental=incremental, comment=comment, setupFile=False
+        )
 
     # -------------------------------------------------------------------------
     # UI Implementation helpers using UIManager
     # -------------------------------------------------------------------------
 
-    def _request_input(self, title: str, fields: list, ok_text: str = "OK", cancel_text: str = "Cancel") -> dict:
+    def _request_input(
+        self, title: str, fields: list, ok_text: str = "OK", cancel_text: str = "Cancel"
+    ) -> dict:
         """Shows a custom modal dialog to request user input.
 
         Uses the Fusion UIManager to create a dynamic form based on the `fields` definition.
@@ -763,78 +866,106 @@ class FusionHost(RamHost):
         """
         ui = self.fusion.UIManager
         disp = bmd.UIDispatcher(ui)
-        
+
         # Use a more unique ID to avoid dispatcher conflicts
         win_id = f"RamsesDlg_{int(os.getpid())}_{id(fields)}"
-        
+
         # Modal behavior: Disable main window if it exists
         main_win = None
         if hasattr(self, "app") and hasattr(self.app, "dlg"):
             main_win = self.app.dlg
-            
+
         if main_win:
             main_win.Enabled = False
-        
+
         rows = []
-        total_height = 80 # Buttons + Margins
-        
+        total_height = 80  # Buttons + Margins
+
         for f in fields:
-            label = ui.Label({"Text": f['label'], "Weight": 0.25, "Alignment": {"AlignTop": True, "AlignRight": True}})
+            label = ui.Label(
+                {
+                    "Text": f["label"],
+                    "Weight": 0.25,
+                    "Alignment": {"AlignTop": True, "AlignRight": True},
+                }
+            )
             ctrl, height = self._create_ui_element(ui, f)
-            total_height += height + 5 # Add small padding between rows
+            total_height += height + 5  # Add small padding between rows
             rows.append(ui.HGroup([label, ctrl]))
 
         # Build Button Group
         buttons = [ui.HGap(0, 1)]
-        buttons.append(ui.Button({"ID": "OkBtn", "Text": ok_text, "Weight": 0, "MinimumSize": [120, 30]}))
+        buttons.append(
+            ui.Button(
+                {"ID": "OkBtn", "Text": ok_text, "Weight": 0, "MinimumSize": [120, 30]}
+            )
+        )
         if cancel_text:
-            buttons.append(ui.Button({"ID": "CancelBtn", "Text": cancel_text, "Weight": 0, "MinimumSize": [120, 30]}))
+            buttons.append(
+                ui.Button(
+                    {
+                        "ID": "CancelBtn",
+                        "Text": cancel_text,
+                        "Weight": 0,
+                        "MinimumSize": [120, 30],
+                    }
+                )
+            )
 
         dlg = disp.AddWindow(
             {
-                "WindowTitle": title, 
-                "ID": win_id, 
+                "WindowTitle": title,
+                "ID": win_id,
                 "Geometry": [400, 400, 500, total_height],
-                "MaximumSize": [800, 1000] # Prevent crazy growth
+                "MaximumSize": [800, 1000],  # Prevent crazy growth
             },
-            ui.VGroup([
-                ui.VGroup({"Spacing": 5, "Weight": 0}, rows),
-                ui.VGap(0, 1), # Stretch gap to push buttons down and keep rows tight
-                ui.VGap(10),
-                ui.HGroup({"Weight": 0}, buttons)
-            ])
+            ui.VGroup(
+                [
+                    ui.VGroup({"Spacing": 5, "Weight": 0}, rows),
+                    ui.VGap(
+                        0, 1
+                    ),  # Stretch gap to push buttons down and keep rows tight
+                    ui.VGap(10),
+                    ui.HGroup({"Weight": 0}, buttons),
+                ]
+            ),
         )
-        
+
         results = {}
         # Track if the user actually clicked OK
         confirmed = [False]
-        
+
         def on_ok(ev):
             confirmed[0] = True
             items = dlg.GetItems()
             for f in fields:
-                if f['type'] == 'label':
-                    continue # Skip data collection for labels
-                
-                ctrl = items[f['id']]
-                if f['type'] == 'text': results[f['id']] = ctrl.PlainText
-                elif f['type'] == 'line': results[f['id']] = ctrl.Text
-                elif f['type'] == 'combo': results[f['id']] = int(ctrl.CurrentIndex)
-                elif f['type'] == 'slider': results[f['id']] = int(ctrl.Value)
-                elif f['type'] == 'checkbox': results[f['id']] = bool(ctrl.Checked)
-            
+                if f["type"] == "label":
+                    continue  # Skip data collection for labels
+
+                ctrl = items[f["id"]]
+                if f["type"] == "text":
+                    results[f["id"]] = ctrl.PlainText
+                elif f["type"] == "line":
+                    results[f["id"]] = ctrl.Text
+                elif f["type"] == "combo":
+                    results[f["id"]] = int(ctrl.CurrentIndex)
+                elif f["type"] == "slider":
+                    results[f["id"]] = int(ctrl.Value)
+                elif f["type"] == "checkbox":
+                    results[f["id"]] = bool(ctrl.Checked)
+
             # Stop the loop
             disp.ExitLoop()
-            
+
         def on_cancel(ev):
             disp.ExitLoop()
-            
+
         # Bind handlers
         dlg.On.OkBtn.Clicked = on_ok
         if cancel_text:
             dlg.On.CancelBtn.Clicked = on_cancel
         dlg.On[win_id].Close = on_cancel
-        
+
         try:
             dlg.Show()
             disp.RunLoop()
@@ -846,12 +977,12 @@ class FusionHost(RamHost):
                 dlg.On[win_id].Close = None
             except Exception:
                 pass
-                
+
             dlg.Hide()
             # Re-enable main window
             if main_win:
                 main_win.Enabled = True
-        
+
         return results if confirmed[0] else None
 
     def _create_ui_element(self, ui: object, field_def: dict) -> tuple:
@@ -864,44 +995,64 @@ class FusionHost(RamHost):
         Returns:
             tuple: (control_object, height_int)
         """
-        f_type = field_def['type']
-        f_id = field_def['id']
-        default = field_def.get('default', '')
-        
-        if f_type == 'text':
-            h = field_def.get('lines', 1) * 25 + 20
-            return ui.TextEdit({"ID": f_id, "Text": str(default), "Weight": 0.75, "MinimumSize": [200, h]}), h
-            
-        if f_type == 'line':
+        f_type = field_def["type"]
+        f_id = field_def["id"]
+        default = field_def.get("default", "")
+
+        if f_type == "text":
+            h = field_def.get("lines", 1) * 25 + 20
+            return ui.TextEdit(
+                {
+                    "ID": f_id,
+                    "Text": str(default),
+                    "Weight": 0.75,
+                    "MinimumSize": [200, h],
+                }
+            ), h
+
+        if f_type == "line":
             return ui.LineEdit({"ID": f_id, "Text": str(default), "Weight": 0.75}), 30
-            
-        if f_type == 'combo':
+
+        if f_type == "combo":
             ctrl = ui.ComboBox({"ID": f_id, "Weight": 0.75})
-            options = field_def.get('options', {})
+            options = field_def.get("options", {})
             for i in range(len(options)):
                 val = options.get(str(i))
-                if val: ctrl.AddItem(str(val))
-            ctrl.CurrentIndex = int(field_def.get('default', 0))
+                if val:
+                    ctrl.AddItem(str(val))
+            ctrl.CurrentIndex = int(field_def.get("default", 0))
             return ctrl, 30
-            
-        if f_type == 'slider':
-            return ui.Slider({"ID": f_id, "Value": float(default), "Minimum": 0, "Maximum": 100, "Weight": 0.75}), 30
-            
-        if f_type == 'checkbox':
-            return ui.CheckBox({"ID": f_id, "Checked": bool(default), "Text": "", "Weight": 0.75}), 30
-            
-        if f_type == 'label':
+
+        if f_type == "slider":
+            return ui.Slider(
+                {
+                    "ID": f_id,
+                    "Value": float(default),
+                    "Minimum": 0,
+                    "Maximum": 100,
+                    "Weight": 0.75,
+                }
+            ), 30
+
+        if f_type == "checkbox":
+            return ui.CheckBox(
+                {"ID": f_id, "Checked": bool(default), "Text": "", "Weight": 0.75}
+            ), 30
+
+        if f_type == "label":
             # Calculate height based on characters (generous estimation)
             text_len = len(str(default))
             h = max(40, (text_len // 50 + 1) * 22)
-            return ui.Label({
-                "ID": f_id, 
-                "Text": str(default), 
-                "Weight": 0.75, 
-                "WordWrap": True,
-                "Alignment": {"AlignTop": True, "AlignLeft": True},
-                "MinimumSize": [200, h]
-            }), h
+            return ui.Label(
+                {
+                    "ID": f_id,
+                    "Text": str(default),
+                    "Weight": 0.75,
+                    "WordWrap": True,
+                    "Alignment": {"AlignTop": True, "AlignLeft": True},
+                    "MinimumSize": [200, h],
+                }
+            ), h
 
         return ui.Label({"Text": "Unknown Field"}), 30
 
@@ -909,7 +1060,14 @@ class FusionHost(RamHost):
     # Pipeline Implementation
     # -------------------------------------------------------------------------
 
-    def _import(self, filePaths:list, item:RamItem, step:RamStep, importOptions:list, forceShowImportUI:bool) -> bool:
+    def _import(
+        self,
+        filePaths: list,
+        item: RamItem,
+        step: RamStep,
+        importOptions: list,
+        forceShowImportUI: bool,
+    ) -> bool:
         """Imports the specified files as Loader nodes into the current composition.
 
         Logic:
@@ -929,9 +1087,10 @@ class FusionHost(RamHost):
         Returns:
             bool: True on success, False if no composition is open.
         """
-        if not self.comp: return False
+        if not self.comp:
+            return False
         self.comp.Lock()
-        
+
         # Get start frame for alignment
         start_frame = RAM_SETTINGS.userSettings.get("compStartFrame", 1001)
 
@@ -945,25 +1104,29 @@ class FusionHost(RamHost):
             # Fusion returns {1.0: x, 2.0: y} in Grid Units
             if pos:
                 start_x = pos[1]
-                start_y = pos[2] + 1 # Start one unit below active tool
+                start_y = pos[2] + 1  # Start one unit below active tool
 
         for i, path in enumerate(filePaths):
             # Stagger horizontally
             target_x = start_x + i
             target_y = start_y
-            
+
             loader = self.comp.AddTool("Loader", target_x, target_y)
             if loader:
                 # Explicitly set the clip path with forward slashes for cross-platform safety
                 loader.Clip[1] = self.normalizePath(path)
-                
+
                 # Smart Naming with safety fallback
                 if item:
-                    raw_name = f"{item.shortName()}_{step.shortName()}" if step else item.shortName()
+                    raw_name = (
+                        f"{item.shortName()}_{step.shortName()}"
+                        if step
+                        else item.shortName()
+                    )
                 else:
                     # Fallback to sanitized base filename
                     raw_name = os.path.splitext(os.path.basename(path))[0]
-                
+
                 name = self._sanitizeNodeName(raw_name)
 
                 if name:
@@ -974,14 +1137,14 @@ class FusionHost(RamHost):
                         final_name = f"{name}_{counter}"
                         counter += 1
                     loader.SetAttrs({"TOOLS_Name": final_name})
-                
+
                 # Automatic Alignment
                 loader.GlobalIn[1] = float(start_frame)
-                
+
         self.comp.Unlock()
         return True
 
-    def _importUI(self, item:RamItem, step:RamStep) -> dict:
+    def _importUI(self, item: RamItem, step: RamStep) -> dict:
         """Shows the native Fusion file request dialog for importing.
 
         Args:
@@ -992,9 +1155,9 @@ class FusionHost(RamHost):
             dict: {'filePaths': [path]} or None if cancelled.
         """
         path = self.fusion.RequestFile()
-        return {'filePaths': [path]} if path else None
+        return {"filePaths": [path]} if path else None
 
-    def _openUI(self, item:RamItem=None, step:RamStep=None) -> dict:
+    def _openUI(self, item: RamItem = None, step: RamStep = None) -> dict:
         """Shows the native Fusion file request dialog for opening a composition.
 
         Args:
@@ -1005,7 +1168,7 @@ class FusionHost(RamHost):
             dict: {'filePath': path} or None if cancelled.
         """
         path = self.fusion.RequestFile()
-        return {'filePath': path} if path else None
+        return {"filePath": path} if path else None
 
     def _preview(
         self,
@@ -1049,12 +1212,12 @@ class FusionHost(RamHost):
 
         # 3. Armed for render
         self.log(f"Starting preview render to: {dst}", LogLevel.Info)
-        
+
         # Ensure directory exists
         prev_dir = os.path.dirname(dst)
         if not os.path.exists(prev_dir):
             os.makedirs(prev_dir)
-            
+
         preview_node.Clip[1] = dst
         self.apply_render_preset(preview_node, "preview")
         preview_node.SetAttrs({"TOOLB_PassThrough": False})
@@ -1086,7 +1249,9 @@ class FusionHost(RamHost):
             if preview_node:
                 preview_node.SetAttrs({"TOOLB_PassThrough": True})
 
-    def _publishOptions(self, proposedOptions: dict, showPublishUI: bool = False) -> dict:
+    def _publishOptions(
+        self, proposedOptions: dict, showPublishUI: bool = False
+    ) -> dict:
         """Returns the publish options, optionally showing a UI.
 
         Currently just passes through default options.
@@ -1116,7 +1281,7 @@ class FusionHost(RamHost):
 
     def _verify_render_output(self, path: str) -> bool:
         """Verifies that a render output exists and is valid.
-        Handles image sequences by checking for wildcard matches if the exact path 
+        Handles image sequences by checking for wildcard matches if the exact path
         contains padding placeholders (e.g., .0000. or .####.).
 
         Args:
@@ -1127,41 +1292,49 @@ class FusionHost(RamHost):
         """
         if not path:
             return False
-            
+
         # 1. Direct check (for movies or single frames)
         if os.path.exists(path) and os.path.getsize(path) > 0:
             return True
-            
+
         # 2. Sequence check (for paths with 0000, ####, etc.)
         directory = os.path.dirname(path)
         if not os.path.isdir(directory):
             return False
-            
+
         filename = os.path.basename(path)
         # Identify common padding patterns between dots: .0000. , .####. , .%04d.
         # Uses lookbehind/lookahead to preserve the surrounding dots.
         # Matches: sequences of zeros, hash symbols, or printf-style %d formats.
-        wildcard_name = re.sub(r'(?<=\.)(0+|#+|%\d*d)(?=\.)', '*', filename)
-        
+        wildcard_name = re.sub(r"(?<=\.)(0+|#+|%\d*d)(?=\.)", "*", filename)
+
         if "*" in wildcard_name:
-            matches = glob.glob(os.path.join(directory, wildcard_name).replace("\\", "/"))
+            matches = glob.glob(
+                os.path.join(directory, wildcard_name).replace("\\", "/")
+            )
             for m in matches:
                 if os.path.isfile(m) and os.path.getsize(m) > 0:
                     return True
-                    
+
         return False
 
-    def publish(self, forceShowPublishUI:bool=False, incrementVersion:bool=True, publishOptions:dict=None, state:RamState=None) -> bool:
+    def publish(
+        self,
+        forceShowPublishUI: bool = False,
+        incrementVersion: bool = True,
+        publishOptions: dict = None,
+        state: RamState = None,
+    ) -> bool:
         """Publishes the current item, ensuring the version file reflects the correct state.
 
-        Overridden to propagate the target state during the publish render cycle, 
+        Overridden to propagate the target state during the publish render cycle,
         preventing archived versions from reverting to legacy state names.
 
         Args:
             forceShowPublishUI (bool): Whether to force the UI.
             incrementVersion (bool): Whether to increment the version after publish.
             publishOptions (dict): Custom options.
-            state (RamState, optional): Target state for the version name. 
+            state (RamState, optional): Target state for the version name.
                                         If None, fetches the current state from DB.
 
         Returns:
@@ -1171,15 +1344,15 @@ class FusionHost(RamHost):
         if not state:
             status = self.currentStatus()
             state = status.state() if status else None
-            
+
         return super(FusionHost, self).publish(
-            forceShowPublishUI=forceShowPublishUI, 
-            incrementVersion=incrementVersion, 
+            forceShowPublishUI=forceShowPublishUI,
+            incrementVersion=incrementVersion,
             publishOptions=publishOptions,
-            state=state
+            state=state,
         )
 
-    def saveAs(self, setupFile:bool=True, state:RamState=None) -> bool:
+    def saveAs(self, setupFile: bool = True, state: RamState = None) -> bool:
         """Saves the current file as a new Item-Step, propagating state to the first version.
 
         Args:
@@ -1191,25 +1364,26 @@ class FusionHost(RamHost):
         """
         # We handle setupFile ourselves to use optimized Fusion logic
         if setupFile:
-            res = self._saveAsUI() # Base API shows UI
-            if not res: return False
-            
+            res = self._saveAsUI()  # Base API shows UI
+            if not res:
+                return False
+
             # Re-apply the logic from save() but for the new context
             item, step = res.get("item"), res.get("step")
             if item:
                 settings = self.collectItemSettings(item)
                 self._setupCurrentFile(item, step, settings)
                 self._store_ramses_metadata(item)
-        
+
         # Call base saveAs - it will eventually call our _saveAs and copyToVersion
         # Note: RamHost.saveAs doesn't support state propagation, so we manually
         # increment the version after save if a state is provided.
         success = super().saveAs(setupFile=False)
-        
+
         if success and state:
             # Force a correctly named version immediately
             self.save(incremental=False, state=state, setupFile=False)
-            
+
         return success
 
     def updateStatus(
@@ -1280,7 +1454,7 @@ class FusionHost(RamHost):
                 self.log(
                     "CRITICAL: A new version was saved to disk, but the database remains unchanged. "
                     "Please update status manually to fix the desync.",
-                    LogLevel.Warning
+                    LogLevel.Warning,
                 )
                 return False
 
@@ -1308,7 +1482,7 @@ class FusionHost(RamHost):
         Implements a "Split Publish":
         1. Render: If `_FINAL` anchor exists, renders it to the Project Export folder.
         2. Backup: Saves a copy of the `.comp` file to the Step Publish folder (`_published`).
-        
+
         If the render fails, the entire process is aborted.
 
         Args:
@@ -1362,7 +1536,7 @@ class FusionHost(RamHost):
             # Enable the node
             final_node.SetAttrs({"TOOLB_PassThrough": False})
             render_success = False
-            
+
             # Resolve and create directory before render
             render_path = self.normalizePath(final_node.Clip[1])
             render_dir = os.path.dirname(render_path)
@@ -1411,12 +1585,12 @@ class FusionHost(RamHost):
                 comp_publish_info = publishInfo.copy()
                 comp_publish_info.extension = ext
                 dst_comp = self.normalizePath(comp_publish_info.filePath())
-                
+
                 # Ensure directory exists (monkey-patched API no longer creates it automatically)
                 comp_dir = os.path.dirname(dst_comp)
                 if not os.path.exists(comp_dir):
                     os.makedirs(comp_dir)
-                
+
                 # src is our current working file, which was just saved by RamHost.publish()
                 RamFileManager.copy(src, dst_comp, separateThread=False)
                 self.log(f"Comp backup published to: {dst_comp}", LogLevel.Info)
@@ -1429,7 +1603,14 @@ class FusionHost(RamHost):
             self.log(f"Publish failed during process: {e}", LogLevel.Critical)
             return []
 
-    def _replace(self, filePaths:list, item:RamItem, step:RamStep, importOptions:list, forceShowImportUI:bool) -> bool:
+    def _replace(
+        self,
+        filePaths: list,
+        item: RamItem,
+        step: RamStep,
+        importOptions: list,
+        forceShowImportUI: bool,
+    ) -> bool:
         """Replaces the selected Loader node's clip with the specified file.
 
         Also updates the node name if it was using a generic name.
@@ -1444,24 +1625,29 @@ class FusionHost(RamHost):
         Returns:
             bool: True on success, False if no valid Loader selected.
         """
-        if not self.comp: return False
+        if not self.comp:
+            return False
         active = self.comp.ActiveTool
         if not active or active.GetAttrs()["TOOLS_RegID"] != "Loader":
             self.log("Please select a Loader node to replace.", LogLevel.Warning)
             return False
-        
+
         if filePaths:
             active.Clip[1] = self.normalizePath(filePaths[0])
             # Rename if it was a generic name
             if "Loader" in active.GetAttrs()["TOOLS_Name"]:
-                raw_name = f"{item.shortName()}_{step.shortName()}" if step else item.shortName()
+                raw_name = (
+                    f"{item.shortName()}_{step.shortName()}"
+                    if step
+                    else item.shortName()
+                )
                 name = self._sanitizeNodeName(raw_name)
-                    
+
                 active.SetAttrs({"TOOLS_Name": name})
             return True
         return False
 
-    def _replaceUI(self, item:RamItem, step:RamStep) -> dict:
+    def _replaceUI(self, item: RamItem, step: RamStep) -> dict:
         """Shows the native Fusion file request dialog for replacing.
 
         Args:
@@ -1472,10 +1658,11 @@ class FusionHost(RamHost):
             dict: {'filePaths': [path]} or None if cancelled.
         """
         res = self._openUI(item, step)
-        if res: return {"filePaths": [res["filePath"]]}
+        if res:
+            return {"filePaths": [res["filePath"]]}
         return None
 
-    def _restoreVersionUI(self, versionFiles:list) -> str:
+    def _restoreVersionUI(self, versionFiles: list) -> str:
         """Shows a UI to select a version to restore.
 
         Args:
@@ -1484,8 +1671,9 @@ class FusionHost(RamHost):
         Returns:
             str: The selected file path, or empty string if cancelled.
         """
-        if not versionFiles: return ""
-        
+        if not versionFiles:
+            return ""
+
         # Enrich options with comments from metadata
         opts = {}
         for i, f in enumerate(versionFiles):
@@ -1493,11 +1681,19 @@ class FusionHost(RamHost):
             basename = os.path.basename(f)
             label = f"{basename} - [{comment}]" if comment else basename
             opts[str(i)] = label
-            
-        res = self._request_input("Restore Version", [
-            {'id': 'Idx', 'label': 'Select Version:', 'type': 'combo', 'options': opts}
-        ])
-        return versionFiles[res['Idx']] if res else ""
+
+        res = self._request_input(
+            "Restore Version",
+            [
+                {
+                    "id": "Idx",
+                    "label": "Select Version:",
+                    "type": "combo",
+                    "options": opts,
+                }
+            ],
+        )
+        return versionFiles[res["Idx"]] if res else ""
 
     def _saveAsUI(self) -> dict:
         """Shows the native Fusion file request dialog for 'Save As'.
@@ -1524,7 +1720,10 @@ class FusionHost(RamHost):
 
         if not item:
             item = RamItem(
-                data={"name": nm.shortName or "New", "shortName": nm.shortName or "New"},
+                data={
+                    "name": nm.shortName or "New",
+                    "shortName": nm.shortName or "New",
+                },
                 create=False,
             )
 
@@ -1549,20 +1748,29 @@ class FusionHost(RamHost):
         Returns:
             str: 'save', 'discard', or 'cancel'.
         """
-        res = self._request_input("Save Changes?", [
-            {'id': 'Mode', 'label': 'Current file is modified. Action:', 'type': 'combo', 'options': {
-                '0': 'Save and Continue',
-                '1': 'Discard and Continue',
-                '2': 'Cancel'
-            }}
-        ])
-        if not res: return "cancel"
+        res = self._request_input(
+            "Save Changes?",
+            [
+                {
+                    "id": "Mode",
+                    "label": "Current file is modified. Action:",
+                    "type": "combo",
+                    "options": {
+                        "0": "Save and Continue",
+                        "1": "Discard and Continue",
+                        "2": "Cancel",
+                    },
+                }
+            ],
+        )
+        if not res:
+            return "cancel"
         modes = {0: "save", 1: "discard", 2: "cancel"}
-        return modes.get(res['Mode'], "cancel")
+        return modes.get(res["Mode"], "cancel")
 
     def apply_render_preset(self, node, preset_name: str = "preview") -> None:
         """Applies standard pipeline settings (codec, format) to a Saver node.
-        
+
         Optimized to avoid dirtying the composition if settings already match.
         Checks for Step-specific overrides in the Ramses Project Settings (YAML).
 
@@ -1572,13 +1780,13 @@ class FusionHost(RamHost):
         """
         if not node:
             return
-            
+
         # 1. Check for Step Overrides
         try:
             step = self.currentStep()
             fusion_cfg = self._get_fusion_settings(step)
             target_cfg = fusion_cfg.get(preset_name, {})
-            
+
             if target_cfg:
                 # Apply custom configuration
                 FusionConfig.apply_config(node, target_cfg)
@@ -1610,24 +1818,26 @@ class FusionHost(RamHost):
         """
         if not self.comp or not item:
             return
-        
+
         try:
             item_uuid = str(item.uuid())
             if self.comp.GetData("Ramses.ItemUUID") != item_uuid:
                 self.comp.SetData("Ramses.ItemUUID", item_uuid)
-            
+
             # Store Project UUID (Resolves cross-project ambiguity)
             project = item.project() or RAMSES.project()
             if project:
                 proj_uuid = str(project.uuid())
                 if self.comp.GetData("Ramses.ProjectUUID") != proj_uuid:
                     self.comp.SetData("Ramses.ProjectUUID", proj_uuid)
-                
+
             self.log(f"Embedded Ramses Metadata: {item.name()}", LogLevel.Debug)
         except Exception as e:
             self.log(f"Failed to embed metadata: {e}", LogLevel.Warning)
 
-    def _setupCurrentFile(self, item: RamItem, step: RamStep, setupOptions: dict) -> bool:
+    def _setupCurrentFile(
+        self, item: RamItem, step: RamStep, setupOptions: dict
+    ) -> bool:
         """Applies Ramses settings (resolution, FPS, ranges) to the current composition.
 
         Updates Fusion Preferences (FrameFormat) and Attributes (Timeline/Render ranges).
@@ -1720,7 +1930,7 @@ class FusionHost(RamHost):
 
         return True
 
-    def _statusUI(self, currentStatus:RamStatus = None) -> dict:
+    def _statusUI(self, currentStatus: RamStatus = None) -> dict:
         """Shows the dialog to update status, note, and publish settings.
 
         Args:
@@ -1731,28 +1941,52 @@ class FusionHost(RamHost):
                   Returns None if cancelled.
         """
         states = RAMSES.states()
-        if not states: return None
+        if not states:
+            return None
         state_opts = {str(i): s.name() for i, s in enumerate(states)}
-        
+
         cur_note = currentStatus.comment() if currentStatus else ""
         cur_short = currentStatus.state().shortName() if currentStatus else "WIP"
-        def_idx = next((i for i, s in enumerate(states) if s.shortName() == cur_short), 0)
+        def_idx = next(
+            (i for i, s in enumerate(states) if s.shortName() == cur_short), 0
+        )
 
-        res = self._request_input("Update Status", [
-            {'id': 'Comment', 'label': 'Note:', 'type': 'text', 'default': cur_note, 'lines': 6},
-            {'id': 'State', 'label': 'New State:', 'type': 'combo', 'options': state_opts, 'default': def_idx},
-            {'id': 'Publish', 'label': 'Publish Final:', 'type': 'checkbox', 'default': False}
-        ])
-        
-        if res is None: return None
-        
-        selected_state = states[res['State']]
-        
+        res = self._request_input(
+            "Update Status",
+            [
+                {
+                    "id": "Comment",
+                    "label": "Note:",
+                    "type": "text",
+                    "default": cur_note,
+                    "lines": 6,
+                },
+                {
+                    "id": "State",
+                    "label": "New State:",
+                    "type": "combo",
+                    "options": state_opts,
+                    "default": def_idx,
+                },
+                {
+                    "id": "Publish",
+                    "label": "Publish Final:",
+                    "type": "checkbox",
+                    "default": False,
+                },
+            ],
+        )
+
+        if res is None:
+            return None
+
+        selected_state = states[res["State"]]
+
         return {
-            "note": res['Comment'], 
-            "completionRatio": int(selected_state.completionRatio()), 
-            "publish": res['Publish'], 
-            "state": selected_state, 
-            "showPublishUI": False, 
-            "savePreview": False
+            "note": res["Comment"],
+            "completionRatio": int(selected_state.completionRatio()),
+            "publish": res["Publish"],
+            "state": selected_state,
+            "showPublishUI": False,
+            "savePreview": False,
         }
