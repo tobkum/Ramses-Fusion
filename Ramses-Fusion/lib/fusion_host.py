@@ -4,6 +4,7 @@ import re
 import json
 import threading
 import socket
+import glob
 from ramses import RamHost, RamItem, RamStep, RamStatus, RamFileInfo, LogLevel, ItemType, RAMSES, RAM_SETTINGS, RamMetaDataManager, RamState, RamDaemonInterface
 try:
     import ramses.yaml as yaml
@@ -27,57 +28,58 @@ if not hasattr(RamFileManager, "_fusion_patched"):
         return original_copy(originPath, destinationPath, separateThread)
     RamFileManager.copy = staticmethod(_patched_copy)
 
-    # 2. Fix Case Sensitivity for version matching on Windows.
+    # 2. Fix Case Sensitivity and robust matching for version files on Windows.
     def _patched_getLatestVersionFilePath(filePath, previous=False):
         fileName = os.path.basename(filePath)
-        nm = RamFileInfo()
-        if not nm.setFileName(fileName): return ''
+        parts = fileName.split('.')[0].split('_')
+        if len(parts) < 4: return ''
+        base_id = "_".join(parts[:4]).lower() + "_"
+
         versionsFolder = RamFileManager.getVersionFolder(filePath)
         if not os.path.isdir(versionsFolder): return ''
-        highestVersion = 0
-        versionFilePath = ''
-        prevVersionFilePath = ''
+        
+        candidates = []
         for f in os.listdir(versionsFolder):
+            if not f.lower().startswith(base_id): continue
             path = os.path.join(versionsFolder, f)
             if not os.path.isfile(path): continue
-            fnm = RamFileInfo()
-            if not fnm.setFileName(f): continue
-            if any([
-                fnm.project.lower() != nm.project.lower(),
-                fnm.ramType.lower() != nm.ramType.lower(),
-                fnm.shortName.lower() != nm.shortName.lower(),
-                fnm.step.lower() != nm.step.lower(),
-                fnm.resource.lower() != nm.resource.lower(),
-                fnm.version == -1
-            ]): continue
-            if fnm.version > highestVersion:
-                highestVersion = fnm.version
-                prevVersionFilePath = versionFilePath
-                versionFilePath = path
-        return prevVersionFilePath if previous else versionFilePath
+            
+            # Extract version from the end: ...STATE001.comp
+            m = re.search(r'(\d+)\.[^.]+$', f)
+            if m:
+                version = int(m.group(1))
+                candidates.append((version, path))
+        
+        if not candidates: return ''
+        candidates.sort() # Sort by version number
+        
+        if previous:
+            return candidates[-2][1] if len(candidates) > 1 else ''
+        return candidates[-1][1]
 
     def _patched_getVersionFilePaths(filePath):
         fileName = os.path.basename(filePath)
-        nm = RamFileInfo()
-        if not nm.setFileName(fileName): return []
+        parts = fileName.split('.')[0].split('_')
+        if len(parts) < 4: return []
+        base_id = "_".join(parts[:4]).lower() + "_"
+
         versionsFolder = RamFileManager.getVersionFolder(filePath)
         if not os.path.isdir(versionsFolder): return []
+        
         versionFiles = []
+        candidates = []
         for f in os.listdir(versionsFolder):
+            if not f.lower().startswith(base_id): continue
             path = os.path.join(versionsFolder, f)
             if not os.path.isfile(path): continue
-            fnm = RamFileInfo()
-            if not fnm.setFileName(f): continue
-            if any([
-                fnm.project.lower() != nm.project.lower(),
-                fnm.ramType.lower() != nm.ramType.lower(),
-                fnm.shortName.lower() != nm.shortName.lower(),
-                fnm.step.lower() != nm.step.lower(),
-                fnm.resource.lower() != nm.resource.lower()
-            ]): continue
-            versionFiles.append(path)
-        versionFiles.sort(key=RamFileManager._versionFilesSorter)
-        return versionFiles
+            
+            m = re.search(r'(\d+)\.[^.]+$', f)
+            if m:
+                version = int(m.group(1))
+                candidates.append((version, path))
+        
+        candidates.sort()
+        return [c[1] for c in candidates]
 
     RamFileManager.getLatestVersionFilePath = staticmethod(_patched_getLatestVersionFilePath)
     RamFileManager.getVersionFilePaths = staticmethod(_patched_getVersionFilePaths)
@@ -1003,23 +1005,40 @@ class FusionHost(RamHost):
 
     def _verify_render_output(self, path: str) -> bool:
         """Verifies that a render output exists and is valid.
-
-        Checks existence and non-zero file size.
+        Handles image sequences by checking for wildcard matches if the exact path 
+        contains padding placeholders (e.g., .0000. or .####.).
 
         Args:
             path (str): The path to verify.
 
         Returns:
-            bool: True if file exists and size > 0, False otherwise.
+            bool: True if file(s) exist and size > 0, False otherwise.
         """
         if not path:
             return False
-        if not os.path.exists(path):
+            
+        # 1. Direct check (for movies or single frames)
+        if os.path.exists(path) and os.path.getsize(path) > 0:
+            return True
+            
+        # 2. Sequence check (for paths with 0000, ####, etc.)
+        directory = os.path.dirname(path)
+        if not os.path.isdir(directory):
             return False
-        # Check for 0-byte files which often indicate a failed or interrupted render
-        if os.path.getsize(path) == 0:
-            return False
-        return True
+            
+        filename = os.path.basename(path)
+        # Identify common padding patterns: .0000. , .####. , %04d
+        # This replaces any sequence of 0s, #s or digit-based formatting with a wildcard
+        # while preserving the surrounding separators (like dots).
+        wildcard_name = re.sub(r'([\.#%])?\d*[#0d]+([\.#d])?', r'\1*\2', filename)
+        
+        if "*" in wildcard_name:
+            matches = glob.glob(os.path.join(directory, wildcard_name).replace("\\", "/"))
+            for m in matches:
+                if os.path.isfile(m) and os.path.getsize(m) > 0:
+                    return True
+                    
+        return False
 
     def publish(self, forceShowPublishUI:bool=False, incrementVersion:bool=True, publishOptions:dict=None, state:RamState=None) -> bool:
         """Publishes the current item, ensuring the version file reflects the correct state.
@@ -1272,9 +1291,15 @@ class FusionHost(RamHost):
 
             # 2. Perform Comp File Backup (standard Ramses publish)
             # This only happens if final_node render succeeded.
-            if self._saveAs(dst, None, None, -1, "", False):
+            # We use RamFileManager.copy instead of _saveAs to avoid switching Fusion's context
+            # to the published folder. This ensures the user stays in the working file.
+            try:
+                # src is our current working file, which was just saved by RamHost.publish()
+                RamFileManager.copy(src, dst, separateThread=False)
                 self.log(f"Comp backup published to: {dst}", LogLevel.Info)
                 published_files.append(dst)
+            except Exception as e:
+                self.log(f"Failed to copy comp backup: {e}", LogLevel.Warning)
 
             return published_files
         except Exception as e:
