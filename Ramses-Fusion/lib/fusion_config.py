@@ -330,7 +330,7 @@ class FusionConfig:
                     # parse_value handles nested structs (ID + {).
                     # If 'first' was ID and next is '{', it was start of struct.
                     val = None
-                    if first[0] == 'ID' and peek()[0] == 'OP' and peek()[1] == '{':
+                    if first[0] == 'ID' and peek() and peek()[0] == 'OP' and peek()[1] == '{':
                          # Reconstruct the "ID {" sequence logic
                          struct_name = first[1]
                          struct_data = parse_table()

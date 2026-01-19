@@ -116,7 +116,7 @@ if not hasattr(RamFileManager, "_fusion_patched"):
             return {}
 
     def _patched_getFileMetaData(filePath):
-        data = RamMetaDataManager.getMetaData(filePath)
+        data = RamMetaDataManager.getMetaData(os.path.dirname(filePath))
         return data.get(os.path.basename(filePath), {})
 
     RamMetaDataManager.getMetaData = staticmethod(_patched_getMetaData)

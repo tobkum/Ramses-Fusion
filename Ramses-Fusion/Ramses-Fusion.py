@@ -792,11 +792,10 @@ class RamsesFusionApp:
                     self._project_cache = None
                     self._user_name_cache = None
 
-                # Clear item/step caches and path trackers to force re-fetch from host
+                # Clear item/step caches and path tracker to force re-fetch from host
                 self._item_cache = None
-                self._item_path = ""
                 self._step_cache = None
-                self._step_path = ""
+                self._context_path = ""
 
                 # Invalidate the host's status cache to ensure the badge updates
                 if hasattr(self.ramses.host, "_status_cache"):
