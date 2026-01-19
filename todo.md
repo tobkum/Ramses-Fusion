@@ -70,6 +70,12 @@
         - **Contexts**: Toggle between "Current Shot" (upstream steps) and "Global Assets".
         - **Selectors**: Step (e.g., Lighting, FX) -> Version (Latest/Approved).
         - **Metadata**: Automatically tags imported Loaders with Source UUIDs for dependency tracking.
+- [ ] **Intermediate/Cache File Strategy**
+    - **Goal**: Define a standard location for pre-renders (masks, particles) that persist across script versions (avoiding re-renders on `v001`->`v002`).
+    - **Proposal**: Use a `_cache` folder at the **Step Root** (sibling to `_versions` and `_published`).
+    - **Tasks**: 
+        - Verify API safety (ensure `_cache` doesn't conflict with Ramses logic).
+        - define naming convention for cache elements (independent versioning?).
 - [ ] **Customizable Preview Specs**
     - Allow users to toggle high-level render settings for PREVIEW renders (e.g., HiQ on/off, Motion Blur toggle, and Proxy Resolution overrides).
 - [ ] **Render Farm Integration**
