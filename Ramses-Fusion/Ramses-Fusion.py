@@ -213,7 +213,7 @@ class RamsesFusionApp:
                     items["ContextLabel"].Text = self._get_context_text()
                 else:
                     items[
-                        "ContextLabel"
+                        "ContextButton"
                     ].Text = "<font color='#ff4444'><b>CONNECTION ERROR</b></font><br><font color='#999'>Ramses Client is offline</font>"
 
             if "RamsesVersion" in items:
@@ -872,36 +872,42 @@ class RamsesFusionApp:
                                 self.ui.VGroup(
                                     {"Spacing": 4, "Weight": 1},
                                     [
-                                        # Context Header
-                                        self.ui.HGroup(
+                                        # Context Header (Clickable - refreshes on click)
+                                        self.ui.Stack(
                                             {"Weight": 0},
                                             [
-                                                self.ui.Label(
+                                                # Layer 1: Styled background with label
+                                                self.ui.HGroup(
                                                     {
-                                                        "ID": "ContextLabel",
-                                                        "Text": self._get_context_text(),
-                                                        "Alignment": {
-                                                            "AlignHCenter": True,
-                                                            "AlignTop": True,
-                                                        },
-                                                        "WordWrap": True,
-                                                        "Weight": 1,
-                                                    }
+                                                        "ID": "ContextFrame",
+                                                        "Weight": 0,
+                                                        "StyleSheet": "QFrame { border: 1px solid #333; background-color: #1a1a1a; border-radius: 4px; }",
+                                                    },
+                                                    [
+                                                        self.ui.Label(
+                                                            {
+                                                                "ID": "ContextLabel",
+                                                                "Text": self._get_context_text(),
+                                                                "Alignment": {
+                                                                    "AlignHCenter": True,
+                                                                    "AlignVCenter": True,
+                                                                },
+                                                                "WordWrap": True,
+                                                                "Weight": 1,
+                                                                "MinimumSize": [220, 70],
+                                                            }
+                                                        ),
+                                                    ],
                                                 ),
+                                                # Layer 2: Transparent button for click handling
                                                 self.ui.Button(
                                                     {
-                                                        "ID": "RefreshButton",
+                                                        "ID": "ContextButton",
                                                         "Text": "",
-                                                        "Weight": 0,
-                                                        "MinimumSize": [48, 48],
-                                                        "MaximumSize": [48, 48],
-                                                        "IconSize": [32, 32],
-                                                        "Flat": False,
-                                                        "ToolTip": "Manually refresh the context header.",
-                                                        "Icon": self._get_icon(
-                                                            "ramupdate.png"
-                                                        ),
-                                                        "StyleSheet": "QPushButton { border: 1px solid #333; background-color: #1a1a1a; border-radius: 4px; } QPushButton:hover { background-color: #252525; border: 1px solid #444; } QPushButton:pressed { background-color: #111; border: 1px solid #222; }",
+                                                        "Flat": True,
+                                                        "ToolTip": "Click to refresh",
+                                                        "MinimumSize": [220, 70],
+                                                        "StyleSheet": "QPushButton { background-color: transparent; border: none; } QPushButton:hover { background-color: rgba(255, 255, 255, 15); border: 1px solid #444; border-radius: 4px; } QPushButton:pressed { background-color: rgba(0, 0, 0, 30); }",
                                                     }
                                                 ),
                                             ],
@@ -941,7 +947,7 @@ class RamsesFusionApp:
         )
 
         # Bind Events
-        self.dlg.On.RefreshButton.Clicked = lambda ev: self.refresh_header(
+        self.dlg.On.ContextButton.Clicked = lambda ev: self.refresh_header(
             force_full=True
         )
         self.dlg.On.RamsesButton.Clicked = self.on_run_ramses
