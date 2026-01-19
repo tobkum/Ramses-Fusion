@@ -213,7 +213,7 @@ class RamsesFusionApp:
                     items["ContextLabel"].Text = self._get_context_text()
                 else:
                     items[
-                        "ContextButton"
+                        "ContextLabel"
                     ].Text = "<font color='#ff4444'><b>CONNECTION ERROR</b></font><br><font color='#999'>Ramses Client is offline</font>"
 
             if "RamsesVersion" in items:
@@ -899,7 +899,28 @@ class RamsesFusionApp:
                                                         ),
                                                     ],
                                                 ),
-                                                # Layer 2: Transparent button for click handling
+                                                # Layer 2: Refresh icon in top-right corner
+                                                self.ui.VGroup(
+                                                    {"Spacing": 0},
+                                                    [
+                                                        self.ui.HGroup(
+                                                            {"Weight": 0, "Spacing": 0},
+                                                            [
+                                                                self.ui.HGap(0, 1),
+                                                                self.ui.Label(
+                                                                    {
+                                                                        "ID": "RefreshIcon",
+                                                                        "Text": "↻",
+                                                                        "Weight": 0,
+                                                                        "StyleSheet": "QLabel { color: #777; font-size: 14px; font-weight: bold; padding: 3px 5px 0 0; }",
+                                                                    }
+                                                                ),
+                                                            ],
+                                                        ),
+                                                        self.ui.VGap(0, 1),
+                                                    ],
+                                                ),
+                                                # Layer 3: Transparent button for click handling (on top)
                                                 self.ui.Button(
                                                     {
                                                         "ID": "ContextButton",
