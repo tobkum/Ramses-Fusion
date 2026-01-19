@@ -2088,9 +2088,10 @@ class RamsesFusionApp:
 
     @requires_connection
     def on_comment(self, ev: object) -> None:
-        """Handler for 'Add Note' button.
+        """Handler for 'Add Note && Save' button.
 
         Shows a dialog to add a descriptive note to the current version in the Ramses DB.
+        Includes an option to perform an incremental save.
 
         Args:
             ev: The event object (unused).
@@ -2101,7 +2102,7 @@ class RamsesFusionApp:
         state = status.state() if status else None
 
         res = host._request_input(
-            "Add Note",
+            "Add Note && Save",
             [
                 {
                     "id": "Comment",
@@ -2109,19 +2110,37 @@ class RamsesFusionApp:
                     "type": "text",
                     "default": current_note,
                     "lines": 5,
+                },
+                {
+                    "id": "Incremental",
+                    "label": "Save as New Version:",
+                    "type": "checkbox",
+                    "default": False,
                 }
             ],
         )
-        if res is not None and res["Comment"] != current_note:
-            has_project = self.ramses.project() is not None
 
-            if host.save(comment=res["Comment"], setupFile=has_project, state=state):
-                # 1. Update Database Status
-                if status:
-                    status.setComment(res["Comment"])
-                    status.setVersion(host.currentVersion())
+        if res is not None:
+            comment_changed = res["Comment"] != current_note
+            is_incremental = res["Incremental"]
+            
+            # Proceed if note changed OR if user explicitly asked for a new version
+            if comment_changed or is_incremental:
+                has_project = self.ramses.project() is not None
 
-                self.refresh_header()
+                if host.save(
+                    comment=res["Comment"], 
+                    setupFile=has_project, 
+                    incremental=is_incremental,
+                    state=state
+                ):
+                    # 1. Update Database Status
+                    if status:
+                        status.setComment(res["Comment"])
+                        # If incremental, the host has updated the version number on disk
+                        status.setVersion(host.currentVersion())
+
+                    self.refresh_header()
 
     @requires_connection
     def on_update_status(self, ev: object) -> None:
