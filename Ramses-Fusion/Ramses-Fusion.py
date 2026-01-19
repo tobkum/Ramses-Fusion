@@ -2,7 +2,7 @@ import sys
 import os
 import re
 import concurrent.futures
-from typing import Optional
+from typing import Optional, List, Any
 
 # Add the 'lib' directory to Python's search path
 try:
@@ -1011,7 +1011,7 @@ class RamsesFusionApp:
         self.dlg.Hide()
         self.dlg = None  # Cleanup reference after exit
 
-    def _create_section_header(self, id_name: str, title: str, content_id: str):
+    def _create_section_header(self, id_name: str, title: str, content_id: str) -> Any:
         """Creates a clickable section header that toggles a content group.
 
         Args:
@@ -1020,7 +1020,7 @@ class RamsesFusionApp:
             content_id (str): ID of the VGroup to toggle.
 
         Returns:
-            Button: The Fusion UI button styled as a header.
+            Any: The Fusion UI button styled as a header.
         """
         # Initial state
         is_collapsed = self._section_states.get(content_id, False)
@@ -1225,15 +1225,15 @@ class RamsesFusionApp:
 
     def create_button(
         self,
-        id_name,
-        text,
-        icon_name,
-        weight=0,
-        tooltip="",
-        min_size=None,
-        max_size=None,
-        accent_color=None,
-    ):
+        id_name: str,
+        text: str,
+        icon_name: str,
+        weight: int = 0,
+        tooltip: str = "",
+        min_size: Optional[List[int]] = None,
+        max_size: Optional[List[int]] = None,
+        accent_color: Optional[str] = None,
+    ) -> Any:
         """Creates a standardized UI Button with optional styling.
 
         Applies custom CSS stylesheets for background color, hover, and pressed states.
@@ -1249,7 +1249,7 @@ class RamsesFusionApp:
             accent_color (str, optional): Hex color code for background. Defaults to None.
 
         Returns:
-            Button: The created Fusion UI button.
+            Any: The created Fusion UI button.
         """
         # Base Style: Reverted to the original flat 1px solid #222 border
         ss = f"QPushButton {{ text-align: left; padding-left: 12px; border: 1px solid #222; border-radius: 3px;"
