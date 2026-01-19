@@ -2143,7 +2143,8 @@ class RamsesFusionApp:
             try:
                 txt = itm["YAML"].PlainText
                 data = yaml.safe_load(txt) if txt.strip() else {}
-            except Exception:
+            except Exception as e:
+                self.log(f"Failed to parse existing YAML: {e}", ram.LogLevel.Debug)
                 data = {}
             
             new_data = self._show_step_config_wizard(step, data)
