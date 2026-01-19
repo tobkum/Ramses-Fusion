@@ -1185,11 +1185,11 @@ class RamsesFusionApp:
                 ),
                 self.create_button(
                     "CommentButton",
-                    "Add Note",
+                    "Add Note && Save",
                     "ramcomment.png",
                     accent_color=bg_color,
                     weight=0,
-                    tooltip="Add a descriptive note to the current version in the Ramses database.",
+                    tooltip="Add a descriptive note and save the current version in the Ramses database.",
                 ),
                 self.create_button(
                     "RetrieveButton",
