@@ -1177,7 +1177,7 @@ class RamsesFusionApp:
                 ),
                 self.create_button(
                     "IncrementalSaveButton",
-                    "Incremental Save",
+                    "Save Incremental",
                     "ramsaveincremental.png",
                     accent_color=bg_color,
                     weight=0,
@@ -2069,7 +2069,7 @@ class RamsesFusionApp:
 
     @requires_connection
     def on_incremental_save(self, ev: object) -> None:
-        """Handler for 'Incremental Save' button.
+        """Handler for 'Save Incremental' button.
 
         Saves the current file as a new version (e.g., v001 -> v002).
 

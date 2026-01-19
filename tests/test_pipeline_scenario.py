@@ -170,7 +170,7 @@ class TestPipelineScenario(unittest.TestCase):
             # Verify Identity Persistence (Metadata was written)
             self.assertEqual(comp.GetData("Ramses.ItemUUID"), "shot-456")
 
-            # --- PHASE 3: Iteration (Incremental Save & Note) ---
+            # --- PHASE 3: Iteration (Save Incremental & Note) ---
             mock_status = MagicMock()
             mock_status.state.return_value = mock_wip_state
             mock_status.comment.return_value = "Old Note"
