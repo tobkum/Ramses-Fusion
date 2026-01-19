@@ -3,7 +3,6 @@ import os
 import re
 import json
 import threading
-import socket
 import glob
 from ramses import RamHost, RamItem, RamStep, RamStatus, RamFileInfo, LogLevel, ItemType, RAMSES, RAM_SETTINGS, RamMetaDataManager, RamState, RamDaemonInterface
 try:

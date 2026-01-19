@@ -97,14 +97,26 @@ class MockComp:
         self.ActiveTool = None
         self.CurrentFrame = MockFrame()
         self.locked = False
+        self._modified = False
+
+    @property
+    def Modified(self):
+        """Track whether the comp has been modified."""
+        return self._modified
+
+    @Modified.setter
+    def Modified(self, value):
+        """Allow explicitly setting Modified flag (e.g., for test reset)."""
+        self._modified = value
 
     def GetAttrs(self):
         return self.attrs
 
     def SetAttrs(self, attrs):
         self.attrs.update(attrs)
+        self._modified = True  # Mark as dirty when attrs change
         return True
-        
+
     def GetPrefs(self, pref_name=""):
         if pref_name == "Comp.FrameFormat":
             # Flattened structure logic for simplicity
@@ -119,6 +131,7 @@ class MockComp:
 
     def SetPrefs(self, prefs):
         self.prefs.update(prefs)
+        self._modified = True  # Mark as dirty when prefs change
 
     def FindTool(self, name):
         # Fusion's FindTool usually searches by the node's Name attribute
@@ -158,9 +171,12 @@ class MockComp:
         
     def GetData(self, key):
         return self.metadata.get(key)
-        
+
     def SetData(self, key, value):
-        self.metadata[key] = value
+        # Only mark as dirty if the value actually changes
+        if self.metadata.get(key) != value:
+            self.metadata[key] = value
+            self._modified = True
 
 class MockUIManager:
     # Minimal mock for UIManager

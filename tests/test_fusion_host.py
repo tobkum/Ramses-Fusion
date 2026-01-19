@@ -370,14 +370,21 @@ class TestFusionHost(unittest.TestCase):
         """Verify that metadata and presets only write if values actually changed."""
         mock_item = MagicMock()
         mock_item.uuid.return_value = "fixed-uuid"
-        
+
+        # Setup mock project to return a known UUID
+        mock_project = MagicMock()
+        mock_project.uuid.return_value = "fixed-project-uuid"
+        mock_item.project.return_value = mock_project
+
         # Avoid Ramses context lookup
         self.host.currentStep = MagicMock(return_value=None)
-        
+
         comp = self.mock_fusion.GetCurrentComp()
+        # Pre-set both metadata values that _store_ramses_metadata might write
         comp.SetData("Ramses.ItemUUID", "fixed-uuid")
+        comp.SetData("Ramses.ProjectUUID", "fixed-project-uuid")
         comp.Modified = False # Reset dirty flag
-        
+
         # 1. Metadata check
         self.host._store_ramses_metadata(mock_item)
         self.assertFalse(comp.Modified, "Comp should not be dirty if metadata is identical")
