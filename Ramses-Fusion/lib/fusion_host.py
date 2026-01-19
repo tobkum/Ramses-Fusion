@@ -31,9 +31,10 @@ if not hasattr(RamFileManager, "_fusion_patched"):
     # 2. Fix Case Sensitivity and robust matching for version files on Windows.
     def _patched_getLatestVersionFilePath(filePath, previous=False):
         fileName = os.path.basename(filePath)
-        parts = fileName.split('.')[0].split('_')
-        if len(parts) < 4: return ''
-        base_id = "_".join(parts[:4]).lower() + "_"
+        # Strip extension and any existing version block (_v001, _WIP001, etc)
+        name_no_ext = fileName.split('.')[0]
+        clean_name = re.sub(r'_[a-zA-Z]*\d+$', '', name_no_ext)
+        base_id = clean_name.lower() + "_"
 
         versionsFolder = RamFileManager.getVersionFolder(filePath)
         if not os.path.isdir(versionsFolder): return ''
@@ -59,14 +60,13 @@ if not hasattr(RamFileManager, "_fusion_patched"):
 
     def _patched_getVersionFilePaths(filePath):
         fileName = os.path.basename(filePath)
-        parts = fileName.split('.')[0].split('_')
-        if len(parts) < 4: return []
-        base_id = "_".join(parts[:4]).lower() + "_"
+        name_no_ext = fileName.split('.')[0]
+        clean_name = re.sub(r'_[a-zA-Z]*\d+$', '', name_no_ext)
+        base_id = clean_name.lower() + "_"
 
         versionsFolder = RamFileManager.getVersionFolder(filePath)
         if not os.path.isdir(versionsFolder): return []
         
-        versionFiles = []
         candidates = []
         for f in os.listdir(versionsFolder):
             if not f.lower().startswith(base_id): continue
@@ -1231,11 +1231,7 @@ class FusionHost(RamHost):
         if item:
             self._store_ramses_metadata(item)
 
-        # 2. File Operation
-        dst = self.normalizePath(self.publishFilePath(ext, "", publishInfo))
-
         self.log(f"Publishing SRC: {src}", LogLevel.Info)
-        self.log(f"Publishing DST: {dst}", LogLevel.Info)
 
         published_files = []
 
@@ -1294,10 +1290,15 @@ class FusionHost(RamHost):
             # We use RamFileManager.copy instead of _saveAs to avoid switching Fusion's context
             # to the published folder. This ensures the user stays in the working file.
             try:
+                # Use publishInfo directly for the comp backup to follow API standards
+                comp_publish_info = publishInfo.copy()
+                comp_publish_info.extension = ext
+                dst_comp = self.normalizePath(comp_publish_info.filePath())
+                
                 # src is our current working file, which was just saved by RamHost.publish()
-                RamFileManager.copy(src, dst, separateThread=False)
-                self.log(f"Comp backup published to: {dst}", LogLevel.Info)
-                published_files.append(dst)
+                RamFileManager.copy(src, dst_comp, separateThread=False)
+                self.log(f"Comp backup published to: {dst_comp}", LogLevel.Info)
+                published_files.append(dst_comp)
             except Exception as e:
                 self.log(f"Failed to copy comp backup: {e}", LogLevel.Warning)
 
