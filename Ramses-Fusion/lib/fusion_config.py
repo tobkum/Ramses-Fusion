@@ -1,6 +1,9 @@
 # -*- coding: utf-8 -*-
 import re
 
+__all__ = ["FusionConfig"]
+
+
 class FusionConfig:
     """Helper class for parsing Fusion Saver nodes and managing Render Configuration.
     
