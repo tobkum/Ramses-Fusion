@@ -216,21 +216,33 @@ class TestFusionHost(unittest.TestCase):
         final_node.SetAttrs({"TOOLS_Name": "_FINAL"})
         final_node.Clip[1] = "D:/Renders/TEST_S_Shot01_COMP.mov"
         
-        # Setup mock publish info
+        # 1. Setup mock publish info
+        expected_dst = "D:/Projects/Published/TEST_S_Shot01_COMP.comp"
+        src_path = "D:/Projects/WIP/TEST_S_Shot01_COMP_v001.comp"
+        
         mock_info = MagicMock()
         mock_info.copy.return_value = mock_info
-        mock_info.filePath.return_value = "D:/Projects/Published/TEST_S_Shot01_COMP.comp"
+        mock_info.filePath.return_value = expected_dst
         
         self.host._verify_render_output = MagicMock(return_value=True)
+        
         # Mock os.makedirs to avoid actual folder creation during test
-        with patch("os.makedirs"), patch("ramses.file_manager.RamFileManager.copy") as mock_copy:
+        with patch("os.makedirs") as mock_makedirs, \
+             patch("ramses.file_manager.RamFileManager.copy") as mock_copy:
+            
             published = self.host._publish(mock_info, {})
         
-        # Should have 2 files: The render and the comp backup
+        # Rigorous Assertions:
+        # 1. Ensure directories were explicitly created (since API is now 'dry')
+        mock_makedirs.assert_called()
+        
+        # 2. Ensure the copy command used the correct SRC and DST
+        mock_copy.assert_called_once_with(src_path, expected_dst, separateThread=False)
+        
+        # 3. Ensure both paths are returned in the publish list
         self.assertEqual(len(published), 2)
         self.assertIn("D:/Renders/TEST_S_Shot01_COMP.mov", published)
-        self.assertIn("D:/Projects/Published/TEST_S_Shot01_COMP.comp", published)
-        mock_copy.assert_called()
+        self.assertIn(expected_dst, published)
 
     def test_publish_aborts_on_missing_anchor(self):
         """Verify that publish is aborted if no _FINAL anchor is present."""
@@ -306,6 +318,15 @@ class TestFusionHost(unittest.TestCase):
         with patch("os.path.exists", return_value=False), \
              patch("os.path.isdir", return_value=True), \
              patch("glob.glob", return_value=[]):
+            
+            self.assertFalse(self.host._verify_render_output(path))
+
+        # 4. Test failure (files exist but are 0 bytes)
+        with patch("os.path.exists", return_value=False), \
+             patch("os.path.isdir", return_value=True), \
+             patch("glob.glob", return_value=["D:/Renders/shot.0001.exr"]), \
+             patch("os.path.isfile", return_value=True), \
+             patch("os.path.getsize", return_value=0):
             
             self.assertFalse(self.host._verify_render_output(path))
 
