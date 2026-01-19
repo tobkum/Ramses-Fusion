@@ -376,6 +376,16 @@ class RamsesFusionApp:
         project_name = project.name() if project else item.projectShortName()
         item_name = item.shortName()
 
+        # 0. Sequence prefix (for shots only)
+        seq_prefix = ""
+        if item.itemType() == ram.ItemType.SHOT:
+            try:
+                seq = item.sequence()
+                if seq:
+                    seq_prefix = f"<font color='#666'><b>{seq.shortName()}</b> | </font>"
+            except Exception:
+                pass
+
         # 1. Step with color
         step_name = "No Step"
         if step:
@@ -409,7 +419,7 @@ class RamsesFusionApp:
         # HERO ID Layout
         return (
             f"<font color='#777' size='3'>{project_name.upper()}</font><br>"
-            f"<font color='#FFF' size='5'><b>{item_name}</b>{priority_suffix}</font><br>"
+            f"{seq_prefix}<font color='#FFF' size='5'><b>{item_name}</b>{priority_suffix}</font><br>"
             f"<font size='3'>{step_name}{state_label}</font>"
         )
 
