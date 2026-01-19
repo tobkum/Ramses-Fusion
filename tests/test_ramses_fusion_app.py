@@ -221,6 +221,10 @@ class TestRamsesFusionApp(unittest.TestCase):
         self.app.ramses.host.currentItem = MagicMock(
             return_value=MagicMock(name="ItemA")
         )
+        # Fix: Must also mock currentStep, otherwise _step_cache is None and cache invalidates
+        self.app.ramses.host.currentStep = MagicMock(
+            return_value=MagicMock(name="StepA")
+        )
 
         # Reset call count (app init calls it once)
         self.app.ramses.host.currentItem.reset_mock()
@@ -278,7 +282,7 @@ class TestRamsesFusionApp(unittest.TestCase):
             self.app.refresh_header.assert_called_once()
 
     def test_on_note_logic(self):
-        """Verify that 'Add Note' pre-fills correctly and only saves on change."""
+        """Verify that 'Save with Note' handles comments and incremental saves correctly."""
         host = self.app.ramses.host
         mock_status = MagicMock()
         mock_status.comment.return_value = "Old Note"
@@ -296,20 +300,35 @@ class TestRamsesFusionApp(unittest.TestCase):
                     self.app.on_comment(None)
                     host.save.assert_not_called()
 
-                # 2. Test No Change (no save)
+                # 2. Test No Change + No Increment (no save)
                 with patch.object(
-                    host, "_request_input", return_value={"Comment": "Old Note"}
+                    host, "_request_input", return_value={"Comment": "Old Note", "Incremental": False}
                 ):
                     self.app.on_comment(None)
                     host.save.assert_not_called()
 
-                # 3. Test Change (Save triggered with state propagation)
+                # 3. Test Comment Change + No Increment (Overwrite Save)
                 with patch.object(
-                    host, "_request_input", return_value={"Comment": "New Note"}
+                    host, "_request_input", return_value={"Comment": "New Note", "Incremental": False}
                 ):
                     self.app.on_comment(None)
                     host.save.assert_called_with(
-                        comment="New Note", setupFile=True, state=mock_state
+                        comment="New Note", setupFile=True, incremental=False, state=mock_state
+                    )
+                    self.app.refresh_header.assert_called_once()
+                
+                # Reset mocks
+                host.save.reset_mock()
+                self.app.refresh_header.reset_mock()
+
+                # 4. Test No Comment Change + Increment (Incremental Save)
+                # User wants a new version but keeps the old note
+                with patch.object(
+                    host, "_request_input", return_value={"Comment": "Old Note", "Incremental": True}
+                ):
+                    self.app.on_comment(None)
+                    host.save.assert_called_with(
+                        comment="Old Note", setupFile=True, incremental=True, state=mock_state
                     )
                     self.app.refresh_header.assert_called_once()
 
