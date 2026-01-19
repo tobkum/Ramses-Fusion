@@ -119,6 +119,94 @@ if not hasattr(RamFileManager, "_fusion_patched"):
     RamMetaDataManager.getMetaData = staticmethod(_patched_getMetaData)
     RamMetaDataManager.getFileMetaData = staticmethod(_patched_getFileMetaData)
 
+    # 5. Fix Side-Effect: Prevent automatic directory creation during path resolution.
+    # The API's default behavior creates _versions and _published folders just by 
+    # checking paths, which clutters the filesystem during UI refreshes.
+    def _patched_getVersionFolder(filePath):
+        fileFolder = os.path.dirname(filePath)
+        from ramses import RAM_SETTINGS
+        versionsFolderName = RAM_SETTINGS.folderNames.versions
+        if RamFileManager.inVersionsFolder(filePath):
+            return fileFolder
+        elif RamFileManager.inPublishFolder(filePath) or RamFileManager.inPreviewFolder(filePath):
+            return os.path.join(os.path.dirname(fileFolder), versionsFolderName).replace("\\", "/")
+        return os.path.join(fileFolder, versionsFolderName).replace("\\", "/")
+
+    def _patched_getPublishFolder(filePath):
+        fileFolder = os.path.dirname(filePath)
+        from ramses import RAM_SETTINGS
+        publishFolderName = RAM_SETTINGS.folderNames.publish
+        if RamFileManager.inPublishFolder(filePath):
+            return fileFolder
+        elif RamFileManager.inVersionsFolder(filePath) or RamFileManager.inPreviewFolder(filePath):
+            return os.path.join(os.path.dirname(fileFolder), publishFolderName).replace("\\", "/")
+        return os.path.join(fileFolder, publishFolderName).replace("\\", "/")
+
+    def _patched_getPublishInfo(filePath):
+        if not os.path.isfile(filePath): return RamFileInfo()
+        fileInfo = RamFileInfo()
+        fileInfo.setFilePath(filePath)
+        publishFolder = RamFileManager.getPublishFolder(filePath)
+        versionInfo = RamFileManager.getLatestVersionInfo(filePath)
+        versionFolder = ""
+        if versionInfo.resource != "": versionFolder = versionInfo.resource + "_"
+        from ramses.utils import intToStr
+        versionFolder += intToStr(max(1, versionInfo.version))
+        if versionInfo.state != "" and versionInfo.state.lower() != "v":
+            versionFolder += "_" + versionInfo.state
+        newFilePath = os.path.join(publishFolder, versionFolder, fileInfo.fileName()).replace("\\", "/")
+        publishedInfo = RamFileInfo()
+        publishedInfo.setFilePath(newFilePath)
+        publishedInfo.date = fileInfo.date
+        publishedInfo.version = versionInfo.version
+        if versionInfo.state != "" and versionInfo.state.lower() != "v":
+            publishedInfo.state = versionInfo.state
+        return publishedInfo
+
+    RamFileManager.getVersionFolder = staticmethod(_patched_getVersionFolder)
+    RamFileManager.getPublishFolder = staticmethod(_patched_getPublishFolder)
+    RamFileManager.getPublishInfo = staticmethod(_patched_getPublishInfo)
+
+    # 6. Fix State Reversion: Allow passing target state to publish process.
+    def _patched_publish(self, forceShowPublishUI=False, incrementVersion=True, publishOptions=None, state=None):
+        item = self.currentItem()
+        step = self.currentStep()
+        if not item or not step: return False
+        
+        # Save with correct state to prevent reversion
+        state_short = state.shortName() if state else None
+        self._RamHost__save(self.saveFilePath(), comment="Published", newStateShortName=state_short)
+        
+        publishInfo = self.publishInfo()
+        if not publishOptions: publishOptions = step.publishSettings('yaml')
+        publishOptions = self._publishOptions(publishOptions, forceShowPublishUI)
+        if publishOptions is False or publishOptions is None: return False
+        
+        ramPublishOptions = publishOptions.get('ramsesPublishOptions', {})
+        if ramPublishOptions.get('useTempFile', False): self.createTempWorkingFile()
+        
+        if not self._RamHost__runUserScripts("before_pre_publish", publishInfo, publishOptions, item, step): return False
+        publishOptions = self._prePublish(publishInfo, publishOptions)
+        if publishOptions is False or publishOptions is None: return False
+        
+        if ramPublishOptions.get('backupFile', False): self._RamHost__backupPublishedFile(publishInfo)
+        if not self._RamHost__runUserScripts("before_publish", publishInfo, item, step, publishOptions): return False
+        
+        published_files = self._publish(publishInfo, publishOptions)
+        if not published_files: return False
+        for file in published_files: self._RamHost__setPublishMetadata(file, publishInfo)
+        if not self._RamHost__runUserScripts("on_publish", published_files, publishInfo, item, step, publishOptions): return False
+        
+        status = self.currentStatus()
+        if status: status.setPublished(True)
+        self.closeTempWorkingFile()
+        
+        if incrementVersion:
+            self._RamHost__save(self.saveFilePath(), incrementVersion=True, newStateShortName=state_short)
+        return True
+
+    RamHost.publish = _patched_publish
+
 # =============================================================================
 
 class FusionHost(RamHost):
@@ -944,6 +1032,12 @@ class FusionHost(RamHost):
 
         # 3. Armed for render
         self.log(f"Starting preview render to: {dst}", LogLevel.Info)
+        
+        # Ensure directory exists
+        prev_dir = os.path.dirname(dst)
+        if not os.path.exists(prev_dir):
+            os.makedirs(prev_dir)
+            
         preview_node.Clip[1] = dst
         self.apply_render_preset(preview_node, "preview")
         preview_node.SetAttrs({"TOOLB_PassThrough": False})
@@ -1064,7 +1158,8 @@ class FusionHost(RamHost):
         return super(FusionHost, self).publish(
             forceShowPublishUI=forceShowPublishUI, 
             incrementVersion=incrementVersion, 
-            publishOptions=publishOptions
+            publishOptions=publishOptions,
+            state=state
         )
 
     def saveAs(self, setupFile:bool=True, state:RamState=None) -> bool:
@@ -1250,11 +1345,16 @@ class FusionHost(RamHost):
             # Enable the node
             final_node.SetAttrs({"TOOLB_PassThrough": False})
             render_success = False
-            render_path = ""
+            
+            # Resolve and create directory before render
+            render_path = self.normalizePath(final_node.Clip[1])
+            render_dir = os.path.dirname(render_path)
+            if render_dir and not os.path.exists(render_dir):
+                os.makedirs(render_dir)
+
             try:
                 # Execute render - comp.Render returns True only on success
                 if self.comp.Render(True):
-                    render_path = self.normalizePath(final_node.Clip[1])
                     # Secondary Verification: Check file existence and size
                     if self._verify_render_output(render_path):
                         self.log(
@@ -1294,6 +1394,11 @@ class FusionHost(RamHost):
                 comp_publish_info = publishInfo.copy()
                 comp_publish_info.extension = ext
                 dst_comp = self.normalizePath(comp_publish_info.filePath())
+                
+                # Ensure directory exists (monkey-patched API no longer creates it automatically)
+                comp_dir = os.path.dirname(dst_comp)
+                if not os.path.exists(comp_dir):
+                    os.makedirs(comp_dir)
                 
                 # src is our current working file, which was just saved by RamHost.publish()
                 RamFileManager.copy(src, dst_comp, separateThread=False)
