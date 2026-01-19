@@ -216,17 +216,21 @@ class TestFusionHost(unittest.TestCase):
         final_node.SetAttrs({"TOOLS_Name": "_FINAL"})
         final_node.Clip[1] = "D:/Renders/TEST_S_Shot01_COMP.mov"
         
+        # Setup mock publish info
         mock_info = MagicMock()
-        # Mock publishFilePath to return a backup path
-        self.host.publishFilePath = MagicMock(return_value="D:/Projects/Published/TEST_S_Shot01_COMP.comp")
-        self.host._verify_render_output = MagicMock(return_value=True)
+        mock_info.copy.return_value = mock_info
+        mock_info.filePath.return_value = "D:/Projects/Published/TEST_S_Shot01_COMP.comp"
         
-        published = self.host._publish(mock_info, {})
+        self.host._verify_render_output = MagicMock(return_value=True)
+        # Mock os.makedirs to avoid actual folder creation during test
+        with patch("os.makedirs"), patch("ramses.file_manager.RamFileManager.copy") as mock_copy:
+            published = self.host._publish(mock_info, {})
         
         # Should have 2 files: The render and the comp backup
         self.assertEqual(len(published), 2)
         self.assertIn("D:/Renders/TEST_S_Shot01_COMP.mov", published)
         self.assertIn("D:/Projects/Published/TEST_S_Shot01_COMP.comp", published)
+        mock_copy.assert_called()
 
     def test_publish_aborts_on_missing_anchor(self):
         """Verify that publish is aborted if no _FINAL anchor is present."""
@@ -275,6 +279,47 @@ class TestFusionHost(unittest.TestCase):
 
         # Should return empty list (aborted)
         self.assertEqual(published, [])
+
+    def test_verify_render_output_sequences(self):
+        """Verify that '_verify_render_output' handles image sequences with wildcards."""
+        # 1. Test standard sequence (.0000.exr)
+        path = "D:/Renders/shot.0000.exr"
+        with patch("os.path.exists", return_value=False), \
+             patch("os.path.isdir", return_value=True), \
+             patch("glob.glob", return_value=["D:/Renders/shot.0001.exr"]), \
+             patch("os.path.isfile", return_value=True), \
+             patch("os.path.getsize", return_value=1024):
+            
+            self.assertTrue(self.host._verify_render_output(path))
+
+        # 2. Test hash sequence (.####.exr)
+        path_hash = "D:/Renders/shot.####.exr"
+        with patch("os.path.exists", return_value=False), \
+             patch("os.path.isdir", return_value=True), \
+             patch("glob.glob", return_value=["D:/Renders/shot.1001.exr"]), \
+             patch("os.path.isfile", return_value=True), \
+             patch("os.path.getsize", return_value=1024):
+            
+            self.assertTrue(self.host._verify_render_output(path_hash))
+
+        # 3. Test failure (no matches)
+        with patch("os.path.exists", return_value=False), \
+             patch("os.path.isdir", return_value=True), \
+             patch("glob.glob", return_value=[]):
+            
+            self.assertFalse(self.host._verify_render_output(path))
+
+    def test_dry_path_resolution(self):
+        """Verify that path resolution doesn't create directories (Dry Resolution)."""
+        from ramses import RamFileManager
+        path = "D:/NewProject/NewShot/COMP/file.comp"
+        
+        with patch("os.makedirs") as mock_makedirs:
+            # These should NOT call makedirs
+            RamFileManager.getVersionFolder(path)
+            RamFileManager.getPublishFolder(path)
+            
+            mock_makedirs.assert_not_called()
 
     def test_logging(self):
         """Verifies that the logger outputs to stdout for INFO and above."""
