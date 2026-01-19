@@ -97,6 +97,7 @@ This list tracks planned improvements to elevate the Ramses-Fusion plugin for pr
     - [ ] **Outdated Asset Scanner**: Badge notification if Loader nodes have newer versions in Ramses.
 - [ ] **Interface & Layout**
     - [x] **Collapsible Sections**: Allow folding away groups (e.g., Assets, Settings) to save space.
+    - [ ] **Auto-Hide UI (Ghost Mode)**: Implement a mode where the plugin automatically collapses to its header (or title bar) when not in use, expanding only when the mouse hovers over it or it receives focus.
     - [ ] **Horizontal Action Bar**: Ultra-slim secondary UI mode for single-monitor setups.
 - [ ] **Pipeline Intelligence**
     - [ ] **Auto-Healing Validation**: One-click "Fix All" for technical mismatches.
