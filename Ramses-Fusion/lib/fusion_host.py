@@ -25,11 +25,13 @@ if not hasattr(RamFileManager, "_fusion_patched"):
     # 1. Fix Race Condition: Disable background threads for copies.
     original_copy = RamFileManager.copy
     def _patched_copy(originPath, destinationPath, separateThread=False):
+        """Forces synchronous file copying to prevent race conditions in Fusion's environment."""
         return original_copy(originPath, destinationPath, separateThread)
     RamFileManager.copy = staticmethod(_patched_copy)
 
     # 2. Fix Case Sensitivity and robust matching for version files on Windows.
     def _patched_getLatestVersionFilePath(filePath, previous=False):
+        """Resolves the latest version file path using a robust, case-insensitive identity match."""
         fileName = os.path.basename(filePath)
         # Strip extension and any existing version block (_v001, _WIP001, etc)
         name_no_ext = fileName.split('.')[0]
@@ -59,6 +61,7 @@ if not hasattr(RamFileManager, "_fusion_patched"):
         return candidates[-1][1]
 
     def _patched_getVersionFilePaths(filePath):
+        """Returns a list of all version files associated with the current composition's identity."""
         fileName = os.path.basename(filePath)
         name_no_ext = fileName.split('.')[0]
         clean_name = re.sub(r'_[a-zA-Z]*\d+$', '', name_no_ext)
@@ -123,6 +126,7 @@ if not hasattr(RamFileManager, "_fusion_patched"):
     # The API's default behavior creates _versions and _published folders just by 
     # checking paths, which clutters the filesystem during UI refreshes.
     def _patched_getVersionFolder(filePath):
+        """Resolves the versions subfolder path without automatically creating it."""
         fileFolder = os.path.dirname(filePath)
         from ramses import RAM_SETTINGS
         versionsFolderName = RAM_SETTINGS.folderNames.versions
@@ -133,6 +137,7 @@ if not hasattr(RamFileManager, "_fusion_patched"):
         return os.path.join(fileFolder, versionsFolderName).replace("\\", "/")
 
     def _patched_getPublishFolder(filePath):
+        """Resolves the published subfolder path without automatically creating it."""
         fileFolder = os.path.dirname(filePath)
         from ramses import RAM_SETTINGS
         publishFolderName = RAM_SETTINGS.folderNames.publish
@@ -143,6 +148,7 @@ if not hasattr(RamFileManager, "_fusion_patched"):
         return os.path.join(fileFolder, publishFolderName).replace("\\", "/")
 
     def _patched_getPublishInfo(filePath):
+        """Resolves publish metadata for a file without creating any directories on disk."""
         if not os.path.isfile(filePath): return RamFileInfo()
         fileInfo = RamFileInfo()
         fileInfo.setFilePath(filePath)
@@ -169,6 +175,7 @@ if not hasattr(RamFileManager, "_fusion_patched"):
 
     # 6. Fix State Reversion: Allow passing target state to publish process.
     def _patched_publish(self, forceShowPublishUI=False, incrementVersion=True, publishOptions=None, state=None):
+        """Extended publish process that supports state propagation to prevent archive status reversion."""
         item = self.currentItem()
         step = self.currentStep()
         if not item or not step: return False
