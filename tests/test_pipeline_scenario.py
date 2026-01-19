@@ -188,6 +188,15 @@ class TestPipelineScenario(unittest.TestCase):
                     comment="Added motion blur", setupFile=True, incremental=False, state=mock_wip_state
                 )
 
+            # --- PHASE 3.5: Preview (Dailies) ---
+            # User generates a preview for supervisor review
+            self.host.savePreview = MagicMock()
+            
+            # Mock validation passing for preview
+            with patch.object(self.app, "_validate_publish", return_value=(True, "", False)):
+                self.app.on_preview(None)
+                self.host.savePreview.assert_called_once()
+
             # --- PHASE 4: Delivery (Status Update + Publish) ---
             mock_done_state = MagicMock()
             mock_done_state.shortName.return_value = "DONE"
@@ -219,6 +228,15 @@ class TestPipelineScenario(unittest.TestCase):
             # Verify Database update
             mock_status.setState.assert_called_with(mock_done_state)
             mock_status.setComment.assert_called_with("Final version for review")
+
+            # --- PHASE 5: Version Control (Restoration) ---
+            # User realizes v5 has an error and rolls back to v4
+            self.host.restoreVersion = MagicMock(return_value=True)
+            
+            # Verify restoration handler triggers host logic and UI refresh
+            self.app.on_retrieve(None)
+            self.host.restoreVersion.assert_called_once()
+            self.app.refresh_header.assert_called()
 
 
 if __name__ == "__main__":
