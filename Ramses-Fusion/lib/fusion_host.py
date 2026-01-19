@@ -1127,10 +1127,10 @@ class FusionHost(RamHost):
             return False
             
         filename = os.path.basename(path)
-        # Identify common padding patterns: .0000. , .####. , %04d
-        # This replaces any sequence of 0s, #s or digit-based formatting with a wildcard
-        # while preserving the surrounding separators (like dots).
-        wildcard_name = re.sub(r'([\.#%])?\d*[#0d]+([\.#d])?', r'\1*\2', filename)
+        # Identify common padding patterns between dots: .0000. , .####. , .%04d.
+        # Uses lookbehind/lookahead to preserve the surrounding dots.
+        # Matches: sequences of zeros, hash symbols, or printf-style %d formats.
+        wildcard_name = re.sub(r'(?<=\.)(0+|#+|%\d*d)(?=\.)', '*', filename)
         
         if "*" in wildcard_name:
             matches = glob.glob(os.path.join(directory, wildcard_name).replace("\\", "/"))
