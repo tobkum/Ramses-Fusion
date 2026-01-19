@@ -337,7 +337,8 @@ class FusionHost(RamHost):
         # Only query if we have a valid item/step pair to avoid API crashes
         try:
             return item.currentStatus(step)
-        except Exception:
+        except Exception as e:
+            self._log(f"Failed to get status for {item}: {e}", LogLevel.Debug)
             return None
 
     def currentItem(self) -> RamItem:
@@ -370,8 +371,8 @@ class FusionHost(RamHost):
                     # Verify the real item actually exists in DB by checking shortName
                     if real_item.shortName() != "Unknown":
                         return real_item
-                except Exception:
-                    pass
+                except Exception as e:
+                    self._log(f"Metadata UUID recovery failed: {e}", LogLevel.Debug)
         
         return item
 
@@ -581,9 +582,9 @@ class FusionHost(RamHost):
                 filename = f"{base_filename}.{ext}"
             
             return self.normalizePath(os.path.join(preview_folder, filename))
-        except Exception:
+        except Exception as e:
+            self._log(f"Failed to resolve preview path: {e}", LogLevel.Debug)
             return ""
-
 
     def resolveFinalPath(self) -> str:
         """Resolves the designated master export path for the current shot.
@@ -632,8 +633,9 @@ class FusionHost(RamHost):
                 filename = f"{base_filename}.{ext}"
             
             return self.normalizePath(os.path.join(target_dir, filename))
-                
-        except Exception:
+
+        except Exception as e:
+            self._log(f"Failed to resolve final path: {e}", LogLevel.Debug)
             return ""
 
     def _saveAs(self, filePath:str, item:RamItem, step:RamStep, version:int, comment:str, incremented:bool) -> bool:

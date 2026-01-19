@@ -968,21 +968,26 @@ class RamsesFusionApp:
         # Bind Section Toggles
         def bind_toggle(header_id, content_id, title):
             def toggle(ev):
-                items = self.dlg.GetItems()
-                # Toggle internal state
-                is_collapsed = not self._section_states.get(content_id, False)
-                self._section_states[content_id] = is_collapsed
+                try:
+                    if not self.dlg:
+                        return
+                    items = self.dlg.GetItems()
+                    # Toggle internal state
+                    is_collapsed = not self._section_states.get(content_id, False)
+                    self._section_states[content_id] = is_collapsed
 
-                # Update Header Text
-                prefix = "[ + ]" if is_collapsed else "[ − ]"
-                items[header_id].Text = f"{prefix}  {title}"
+                    # Update Header Text
+                    prefix = "[ + ]" if is_collapsed else "[ − ]"
+                    items[header_id].Text = f"{prefix}  {title}"
 
-                # Manually toggle each button's visibility
-                for btn_id in section_map.get(content_id, []):
-                    if btn_id in items:
-                        items[btn_id].Hidden = is_collapsed
+                    # Manually toggle each button's visibility
+                    for btn_id in section_map.get(content_id, []):
+                        if btn_id in items:
+                            items[btn_id].Hidden = is_collapsed
 
-                self.resize_to_fit()
+                    self.resize_to_fit()
+                except Exception:
+                    pass  # Dialog may have been closed during event
 
             self.dlg.On[header_id].Clicked = toggle
 
