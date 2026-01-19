@@ -1,8 +1,6 @@
 # Ramses-Fusion Workflow Improvements TODO
 
-This list tracks planned improvements to elevate the Ramses-Fusion plugin for professional VFX workflows.
-
-## Completed Code Improvements (2026-01-15/17)
+## Completed Code Improvements
 - [x] **Robustness**: Fixed all bare `except` blocks with specific logging.
 - [x] **Safety**: Added null checks for critical status objects.
 - [x] **Bug Fix**: Resolved circular reference in About window.
