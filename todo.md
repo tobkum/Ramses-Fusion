@@ -18,6 +18,8 @@ This list tracks planned improvements to elevate the Ramses-Fusion plugin for pr
 - [x] **Code Quality**: Standardized path resolution in `fusion_host.py` using `_get_preset_settings` helper; eliminated redundant logic across `resolvePreviewPath` and `resolveFinalPath`.
 - [x] **Bug Fix**: Resolved "Double Extension" bug in sequence path generation.
 - [x] **Workflow**: Implemented dynamic zero-padding for image sequences based on shot frame range.
+- [x] **Configuration**: Global Render Specifications (Step-level YAML overrides for codec, format, and sequence settings).
+- [x] **QA**: Post-Render Verification (Wildcard sequence matching and 0-byte integrity checks).
 - [x] **Code Quality**: Removed significant code duplication in `fusion_config.py` (Parser and Extract methods) and verified with 39 unit tests.
 - [x] **Robustness**: Hardened Lua parser to support scientific notation and comments.
 - [x] **Safety**: Transactional Publish Workflow (Strictly requires `_FINAL` anchor; aborts all operations if render fails).
@@ -73,8 +75,6 @@ This list tracks planned improvements to elevate the Ramses-Fusion plugin for pr
 ## Quality Assurance
 - [ ] **Pre-Render Validation**
     - Sanity check before render: Unconnected nodes, missing media, tools left in PassThrough.
-- [ ] **Post-Render Verification**
-    - Verify file existence, sequence length, and file size to catch corrupted frames.
 
 ## Performance
 - [ ] **Background Status Fetching**
@@ -99,15 +99,3 @@ This list tracks planned improvements to elevate the Ramses-Fusion plugin for pr
 - [ ] **Pipeline Intelligence**
     - [ ] **Auto-Healing Validation**: One-click "Fix All" for technical mismatches.
     - [ ] **Structured Log Viewer**: Dedicated panel for Ramses-specific events and errors.
-
----
-
-## Configuration & Customization
-- [ ] **Global Render Specifications**
-    - Read render specs (codec, resolution, naming) from Ramses Project/Step YAML settings instead of hardcoding.
-    - _Example YAML:_
-      ```yaml
-      render_presets:
-        Preview: { format: "QuickTimeMovies", codec: "Apple ProRes 422_apcn" }
-        Final: { format: "QuickTimeMovies", codec: "Apple ProRes 4444_ap4h" }
-      ```
