@@ -1295,7 +1295,7 @@ class RamsesFusionApp:
             Any: The created Fusion UI button.
         """
         # Base Style: Reverted to the original flat 1px solid #222 border
-        ss = f"QPushButton {{ text-align: left; padding-left: 12px; border: 1px solid #222; border-radius: 3px;"
+        ss = "QPushButton { text-align: left; padding-left: 12px; border: 1px solid #222; border-radius: 3px;"
 
         if accent_color:
             ss += f" background-color: {accent_color}; }}"
@@ -1315,9 +1315,9 @@ class RamsesFusionApp:
                 max(0, hb - 10),
             )
 
-            ss += f" QPushButton:hover {{ background-color: {hover}; }}"
-            ss += f" QPushButton:pressed {{ background-color: {pressed}; }}"
-            ss += f" QPushButton:disabled {{ background-color: #222; color: #555; border: 1px solid #1a1a1a; }}"
+            ss += f"QPushButton:hover {{ background-color: {hover}; }}"
+            ss += f"QPushButton:pressed {{ background-color: {pressed}; }}"
+            ss += "QPushButton:disabled { background-color: #222; color: #555; border: 1px solid #1a1a1a; }"
         else:
             ss += " }"
 
