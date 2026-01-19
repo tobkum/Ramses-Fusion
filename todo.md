@@ -42,6 +42,7 @@ This list tracks planned improvements to elevate the Ramses-Fusion plugin for pr
 ## Pipeline Intelligence
 - [ ] **Dependency Tracking (Ramses "Uses")**
     - Automatically register imported assets in Ramses to track "This shot uses Asset X v002".
+    - **Integration**: Trigger this registration when using the proposed "Smart Import" dialog (see below).
 - [ ] **Outdated Asset Detection**
     - "Audit Scene" tool: Scan all Loaders and warn if newer published versions exist in the DB.
 - [ ] **Frame Range Validation on Import**
@@ -50,6 +51,21 @@ This list tracks planned improvements to elevate the Ramses-Fusion plugin for pr
     - Warn if an imported asset belongs to a different project or has mismatched FPS.
 
 ## Workflow Enhancements
+- [ ] **Dual Export Pipeline Support**
+    - **Mechanism**: Option to toggle between "Final Export" (Project `06-EXPORT` folder, unversioned) and "Step Export" (Step `_published` folder, versioned).
+    - **Implementation**: 
+        - Update `FusionHost.resolveFinalPath` to respect a new `export_dest` setting in the Step's YAML config.
+        - **UI**: Add a "Destination" dropdown (Project Export vs. Step Export) to the **FINAL** column in the `StepConfigWizard` ("Step Configuration" dialog).
+        - **Logic**: 
+            - `export_dest="project"` (Default): Use `project.exportPath()`.
+            - `export_dest="step"`: Force use of `publishFilePath()` (Versioned `_published` folder).
+        - **Pipeline Impact**: "Step Export" ensures renders are discoverable by the standard "Import Published" tool for downstream steps.
+- [ ] **Smart Import Dialog ("Pipeline Loader")**
+    - **Goal**: Replace the native file browser with a context-aware dialog for importing assets and step renders.
+    - **Features**:
+        - **Contexts**: Toggle between "Current Shot" (upstream steps) and "Global Assets".
+        - **Selectors**: Step (e.g., Lighting, FX) -> Version (Latest/Approved).
+        - **Metadata**: Automatically tags imported Loaders with Source UUIDs for dependency tracking.
 - [ ] **Customizable Preview Specs**
     - Allow users to toggle high-level render settings for PREVIEW renders (e.g., HiQ on/off, Motion Blur toggle, and Proxy Resolution overrides).
 - [ ] **Render Farm Integration**
