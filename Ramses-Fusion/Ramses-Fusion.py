@@ -881,7 +881,7 @@ class RamsesFusionApp:
                                                     {
                                                         "ID": "ContextFrame",
                                                         "Weight": 0,
-                                                        "StyleSheet": "QFrame { border: 1px solid #333; background-color: #1a1a1a; border-radius: 4px; }",
+                                                        "StyleSheet": "QFrame { border: 1px solid #3a4048; background-color: #1e2228; border-radius: 4px; }",
                                                     },
                                                     [
                                                         self.ui.Label(
@@ -907,7 +907,7 @@ class RamsesFusionApp:
                                                         "Flat": True,
                                                         "ToolTip": "Click to refresh",
                                                         "MinimumSize": [220, 70],
-                                                        "StyleSheet": "QPushButton { background-color: transparent; border: none; } QPushButton:hover { background-color: rgba(255, 255, 255, 15); border: 1px solid #444; border-radius: 4px; } QPushButton:pressed { background-color: rgba(0, 0, 0, 30); }",
+                                                        "StyleSheet": "QPushButton { background-color: transparent; border: none; } QPushButton:hover { background-color: rgba(255, 255, 255, 12); border: 1px solid #4a5562; border-radius: 4px; } QPushButton:pressed { background-color: rgba(0, 0, 0, 25); }",
                                                     }
                                                 ),
                                             ],
