@@ -50,6 +50,8 @@ This list tracks planned improvements to elevate the Ramses-Fusion plugin for pr
     - Warn if an imported asset belongs to a different project or has mismatched FPS.
 
 ## Workflow Enhancements
+- [ ] **Customizable Preview Specs**
+    - Allow users to toggle high-level render settings for PREVIEW renders (e.g., HiQ on/off, Motion Blur toggle, and Proxy Resolution overrides).
 - [ ] **Render Farm Integration**
     - Submit jobs to Deadline/OpenCue/etc. with proper metadata (frames, output path, user) instead of local render.
 - [ ] **Batch Operations**
