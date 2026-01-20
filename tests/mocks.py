@@ -55,16 +55,38 @@ class MockTool:
         return self.Input.get(name)
 
     def FindMainInput(self, index):
-        # Mock connection checking
-        return MockInput(self)
+        # Mock connection checking - return cached input or create new one
+        if not hasattr(self, '_main_input'):
+            self._main_input = MockInput(self, connected=False)
+        return self._main_input
+
+    def connect_input(self):
+        """Test helper to simulate a connected input."""
+        if not hasattr(self, '_main_input'):
+            self._main_input = MockInput(self, connected=True)
+        else:
+            self._main_input.connect()
+
+    def disconnect_input(self):
+        """Test helper to simulate a disconnected input."""
+        if hasattr(self, '_main_input'):
+            self._main_input.disconnect()
 
 class MockInput:
-    def __init__(self, owner):
+    def __init__(self, owner, connected=False):
         self.owner = owner
-        self.connected_output = None
-        
+        self.connected_output = MagicMock(name="ConnectedOutput") if connected else None
+
     def GetConnectedOutput(self):
         return self.connected_output
+
+    def connect(self):
+        """Test helper to simulate a connected input."""
+        self.connected_output = MagicMock(name="ConnectedOutput")
+
+    def disconnect(self):
+        """Test helper to simulate a disconnected input."""
+        self.connected_output = None
 
 class MockFlowView:
     def GetPosTable(self, tool):

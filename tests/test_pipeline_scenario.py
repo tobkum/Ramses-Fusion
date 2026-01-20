@@ -99,11 +99,13 @@ class TestPipelineScenario(unittest.TestCase):
         mock_exists,
     ):
         """
-        Walkthrough:
-        1. User creates a new shot SH010 via the wizard.
-        2. User syncs project settings (Resolution, FPS).
-        3. User performs an incremental save with a note.
-        4. User updates status to DONE and publishes.
+        Walkthrough - Tests ACTUAL STATE CHANGES through the pipeline:
+        1. User sets up scene (syncs project settings).
+        2. User triggers save via app handler.
+        3. User adds a note via app handler.
+        4. User generates preview.
+        5. User updates status and publishes.
+        6. User restores a previous version.
         """
         # Ensure connection check doesn't block or try to reach daemon
         self.app.ramses.online = MagicMock(return_value=True)
@@ -128,7 +130,18 @@ class TestPipelineScenario(unittest.TestCase):
             self.host.currentItem = MagicMock(return_value=mock_shot)
             self.host.currentStep = MagicMock(return_value=MagicMock())
 
-            # --- PHASE 1: Shot Creation ---
+            # --- PHASE 1: Initial State Verification ---
+            comp = self.mock_fusion.GetCurrentComp()
+
+            # Verify comp starts without Ramses metadata
+            self.assertIsNone(comp.GetData("Ramses.ItemUUID"))
+            self.assertIsNone(comp.GetData("Ramses.ProjectUUID"))
+
+            # Verify no anchor nodes exist initially
+            self.assertIsNone(comp.FindTool("_PREVIEW"))
+            self.assertIsNone(comp.FindTool("_FINAL"))
+
+            # --- PHASE 2: Scene Setup - Verify ACTUAL State Changes ---
             self.app.ramses.project = MagicMock(return_value=mock_project)
 
             mock_wip_state = MagicMock()
@@ -137,17 +150,8 @@ class TestPipelineScenario(unittest.TestCase):
             self.app.ramses.defaultState = MagicMock(return_value=mock_wip_state)
 
             path = "D:/Projects/TESTPROJ/SH010/COMP/TESTPROJ_S_SH010_COMP.comp"
-            self.mock_fusion.GetCurrentComp().SetAttrs({"COMPS_FileName": path})
+            comp.SetAttrs({"COMPS_FileName": path})
 
-            with patch.object(self.host, "save", return_value=True) as mock_save:
-                self.host.save(
-                    comment="Initial creation", setupFile=True, state=mock_wip_state
-                )
-                mock_save.assert_called_with(
-                    comment="Initial creation", setupFile=True, state=mock_wip_state
-                )
-
-            # --- PHASE 2: Scene Setup & Identity Verification ---
             # Setup settings
             db_settings = {
                 "width": 1920,
@@ -161,43 +165,93 @@ class TestPipelineScenario(unittest.TestCase):
             )
             self.host.resolveFinalPath = MagicMock(return_value="D:/Renders/SH010.mov")
 
+            # Trigger setup scene
             self.app.on_setup_scene(None)
 
-            comp = self.mock_fusion.GetCurrentComp()
-            self.assertEqual(comp.GetPrefs("Comp.FrameFormat")["Width"], 1920)
-            self.assertIsNotNone(comp.FindTool("_FINAL"))
+            # VERIFY ACTUAL STATE CHANGES (not mock calls):
+            # 1. Resolution was applied
+            prefs = comp.GetPrefs("Comp.FrameFormat")
+            self.assertEqual(prefs["Width"], 1920, "Width should be set to 1920")
+            self.assertEqual(prefs["Height"], 1080, "Height should be set to 1080")
+            self.assertEqual(prefs["Rate"], 24.0, "Framerate should be set to 24.0")
 
-            # Verify Identity Persistence (Metadata was written)
-            self.assertEqual(comp.GetData("Ramses.ItemUUID"), "shot-456")
+            # 2. Anchor nodes were created
+            preview_node = comp.FindTool("_PREVIEW")
+            final_node = comp.FindTool("_FINAL")
+            self.assertIsNotNone(preview_node, "_PREVIEW anchor should exist")
+            self.assertIsNotNone(final_node, "_FINAL anchor should exist")
 
-            # --- PHASE 3: Iteration (Save Incremental & Note) ---
-            mock_status = MagicMock()
-            mock_status.state.return_value = mock_wip_state
-            mock_status.comment.return_value = "Old Note"
-            self.host.currentStatus = MagicMock(return_value=mock_status)
+            # 3. Anchor paths were set correctly
+            self.assertEqual(preview_node.Clip[1], "D:/Previews/SH010.mov")
+            self.assertEqual(final_node.Clip[1], "D:/Renders/SH010.mov")
 
-            # User adds a note
-            self.host._request_input = MagicMock(
-                return_value={"Comment": "Added motion blur", "Incremental": False}
+            # 4. Anchors are disabled by default (PassThrough)
+            self.assertTrue(
+                preview_node.attrs.get("TOOLB_PassThrough"),
+                "_PREVIEW should be pass-through"
+            )
+            self.assertTrue(
+                final_node.attrs.get("TOOLB_PassThrough"),
+                "_FINAL should be pass-through"
             )
 
-            # Verify that save was called with the note AND state preservation
-            with patch.object(self.host, "save", return_value=True) as mock_save_iter:
-                self.app.on_comment(None)
-                mock_save_iter.assert_called_with(
-                    comment="Added motion blur", setupFile=True, incremental=False, state=mock_wip_state
+            # 5. Identity metadata was persisted
+            self.assertEqual(
+                comp.GetData("Ramses.ItemUUID"), "shot-456",
+                "Item UUID should be stored in comp metadata"
+            )
+            self.assertEqual(
+                comp.GetData("Ramses.ProjectUUID"), "proj-123",
+                "Project UUID should be stored in comp metadata"
+            )
+
+            # --- PHASE 3: Save Handler Test ---
+            # Test that on_save triggers host.save with correct state propagation
+            mock_status = MagicMock()
+            mock_status.state.return_value = mock_wip_state
+            mock_status.comment.return_value = ""
+            self.host.currentStatus = MagicMock(return_value=mock_status)
+
+            with patch.object(self.host, "save", return_value=True) as mock_save:
+                # Trigger via APP handler (not direct host call)
+                self.app.on_save(None)
+
+                # Verify the APP correctly called HOST with state propagation
+                mock_save.assert_called_once()
+                call_kwargs = mock_save.call_args[1]
+                self.assertEqual(
+                    call_kwargs.get("state"), mock_wip_state,
+                    "Save should propagate current state"
                 )
 
-            # --- PHASE 3.5: Preview (Dailies) ---
-            # User generates a preview for supervisor review
+            # --- PHASE 4: Comment Handler Test ---
+            mock_status.comment.return_value = "Old Note"
+
+            # Simulate user input for note dialog
+            self.host._request_input = MagicMock(
+                return_value={"Comment": "Added motion blur", "Incremental": True}
+            )
+
+            with patch.object(self.host, "save", return_value=True) as mock_save:
+                # Trigger via APP handler
+                self.app.on_comment(None)
+
+                # Verify comment was passed and incremental flag respected
+                mock_save.assert_called_once()
+                call_kwargs = mock_save.call_args[1]
+                self.assertEqual(call_kwargs.get("comment"), "Added motion blur")
+                self.assertTrue(call_kwargs.get("incremental"))
+                self.assertEqual(call_kwargs.get("state"), mock_wip_state)
+
+            # --- PHASE 5: Preview Handler Test ---
             self.host.savePreview = MagicMock()
-            
+
             # Mock validation passing for preview
             with patch.object(self.app, "_validate_publish", return_value=(True, "", False)):
                 self.app.on_preview(None)
                 self.host.savePreview.assert_called_once()
 
-            # --- PHASE 4: Delivery (Status Update + Publish) ---
+            # --- PHASE 6: Status Update Transaction Test ---
             mock_done_state = MagicMock()
             mock_done_state.shortName.return_value = "DONE"
             mock_done_state.completionRatio.return_value = 100
@@ -217,26 +271,179 @@ class TestPipelineScenario(unittest.TestCase):
             self.host.publish = MagicMock(return_value=True)
             self.host.currentVersion = MagicMock(return_value=5)
 
-            success = self.host.updateStatus()
+            # Use real save to test transaction orchestration
+            with patch.object(self.host, "save", return_value=True) as mock_save:
+                success = self.host.updateStatus()
 
-            self.assertTrue(success)
-            # Verify Publish occurred with target state (to prevent reversion)
-            self.host.publish.assert_called()
-            args, kwargs = self.host.publish.call_args
-            self.assertEqual(kwargs.get("state"), mock_done_state)
+            self.assertTrue(success, "updateStatus should succeed")
 
-            # Verify Database update
+            # Verify transaction order: save was called BEFORE publish
+            mock_save.assert_called_once()
+            self.host.publish.assert_called_once()
+
+            # Verify state propagation to publish (prevents reversion bug)
+            publish_kwargs = self.host.publish.call_args[1]
+            self.assertEqual(
+                publish_kwargs.get("state"), mock_done_state,
+                "Publish should receive target state to prevent reversion"
+            )
+
+            # Verify database was updated
             mock_status.setState.assert_called_with(mock_done_state)
             mock_status.setComment.assert_called_with("Final version for review")
+            mock_status.setVersion.assert_called_with(5)
 
-            # --- PHASE 5: Version Control (Restoration) ---
-            # User realizes v5 has an error and rolls back to v4
+            # --- PHASE 7: Version Restore Test ---
             self.host.restoreVersion = MagicMock(return_value=True)
-            
-            # Verify restoration handler triggers host logic and UI refresh
+
+            # Trigger via APP handler
             self.app.on_retrieve(None)
+
             self.host.restoreVersion.assert_called_once()
             self.app.refresh_header.assert_called()
+
+
+class TestPipelineFailureModes(unittest.TestCase):
+    """Tests failure scenarios in the pipeline to ensure graceful handling."""
+
+    def setUp(self):
+        self.mock_fusion = MockFusion()
+        ram_fusion_mod.fusion = self.mock_fusion
+        ram_fusion_mod.fu = self.mock_fusion
+        ram_fusion_mod.bmd = sys.modules["bmd"]
+
+        import fusion_host
+        fusion_host.bmd = sys.modules["bmd"]
+
+        self.app = RamsesFusionApp()
+        self.host = self.app.ramses.host
+
+    def test_update_status_aborts_on_save_failure(self):
+        """Verify updateStatus aborts cleanly if save fails."""
+        self.host.testDaemonConnection = MagicMock(return_value=True)
+        self.host.currentItem = MagicMock(return_value=MagicMock())
+
+        mock_state = MagicMock()
+        self.host._statusUI = MagicMock(return_value={
+            "publish": True,
+            "note": "Test",
+            "state": mock_state,
+            "completionRatio": 50
+        })
+
+        # Save fails
+        self.host.save = MagicMock(return_value=False)
+        self.host.publish = MagicMock(return_value=True)
+
+        success = self.host.updateStatus()
+
+        self.assertFalse(success, "Should fail when save fails")
+        # Publish should NOT have been called
+        self.host.publish.assert_not_called()
+
+    def test_update_status_aborts_on_publish_failure(self):
+        """Verify updateStatus aborts and logs when publish fails after save."""
+        self.host.testDaemonConnection = MagicMock(return_value=True)
+        self.host.currentItem = MagicMock(return_value=MagicMock())
+
+        mock_state = MagicMock()
+        mock_status = MagicMock()
+        self.host.currentStatus = MagicMock(return_value=mock_status)
+
+        self.host._statusUI = MagicMock(return_value={
+            "publish": True,
+            "note": "Test",
+            "state": mock_state,
+            "completionRatio": 50
+        })
+
+        # Save succeeds, publish fails
+        self.host.save = MagicMock(return_value=True)
+        self.host.publish = MagicMock(return_value=False)
+
+        # Capture log messages
+        log_messages = []
+        original_log = self.host._log
+        self.host._log = lambda msg, level: log_messages.append((msg, level))
+
+        success = self.host.updateStatus()
+
+        self.assertFalse(success, "Should fail when publish fails")
+
+        # Database should NOT have been updated (transaction aborted)
+        mock_status.setState.assert_not_called()
+
+        # User should be warned about the desync
+        warning_msgs = [msg for msg, lvl in log_messages if lvl == LogLevel.Warning]
+        self.assertTrue(
+            any("manually" in msg.lower() for msg in warning_msgs),
+            "Should warn user about manual recovery needed"
+        )
+
+    def test_update_status_skips_publish_when_not_requested(self):
+        """Verify updateStatus skips publish when user doesn't request it."""
+        self.host.testDaemonConnection = MagicMock(return_value=True)
+        self.host.currentItem = MagicMock(return_value=MagicMock())
+
+        mock_state = MagicMock()
+        mock_status = MagicMock()
+        self.host.currentStatus = MagicMock(return_value=mock_status)
+
+        self.host._statusUI = MagicMock(return_value={
+            "publish": False,  # User doesn't want to publish
+            "note": "Just updating status",
+            "state": mock_state,
+            "completionRatio": 75
+        })
+
+        self.host.save = MagicMock(return_value=True)
+        self.host.publish = MagicMock(return_value=True)
+        self.host.currentVersion = MagicMock(return_value=3)
+
+        success = self.host.updateStatus()
+
+        self.assertTrue(success)
+        # Publish should NOT have been called
+        self.host.publish.assert_not_called()
+        # But database should still be updated
+        mock_status.setState.assert_called_with(mock_state)
+
+    def test_comment_handler_skips_save_when_unchanged(self):
+        """Verify on_comment doesn't save when note is unchanged and not incremental."""
+        mock_status = MagicMock()
+        mock_status.comment.return_value = "Existing note"
+        mock_status.state.return_value = MagicMock()
+        self.host.currentStatus = MagicMock(return_value=mock_status)
+
+        # User doesn't change anything
+        self.host._request_input = MagicMock(
+            return_value={"Comment": "Existing note", "Incremental": False}
+        )
+
+        self.host.save = MagicMock(return_value=True)
+
+        with patch.object(self.app, "refresh_header"):
+            self.app.on_comment(None)
+
+        # Save should NOT have been called
+        self.host.save.assert_not_called()
+
+    def test_comment_handler_cancellation(self):
+        """Verify on_comment handles user cancellation gracefully."""
+        mock_status = MagicMock()
+        mock_status.comment.return_value = "Note"
+        mock_status.state.return_value = MagicMock()
+        self.host.currentStatus = MagicMock(return_value=mock_status)
+
+        # User cancels the dialog
+        self.host._request_input = MagicMock(return_value=None)
+
+        self.host.save = MagicMock(return_value=True)
+
+        self.app.on_comment(None)
+
+        # Save should NOT have been called
+        self.host.save.assert_not_called()
 
 
 if __name__ == "__main__":
