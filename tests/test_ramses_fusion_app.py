@@ -443,6 +443,290 @@ class TestRamsesFusionApp(unittest.TestCase):
                 self.assertIn("#FFF", html)
                 self.assertIn("SH010", html)
 
+    def test_validation_passes_when_anchors_connected(self):
+        """Verify validation succeeds when anchors exist, are connected, and settings match."""
+        mock_item = MagicMock()
+        mock_item.itemType.return_value = ramses.ItemType.SHOT
+
+        # DB Settings
+        db_settings = {"width": 1920, "height": 1080, "framerate": 24.0, "frames": 100}
+        self.app.ramses.host.collectItemSettings = MagicMock(return_value=db_settings)
+
+        # Ensure host uses our mock fusion
+        self.app.ramses.host.fusion = self.mock_fusion
+
+        comp = self.mock_fusion.GetCurrentComp()
+
+        # Set matching resolution
+        comp.SetPrefs({
+            "Comp.FrameFormat.Width": 1920,
+            "Comp.FrameFormat.Height": 1080,
+            "Comp.FrameFormat.Rate": 24.0
+        })
+
+        # Set matching frame range (1001 + 100 - 1 = 1100)
+        comp.SetAttrs({
+            "COMPN_RenderStart": 1001.0,
+            "COMPN_RenderEnd": 1100.0
+        })
+
+        # Create CONNECTED anchor nodes
+        preview_node = comp.AddTool("Saver", 0, 0)
+        preview_node.SetAttrs({"TOOLS_Name": "_PREVIEW"})
+        preview_node.connect_input()
+
+        final_node = comp.AddTool("Saver", 0, 0)
+        final_node.SetAttrs({"TOOLS_Name": "_FINAL"})
+        final_node.connect_input()
+
+        with patch.object(
+            RamsesFusionApp, "current_item", new_callable=PropertyMock
+        ) as mock_prop:
+            mock_prop.return_value = mock_item
+
+            # Test with ALL checks enabled
+            is_valid, msg, has_hard_error = self.app._validate_publish(
+                check_preview=True, check_final=True
+            )
+
+            self.assertTrue(is_valid, f"Validation should pass but got: {msg}")
+            self.assertEqual(msg, "", "Message should be empty on success")
+            self.assertFalse(has_hard_error, "Should have no hard errors")
+
+    def test_validation_full_check_detects_all_issues(self):
+        """Verify full validation detects multiple issues at once."""
+        mock_item = MagicMock()
+        mock_item.itemType.return_value = ramses.ItemType.SHOT
+
+        # DB Settings
+        db_settings = {"width": 1920, "height": 1080, "framerate": 24.0, "frames": 100}
+        self.app.ramses.host.collectItemSettings = MagicMock(return_value=db_settings)
+
+        # Ensure host uses our mock fusion
+        self.app.ramses.host.fusion = self.mock_fusion
+
+        comp = self.mock_fusion.GetCurrentComp()
+
+        # Set WRONG resolution
+        comp.SetPrefs({
+            "Comp.FrameFormat.Width": 1280,
+            "Comp.FrameFormat.Height": 720,
+            "Comp.FrameFormat.Rate": 30.0  # Wrong FPS too
+        })
+
+        # Set WRONG frame range
+        comp.SetAttrs({
+            "COMPN_RenderStart": 1001.0,
+            "COMPN_RenderEnd": 1050.0  # 50 frames instead of 100
+        })
+
+        # Create DISCONNECTED anchor nodes
+        preview_node = comp.AddTool("Saver", 0, 0)
+        preview_node.SetAttrs({"TOOLS_Name": "_PREVIEW"})
+        # Not connected!
+
+        final_node = comp.AddTool("Saver", 0, 0)
+        final_node.SetAttrs({"TOOLS_Name": "_FINAL"})
+        # Not connected!
+
+        with patch.object(
+            RamsesFusionApp, "current_item", new_callable=PropertyMock
+        ) as mock_prop:
+            mock_prop.return_value = mock_item
+
+            is_valid, msg, has_hard_error = self.app._validate_publish(
+                check_preview=True, check_final=True
+            )
+
+            self.assertFalse(is_valid, "Validation should fail")
+            # Should detect multiple issues
+            self.assertIn("Resolution Mismatch", msg)
+            self.assertIn("Frame Range Mismatch", msg)
+            self.assertIn("Disconnected Anchor", msg)
+            # Disconnected anchors are hard errors
+            self.assertTrue(has_hard_error, "Should have hard error for disconnected anchor")
+
+    def test_validation_missing_anchor_is_hard_error(self):
+        """Verify missing anchor nodes result in hard errors that block publish."""
+        mock_item = MagicMock()
+        mock_item.itemType.return_value = ramses.ItemType.SHOT
+
+        db_settings = {"width": 1920, "height": 1080, "framerate": 24.0, "frames": 100}
+        self.app.ramses.host.collectItemSettings = MagicMock(return_value=db_settings)
+
+        # Ensure host uses our mock fusion
+        self.app.ramses.host.fusion = self.mock_fusion
+
+        comp = self.mock_fusion.GetCurrentComp()
+        comp.SetPrefs({
+            "Comp.FrameFormat.Width": 1920,
+            "Comp.FrameFormat.Height": 1080,
+            "Comp.FrameFormat.Rate": 24.0
+        })
+        comp.SetAttrs({
+            "COMPN_RenderStart": 1001.0,
+            "COMPN_RenderEnd": 1100.0
+        })
+
+        # NO anchor nodes created!
+
+        with patch.object(
+            RamsesFusionApp, "current_item", new_callable=PropertyMock
+        ) as mock_prop:
+            mock_prop.return_value = mock_item
+
+            is_valid, msg, has_hard_error = self.app._validate_publish(
+                check_preview=True, check_final=True
+            )
+
+            self.assertFalse(is_valid)
+            self.assertIn("Missing Anchor", msg)
+            self.assertTrue(has_hard_error, "Missing anchor should be a hard error")
+
+    def test_validation_soft_errors_allow_override(self):
+        """Verify soft errors (mismatches) don't set hard_error flag."""
+        mock_item = MagicMock()
+        mock_item.itemType.return_value = ramses.ItemType.SHOT
+
+        # DB expects 1920x1080
+        db_settings = {"width": 1920, "height": 1080, "framerate": 24.0, "frames": 100}
+        self.app.ramses.host.collectItemSettings = MagicMock(return_value=db_settings)
+
+        # Ensure host uses our mock fusion
+        self.app.ramses.host.fusion = self.mock_fusion
+
+        comp = self.mock_fusion.GetCurrentComp()
+
+        # Comp has different resolution (soft error)
+        comp.SetPrefs({
+            "Comp.FrameFormat.Width": 2048,
+            "Comp.FrameFormat.Height": 1080,
+            "Comp.FrameFormat.Rate": 24.0
+        })
+        comp.SetAttrs({
+            "COMPN_RenderStart": 1001.0,
+            "COMPN_RenderEnd": 1100.0
+        })
+
+        # Anchors exist and are connected (no hard error)
+        preview_node = comp.AddTool("Saver", 0, 0)
+        preview_node.SetAttrs({"TOOLS_Name": "_PREVIEW"})
+        preview_node.connect_input()
+
+        with patch.object(
+            RamsesFusionApp, "current_item", new_callable=PropertyMock
+        ) as mock_prop:
+            mock_prop.return_value = mock_item
+
+            is_valid, msg, has_hard_error = self.app._validate_publish(
+                check_preview=True, check_final=False
+            )
+
+            self.assertFalse(is_valid, "Should fail due to resolution mismatch")
+            self.assertIn("Resolution Mismatch", msg)
+            # But it's a soft error - user can override
+            self.assertFalse(has_hard_error, "Resolution mismatch should be soft error")
+
+
+class TestValidationEdgeCases(unittest.TestCase):
+    """Tests edge cases in validation logic."""
+
+    def setUp(self):
+        self.mock_fusion = MockFusion()
+        ram_fusion_mod.fusion = self.mock_fusion
+        ram_fusion_mod.fu = self.mock_fusion
+        ram_fusion_mod.bmd = sys.modules["bmd"]
+
+        import fusion_host
+        fusion_host.bmd = sys.modules["bmd"]
+
+        self.app = RamsesFusionApp()
+        # Ensure host uses our mock fusion
+        self.app.ramses.host.fusion = self.mock_fusion
+
+    def test_validation_skips_frame_check_for_assets(self):
+        """Verify frame range validation is skipped for Asset items (not Shots)."""
+        mock_item = MagicMock()
+        mock_item.itemType.return_value = ramses.ItemType.ASSET  # Not a shot
+
+        db_settings = {"width": 1920, "height": 1080, "framerate": 24.0}
+        self.app.ramses.host.collectItemSettings = MagicMock(return_value=db_settings)
+
+        comp = self.mock_fusion.GetCurrentComp()
+        comp.SetPrefs({
+            "Comp.FrameFormat.Width": 1920,
+            "Comp.FrameFormat.Height": 1080,
+            "Comp.FrameFormat.Rate": 24.0
+        })
+
+        # Frame range doesn't match, but shouldn't matter for assets
+        comp.SetAttrs({
+            "COMPN_RenderStart": 1.0,
+            "COMPN_RenderEnd": 10.0
+        })
+
+        # Connected anchor
+        preview_node = comp.AddTool("Saver", 0, 0)
+        preview_node.SetAttrs({"TOOLS_Name": "_PREVIEW"})
+        preview_node.connect_input()
+
+        with patch.object(
+            RamsesFusionApp, "current_item", new_callable=PropertyMock
+        ) as mock_prop:
+            mock_prop.return_value = mock_item
+
+            is_valid, msg, _ = self.app._validate_publish(
+                check_preview=True, check_final=False
+            )
+
+            # Should pass - frame range check skipped for assets
+            self.assertTrue(is_valid, f"Assets should skip frame check, got: {msg}")
+
+    def test_validation_handles_missing_db_settings(self):
+        """Verify validation handles gracefully when DB settings are incomplete."""
+        mock_item = MagicMock()
+        mock_item.itemType.return_value = ramses.ItemType.SHOT
+
+        # Empty/incomplete settings
+        self.app.ramses.host.collectItemSettings = MagicMock(return_value={})
+
+        comp = self.mock_fusion.GetCurrentComp()
+        comp.SetPrefs({
+            "Comp.FrameFormat.Width": 1920,
+            "Comp.FrameFormat.Height": 1080,
+            "Comp.FrameFormat.Rate": 24.0
+        })
+
+        with patch.object(
+            RamsesFusionApp, "current_item", new_callable=PropertyMock
+        ) as mock_prop:
+            mock_prop.return_value = mock_item
+
+            # Should not raise an exception
+            try:
+                is_valid, msg, _ = self.app._validate_publish(
+                    check_preview=False, check_final=False
+                )
+                # Validation result depends on implementation - just verify no crash
+            except (KeyError, TypeError) as e:
+                self.fail(f"Validation should handle missing settings gracefully: {e}")
+
+    def test_validation_no_item_context(self):
+        """Verify validation handles missing item context."""
+        with patch.object(
+            RamsesFusionApp, "current_item", new_callable=PropertyMock
+        ) as mock_prop:
+            mock_prop.return_value = None  # No current item
+
+            # Should handle gracefully
+            try:
+                is_valid, msg, _ = self.app._validate_publish(
+                    check_preview=False, check_final=False
+                )
+                # Should either pass (nothing to validate) or fail gracefully
+            except (AttributeError, TypeError) as e:
+                self.fail(f"Validation should handle missing item gracefully: {e}")
+
 
 if __name__ == "__main__":
     unittest.main()

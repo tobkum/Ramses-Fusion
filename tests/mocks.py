@@ -141,18 +141,39 @@ class MockComp:
 
     def GetPrefs(self, pref_name=""):
         if pref_name == "Comp.FrameFormat":
-            # Flattened structure logic for simplicity
+            # Return flat dict when specifically requesting FrameFormat
             return {
-                "Width": self.prefs.get("Comp.FrameFormat.Width"),
-                "Height": self.prefs.get("Comp.FrameFormat.Height"),
-                "Rate": self.prefs.get("Comp.FrameFormat.Rate"),
-                "AspectX": self.prefs.get("Comp.FrameFormat.AspectX"),
-                "AspectY": self.prefs.get("Comp.FrameFormat.AspectY")
+                "Width": self.prefs.get("Comp.FrameFormat.Width", 0),
+                "Height": self.prefs.get("Comp.FrameFormat.Height", 0),
+                "Rate": self.prefs.get("Comp.FrameFormat.Rate", 24.0),
+                "AspectX": self.prefs.get("Comp.FrameFormat.AspectX", 1.0),
+                "AspectY": self.prefs.get("Comp.FrameFormat.AspectY", 1.0)
             }
-        return self.prefs
+        # Return nested structure when called without arguments (like Fusion does)
+        return {
+            "Comp": {
+                "FrameFormat": {
+                    "Width": self.prefs.get("Comp.FrameFormat.Width", 0),
+                    "Height": self.prefs.get("Comp.FrameFormat.Height", 0),
+                    "Rate": self.prefs.get("Comp.FrameFormat.Rate", 24.0),
+                    "AspectX": self.prefs.get("Comp.FrameFormat.AspectX", 1.0),
+                    "AspectY": self.prefs.get("Comp.FrameFormat.AspectY", 1.0)
+                }
+            }
+        }
 
     def SetPrefs(self, prefs):
-        self.prefs.update(prefs)
+        # Handle both flat keys and nested format
+        for key, value in prefs.items():
+            if key == "Comp.FrameFormat.Width" or key == "Comp.FrameFormat.Height" or \
+               key == "Comp.FrameFormat.Rate" or key == "Comp.FrameFormat.AspectX" or \
+               key == "Comp.FrameFormat.AspectY":
+                self.prefs[key] = value
+            elif "." not in key and key in ["Width", "Height", "Rate", "AspectX", "AspectY"]:
+                # Also accept short form
+                self.prefs[f"Comp.FrameFormat.{key}"] = value
+            else:
+                self.prefs[key] = value
         self._modified = True  # Mark as dirty when prefs change
 
     def FindTool(self, name):
