@@ -366,7 +366,7 @@ class FusionHost(RamHost):
         return self.comp.GetAttrs().get("COMPB_Modified", False)
 
     def _log(self, message: str, level: int) -> None:
-        """Logs a message to the Fusion console.
+        """Logs a message to the Fusion console (internal helper).
 
         Args:
             message (str): The message to log.
@@ -812,7 +812,7 @@ class FusionHost(RamHost):
                 settings = self.collectItemSettings(item)
                 self._setupCurrentFile(item, self.currentStep(), settings)
 
-        # Always persist identity metadata before saving
+        # When setupFile=False, persist metadata here (setupFile=True handles it via _setupCurrentFile)
         if not setupFile:
             item = self.currentItem()
             if item:
