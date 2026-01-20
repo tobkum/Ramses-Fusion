@@ -1185,7 +1185,7 @@ class RamsesFusionApp:
                 ),
                 self.create_button(
                     "CommentButton",
-                    "Save with Note...",
+                    "Save with Note",
                     "ramcomment.png",
                     accent_color=bg_color,
                     weight=0,
