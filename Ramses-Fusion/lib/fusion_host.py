@@ -1403,10 +1403,11 @@ class FusionHost(RamHost):
         3. Updates the database status ONLY if publish succeeds (or wasn't requested).
         4. Generates a preview (optional).
 
-                Args:
-                    state (RamState, optional): The target state. If None, shows UI.
-                    comment (str, optional): Note describing the version changes.
-                    completionRatio (int, optional): Progress percentage (0-100).            savePreview (bool, optional): Whether to generate a preview render.
+        Args:
+            state (RamState, optional): The target state. If None, shows UI.
+            comment (str, optional): Note describing the version changes.
+            completionRatio (int, optional): Progress percentage (0-100).
+            savePreview (bool, optional): Whether to generate a preview render.
             publish (bool, optional): Whether to publish the file.
             showPublishUI (bool, optional): Whether to force the publish UI.
 
