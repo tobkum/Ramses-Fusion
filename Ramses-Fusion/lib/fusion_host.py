@@ -670,8 +670,11 @@ class FusionHost(RamHost):
     def resolveFinalPath(self) -> str:
         """Resolves the designated master export path for the current shot.
 
-        Attempts to use the project's export path. If not set, falls back to the standard
-        publish file path. Respects custom format/sequence settings from the Step configuration.
+        Supports two export destinations configured via Step YAML settings:
+        - "project" (default): Unversioned export to project's 06-EXPORT folder.
+        - "step": Versioned export to the step's _published folder.
+
+        Respects custom format/sequence settings from the Step configuration.
         Uses zeroes (0) for frame padding if an image sequence is configured.
 
         Returns:
@@ -685,24 +688,35 @@ class FusionHost(RamHost):
 
             ext, is_sequence = self._get_preset_settings("final")
 
-            export_folder = project.exportPath()
+            # Check export destination preference from Step YAML
+            fusion_cfg = self._get_fusion_settings(self.currentStep())
+            final_cfg = fusion_cfg.get("final", {})
+            export_dest = final_cfg.get("export_dest", "project")
 
             # 1. Resolve Base Filename and Target Directory
             pub_info = self.publishInfo()
 
-            if export_folder:
-                # Master Render (No versioning in filename)
-                master_info = pub_info.copy()
-                master_info.version = -1
-                master_info.extension = ""
-                base_filename = master_info.fileName().rstrip(".")
-                target_dir = export_folder
-            else:
-                # Archival Render (Versioned fallback)
-                # We get the path from Ramses, then strip extension for our own sequence logic
+            if export_dest == "step":
+                # Step Export: Versioned path to _published folder
                 archival_path = self.publishFilePath(ext, "")
                 base_filename = os.path.splitext(os.path.basename(archival_path))[0]
                 target_dir = os.path.dirname(archival_path)
+            else:
+                # Project Export (default): Use project export folder or fallback
+                export_folder = project.exportPath()
+
+                if export_folder:
+                    # Master Render (No versioning in filename)
+                    master_info = pub_info.copy()
+                    master_info.version = -1
+                    master_info.extension = ""
+                    base_filename = master_info.fileName().rstrip(".")
+                    target_dir = export_folder
+                else:
+                    # Archival Render (Versioned fallback when no export folder set)
+                    archival_path = self.publishFilePath(ext, "")
+                    base_filename = os.path.splitext(os.path.basename(archival_path))[0]
+                    target_dir = os.path.dirname(archival_path)
 
             # 2. Handle Sequence Logic
             if is_sequence:

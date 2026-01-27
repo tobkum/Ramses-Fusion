@@ -2330,37 +2330,38 @@ class RamsesFusionApp:
         final_cfg = fusion_cfg.get("final", {})
 
         # Helper to build a column
-        def build_col(title, id_prefix, cfg, color):
-            return ui.VGroup(
-                {"Spacing": 10, "Weight": 1},
-                [
-                    ui.Label(
-                        {
-                            "Text": f"<b><font color='{color}'>{title}</font></b>",
-                            "Alignment": {"AlignHCenter": True},
-                            "Weight": 0,
-                        }
-                    ),
-                    ui.Label({"Text": "Paste Saver Node Text:", "Weight": 0}),
-                    ui.TextEdit(
-                        {
-                            "ID": f"{id_prefix}Txt",
-                            "PlaceholderText": "Copy a Saver node in Fusion and paste here...",
-                            "Weight": 1,
-                            "Lexer": "lua",
-                            "Font": ui.Font({"Family": "Consolas"}),
-                        }
-                    ),
-                    ui.Label(
-                        {
-                            "ID": f"{id_prefix}Info",
-                            "Text": f"Current: {cfg.get('format', 'Default')}",
-                            "Weight": 0,
-                            "StyleSheet": "color: #888;",
-                        }
-                    ),
-                ],
-            )
+        def build_col(title, id_prefix, cfg, color, extras=None):
+            """Builds a column with title, TextEdit for Saver node, and optional extras."""
+            elements = [
+                ui.Label(
+                    {
+                        "Text": f"<b><font color='{color}'>{title}</font></b>",
+                        "Alignment": {"AlignHCenter": True},
+                        "Weight": 0,
+                    }
+                ),
+                ui.Label({"Text": "Paste Saver Node Text:", "Weight": 0}),
+                ui.TextEdit(
+                    {
+                        "ID": f"{id_prefix}Txt",
+                        "PlaceholderText": "Copy a Saver node in Fusion and paste here...",
+                        "Weight": 1,
+                        "Lexer": "lua",
+                        "Font": ui.Font({"Family": "Consolas"}),
+                    }
+                ),
+                ui.Label(
+                    {
+                        "ID": f"{id_prefix}Info",
+                        "Text": f"Current: {cfg.get('format', 'Default')}",
+                        "Weight": 0,
+                        "StyleSheet": "color: #888;",
+                    }
+                ),
+            ]
+            if extras:
+                elements.extend(extras)
+            return ui.VGroup({"Spacing": 10, "Weight": 1}, elements)
 
         dlg = self.disp.AddWindow(
             {
@@ -2404,6 +2405,15 @@ class RamsesFusionApp:
                                                     "Final",
                                                     final_cfg,
                                                     "#B24C4C",
+                                                    extras=[
+                                                        ui.VGap(10),
+                                                        ui.Label({"Text": "Export Destination:", "Weight": 0}),
+                                                        ui.ComboBox({
+                                                            "ID": "FinalDest",
+                                                            "Weight": 0,
+                                                            "MinimumSize": [200, 24],
+                                                        }),
+                                                    ],
                                                 ),
                                             ],
                                         ),
@@ -2453,6 +2463,11 @@ class RamsesFusionApp:
         itm = dlg.GetItems()
         result = [None]
 
+        # Populate Export Destination dropdown
+        itm["FinalDest"].AddItem("Project Export (06-EXPORT)")
+        itm["FinalDest"].AddItem("Step Published (_published)")
+        itm["FinalDest"].CurrentIndex = 1 if final_cfg.get("export_dest") == "step" else 0
+
         def on_ok(ev):
             # 1. Preview Parsing
             p_text = itm["PrevTxt"].PlainText
@@ -2494,6 +2509,13 @@ class RamsesFusionApp:
                 new_data["fusion"]["final"]["image_sequence"] = (
                     FusionConfig.is_sequence(f_parsed.get("format"))
                 )
+
+            # Save Export Destination (always, even without parsed Saver)
+            if "final" not in new_data["fusion"]:
+                new_data["fusion"]["final"] = {}
+            new_data["fusion"]["final"]["export_dest"] = (
+                "step" if itm["FinalDest"].CurrentIndex == 1 else "project"
+            )
 
             result[0] = new_data
             self.disp.ExitLoop()

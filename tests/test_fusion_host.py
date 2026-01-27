@@ -455,6 +455,31 @@ class TestFusionHost(unittest.TestCase):
         expected = "D:/Exports/Shot01/Shot01.0000.exr"
         self.assertEqual(path, expected)
 
+    def test_resolve_final_path_step_export(self):
+        """Verify resolveFinalPath respects 'step' export_dest setting (Dual Export feature)."""
+        # Mock Step to return step export config
+        mock_step = MagicMock()
+        self.host._get_fusion_settings = MagicMock(return_value={
+            "final": {"format": "QuickTimeMovies", "export_dest": "step"}
+        })
+        self.host.currentStep = MagicMock(return_value=mock_step)
+        
+        # Mock Project (should be ignored when export_dest="step")
+        mock_project = MagicMock()
+        mock_project.exportPath.return_value = "D:/Exports"  # This should NOT be used
+        import ramses
+        ramses.RAMSES.project = MagicMock(return_value=mock_project)
+        
+        # Mock publishFilePath (the versioned _published path)
+        self.host.publishFilePath = MagicMock(return_value="D:/Steps/COMP/_published/Shot01_v003.mov")
+        
+        path = self.host.resolveFinalPath()
+        
+        # Should use publishFilePath, NOT project.exportPath
+        self.assertEqual(path, "D:/Steps/COMP/_published/Shot01_v003.mov")
+        # Verify exportPath was NOT called (default project export bypassed)
+        mock_project.exportPath.assert_not_called()
+
     def test_update_status_transaction(self):
         """Verify the updateStatus transaction logic (Save -> Publish -> DB Update)."""
         # Mock Daemon Connection

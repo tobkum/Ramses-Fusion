@@ -22,6 +22,7 @@
 - [x] **Robustness**: Hardened Lua parser to support scientific notation and comments.
 - [x] **Safety**: Transactional Publish Workflow (Strictly requires `_FINAL` anchor; aborts all operations if render fails).
 - [x] **UX/UI**: Modernized Step Configuration Wizard with responsive layout (1000x800) and automated sequence detection.
+- [x] **New Feature**: Dual Export Pipeline Support (Toggle between "Project Export" and "Step Export" destinations via Step Config Wizard).
 
 ---
 
@@ -55,15 +56,7 @@
     - Warn if an imported asset belongs to a different project or has mismatched FPS.
 
 ## Workflow Enhancements
-- [ ] **Dual Export Pipeline Support**
-    - **Mechanism**: Option to toggle between "Final Export" (Project `06-EXPORT` folder, unversioned) and "Step Export" (Step `_published` folder, versioned).
-    - **Implementation**: 
-        - Update `FusionHost.resolveFinalPath` to respect a new `export_dest` setting in the Step's YAML config.
-        - **UI**: Add a "Destination" dropdown (Project Export vs. Step Export) to the **FINAL** column in the `StepConfigWizard` ("Step Configuration" dialog).
-        - **Logic**: 
-            - `export_dest="project"` (Default): Use `project.exportPath()`.
-            - `export_dest="step"`: Force use of `publishFilePath()` (Versioned `_published` folder).
-        - **Pipeline Impact**: "Step Export" ensures renders are discoverable by the standard "Import Published" tool for downstream steps.
+
 - [ ] **Smart Import Dialog ("Pipeline Loader")**
     - **Goal**: Replace the native file browser with a context-aware dialog for importing assets and step renders.
     - **Features**:
