@@ -43,6 +43,10 @@
     - [ ] **UX**: Visual indicator (🔓/🔒) in header. Prompt user on Open if a valid lock exists (Read-Only / Force Unlock).
 - [ ] **Write Permission Validation**
     - Pre-check write permissions on target directories before attempting render/save/publish actions.
+- [ ] **Critical: Lock Pipeline Nodes**
+    - **Goal**: Prevent accidental user modification of pipeline-critical nodes (`_PREVIEW`, `_FINAL`).
+    - **Implementation**: After "Sync Project Settings" or "Setup Scene", automatically set the `Locked` attribute on these nodes.
+    - **UX**: Nodes remain inspectable but cannot be deleted or have their settings (format, path, resolution) changed without explicit unlocking.
 
 ## Pipeline Intelligence
 - [ ] **Dependency Tracking (Ramses "Uses")**
@@ -57,6 +61,16 @@
 
 ## Workflow Enhancements
 
+- [ ] **Production Feedback Stream**
+    - **Goal**: Allow artists to view supervisor feedback and version history directly within Fusion, eliminating the need to alt-tab to external tools.
+    - **UI**: A dedicated "History" tab or collapsable panel showing a timeline of comments for the current Shot/Task.
+    - **Features**: 
+        - Read-only list of comments (e.g., `v002 (Supervisor): "Blur the background more."`).
+        - Visual distinction between "Artist Notes" and "Supervisor/Client Feedback".
+- [ ] **Quick Access: "Open Output Folder"**
+    - **Goal**: One-click access to the OS directory for previews and final renders, reducing navigation friction.
+    - **Implementation**: Small folder icon buttons next to "Create Preview" and "Update / Publish".
+    - **Logic**: Resolves the path using `FusionHost.resolveFinalPath` / `previewPath` and opens the directory.
 - [ ] **Smart Import Dialog ("Pipeline Loader")**
     - **Goal**: Replace the native file browser with a context-aware dialog for importing assets and step renders.
     - **Features**:
@@ -76,8 +90,14 @@
 - [ ] **Batch Operations**
     - "Update All Loaders": One-click update all assets to latest version.
     - "Batch Status": Update status for multiple loaded assets at once.
-- [ ] **Automated Slates / Burn-ins**
-    - Generator tool for `Text+` node populated with live metadata (Shot, Version, Artist, Date).
+- [ ] **Data-Driven Auto-Slate ("Ramses Slate")**
+    - **Goal**: Eliminate manual data entry and typos in slates.
+    - **Mechanism**: A custom Fusion Tool (Fuse/Macro) with **no manual text inputs**.
+    - **Logic**: Pulls all data dynamically from the Ramses Daemon at render-time:
+        - Show Name, Shot Code, Artist Name (Current User).
+        - Status (e.g., "Ready for Review"), Date, Frame Count.
+        - Technical Metadata (Lens info, Resolution, Colorspace).
+    - **Value**: Guaranteed accuracy; the slate is a direct reflection of the database state.
 - [ ] **Loader Version Control**
     - Context menu or buttons to "Version Up/Down" selected Loader nodes.
 - [ ] **Notification Webhooks (ChatOps)**
