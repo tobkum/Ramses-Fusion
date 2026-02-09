@@ -314,6 +314,7 @@ class FusionHost(RamHost):
         self.fusion = fusion_obj
         self.hostName = "Fusion"
         self._status_cache = None  # Used for UI badge caching
+        self._node_version_cache = {} # {node_name: (last_path, is_outdated, latest_dir)}
 
         try:
             self.hostVersion = str(
@@ -753,9 +754,18 @@ class FusionHost(RamHost):
                     target_dir = export_folder
                 else:
                     # Archival Render (Versioned fallback when no export folder set)
-                    archival_path = self.publishFilePath(ext, "")
-                    base_filename = os.path.splitext(os.path.basename(archival_path))[0]
-                    target_dir = os.path.dirname(archival_path)
+                    # HERO ONLY: Force-strip resource from the archival deliverable name
+                    pub_info = self.publishInfo()
+                    master_info = pub_info.copy()
+                    master_info.version = -1
+                    master_info.resource = "" # Force strip resource
+                    master_info.extension = ""
+                    base_filename = master_info.fileName().rstrip(".")
+                    
+                    # Target the current version's folder or step folder?
+                    # API standard archival render goes to the step root or _published
+                    fallback_path = self.publishFilePath(ext, "")
+                    target_dir = os.path.dirname(fallback_path)
 
             # 2. Handle Sequence Logic
             if is_sequence:
@@ -2075,52 +2085,66 @@ class FusionHost(RamHost):
         count = 0
         loaders = self.comp.GetToolList(False, "Loader")
         if not loaders:
+            # Clear cache if no loaders found
+            self._node_version_cache = {}
             return 0
             
-        for node in loaders.values():
+        # Clean up cache for deleted nodes
+        current_names = set(loaders.keys())
+        cached_names = list(self._node_version_cache.keys())
+        for name in cached_names:
+            if name not in current_names:
+                del self._node_version_cache[name]
+
+        for name, node in loaders.items():
             # Fast Check: Path string
             path = self.normalizePath(node.Clip[1])
             if "/_published/" not in path:
+                # If it was previously a Ramses asset but now isn't, clear it
+                if name in self._node_version_cache:
+                    del self._node_version_cache[name]
+                continue
+            
+            # --- PERFORMANCE CACHE (Audit 2.1) ---
+            cached = self._node_version_cache.get(name)
+            if cached and cached[0] == path:
+                # Path hasn't changed since last scan, use cached result
+                is_outdated = cached[1]
+                if is_outdated:
+                    count += 1
                 continue
                 
             # 1. Identify Context (Virtual avoids DB hit)
             item = RamItem.fromPath(path, virtualIfNotFound=True)
             if not item or item.shortName() == "Unknown": 
-                self._log(f"Scanner: Could not resolve Ramses Item for {os.path.basename(path)}", LogLevel.Debug)
                 continue
             
             step = RamStep.fromPath(path)
             if not step:
-                self._log(f"Scanner: Could not resolve Pipeline Step for {os.path.basename(path)}", LogLevel.Debug)
                 continue
             
             # 2. Identify Resource context
-            # Using RamFileInfo to accurately parse the resource block from the path
             info = RamFileInfo()
             info.setFilePath(path)
             res = info.resource
             
             # 3. Check Latest Version Folder
-            # Use correct API with resource filter: latestPublishedVersionFolderPath
             latest_dir = item.latestPublishedVersionFolderPath(step=step, resource=res)
+            is_outdated = False
             
             if latest_dir:
-                # PATH HARDENING: Ensure robust comparison across platforms
+                # PATH HARDENING
                 def _sanitize(p):
                     if not p: return ""
-                    # Remove padding markers that might confuse dirname/abspath
                     p = str(p).replace("####", "0000").replace(".%04d", ".0000")
                     return self.normalizePath(p).lower().rstrip("/")
 
                 latest_dir_clean = _sanitize(latest_dir)
                 current_dir_clean = _sanitize(os.path.dirname(path))
                 
-                self._log(f"Scanner: Comparing {item.shortName()} | {step.shortName()}", LogLevel.Debug)
-                self._log(f"  Current: {current_dir_clean}", LogLevel.Debug)
-                self._log(f"  Latest:  {latest_dir_clean}", LogLevel.Debug)
-
                 if current_dir_clean != latest_dir_clean:
                     # OUTDATED
+                    is_outdated = True
                     node.TileColor = { "R": 1.0, "G": 0.5, "B": 0.0 } # Orange
                     v_name = os.path.basename(latest_dir)
                     msg = f"New version available: {v_name}"
@@ -2128,14 +2152,14 @@ class FusionHost(RamHost):
                         node.Comments[1] = msg
                     count += 1
                 else:
-                    # UP TO DATE: Self-heal visuals if they were orange
-                    # We check if it was orange (R=1.0, G=0.5)
+                    # UP TO DATE: Self-heal visuals
                     color = node.TileColor
                     if color and abs(color.get("R", 0) - 1.0) < 0.1 and abs(color.get("G", 0) - 0.5) < 0.1:
                         node.TileColor = { "R": 0.0, "G": 0.0, "B": 0.0 }
                         node.Comments[1] = ""
-            else:
-                self._log(f"Scanner: No published version found for {item.shortName()} | {step.shortName()}", LogLevel.Debug)
+            
+            # Update Cache
+            self._node_version_cache[name] = (path, is_outdated, latest_dir)
 
         return count
 
