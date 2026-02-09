@@ -252,12 +252,15 @@ class RamsesFusionApp:
                         is_mismatch = True
                 else:
                     # STRICT MODE: No Metadata = Mismatch/Invalid
-                    # Since this is a fresh deployment, valid Ramses files MUST have metadata.
-                    self.log(
-                        "Identity Error: File lacks Ramses Metadata.",
-                        ram.LogLevel.Warning,
-                    )
-                    is_mismatch = True
+                    # But only flag if the file has been SAVED (new comps don't have metadata yet)
+                    current_path = self._host.currentFilePath()
+                    if current_path:  # File has been saved
+                        self.log(
+                            "Identity Error: Saved file lacks Ramses Metadata.",
+                            ram.LogLevel.Warning,
+                        )
+                        is_mismatch = True
+                    # New unsaved comps are OK - they'll get metadata on first save
 
             is_pipeline = item is not None and bool(item.uuid()) and not is_mismatch
 
@@ -657,7 +660,9 @@ class RamsesFusionApp:
         db_fps = float(settings.get("framerate", 24.0))
         comp_fps = float(frame_format.get("Rate", 24.0))
 
-        if abs(db_fps - comp_fps) > 0.001:
+        # Industry-standard epsilon (0.01) allows NTSC variance (23.976, 29.97, 59.94)
+        # while catching real mismatches (24 vs 25, 29.97 vs 30)
+        if abs(db_fps - comp_fps) > 0.01:
             errors.append(
                 f"<font color='#ffcc00'><b>Framerate Mismatch</b></font><br><font color='#999'>Database: <b>{db_fps} fps</b> | Composition: <b>{comp_fps} fps</b></font>"
             )
@@ -792,6 +797,13 @@ class RamsesFusionApp:
         Args:
             force_full (bool): If True, invalidates project/user caches to force a full re-fetch.
         """
+        # Time-based debouncing: Skip refresh if <5s since last refresh (unless forced)
+        current_time = time.time()
+        if not force_full and (current_time - self._last_refresh_time) < 5.0:
+            return
+        
+        self._last_refresh_time = current_time
+        
         is_online = self._check_connection(silent=True)
         self._outdated_count = 0  # Reset count to ensure accurate UI state
 
