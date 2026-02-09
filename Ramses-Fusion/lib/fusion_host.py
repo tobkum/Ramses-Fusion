@@ -733,6 +733,7 @@ class FusionHost(RamHost):
                     source_media = item.get("sourceMedia") if item else None
 
                     if source_media:
+                        # CLIENT NAMING WORKFLOW
                         # Get suffix from Step Config (default: _vfx)
                         step = self.currentStep()
                         step_cfg = step.publishSettings("yaml") if step else {}
@@ -742,9 +743,10 @@ class FusionHost(RamHost):
                         base_filename = f"{source_media}{suffix}"
                     else:
                         # FALLBACK TO RAMSES STANDARD
-                        # Master Render (No versioning in filename)
+                        # Master Render (HERO ONLY: Strip resource from deliverable name)
                         master_info = pub_info.copy()
                         master_info.version = -1
+                        master_info.resource = "" # Force Hero naming
                         master_info.extension = ""
                         base_filename = master_info.fileName().rstrip(".")
                     
@@ -2092,9 +2094,15 @@ class FusionHost(RamHost):
                 self._log(f"Scanner: Could not resolve Pipeline Step for {os.path.basename(path)}", LogLevel.Debug)
                 continue
             
-            # 2. Check Latest Version Folder
-            # Use correct API: latestPublishedVersionFolderPath
-            latest_dir = item.latestPublishedVersionFolderPath(step=step)
+            # 2. Identify Resource context
+            # Using RamFileInfo to accurately parse the resource block from the path
+            info = RamFileInfo()
+            info.setFilePath(path)
+            res = info.resource
+            
+            # 3. Check Latest Version Folder
+            # Use correct API with resource filter: latestPublishedVersionFolderPath
+            latest_dir = item.latestPublishedVersionFolderPath(step=step, resource=res)
             
             if latest_dir:
                 # PATH HARDENING: Ensure robust comparison across platforms
@@ -2157,8 +2165,13 @@ class FusionHost(RamHost):
                     stp = RamStep.fromPath(path)
                     
                     if itm:
-                        # Use correct API: latestPublishedVersionFolderPath
-                        latest_dir = itm.latestPublishedVersionFolderPath(step=stp)
+                        # Identify Resource context
+                        info = RamFileInfo()
+                        info.setFilePath(path)
+                        res = info.resource
+
+                        # Use correct API: latestPublishedVersionFolderPath with resource filter
+                        latest_dir = itm.latestPublishedVersionFolderPath(step=stp, resource=res)
                         
                         # If outdated, intervene with Smart Dialog
                         if latest_dir and os.path.dirname(path) != self.normalizePath(latest_dir):
@@ -2184,10 +2197,23 @@ class FusionHost(RamHost):
                             if res:
                                 if res["Action"] == 0:
                                     # EXECUTE UPDATE
-                                    # Assume same filename in new version folder
                                     filename = os.path.basename(path)
                                     new_path = os.path.join(latest_dir, filename)
                                     
+                                    # If filename changed (e.g. contains version), find the new one
+                                    if not os.path.exists(new_path):
+                                        # Look for any valid media file in the new folder
+                                        found = False
+                                        EXTS = ('.mov', '.mp4', '.mxf', '.exr', '.dpx', '.png', '.jpg')
+                                        for f in sorted(os.listdir(latest_dir)):
+                                            if f.lower().endswith(EXTS) and not f.startswith("."):
+                                                new_path = os.path.join(latest_dir, f)
+                                                found = True
+                                                break
+                                        if not found:
+                                            self.log(f"Update failed: No media found in {latest_dir}", LogLevel.Error)
+                                            return False
+
                                     active.Clip[1] = self.normalizePath(new_path)
                                     # Reset Visuals
                                     active.TileColor = { "R": 0.0, "G": 0.0, "B": 0.0 }
