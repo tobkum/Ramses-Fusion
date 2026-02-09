@@ -56,12 +56,12 @@ if not hasattr(RamFileManager, "_fusion_patched"):
 
     # 2. Fix Case Sensitivity and robust matching for version files on Windows.
     def _patched_getLatestVersionFilePath(filePath, previous=False):
-        """Resolves the latest version file path using a robust, case-insensitive identity match."""
+        """Resolves the latest version file path using robust matching (Files AND Folders)."""
         fileName = os.path.basename(filePath)
-        # Strip extension and any existing version block (_v001, _WIP001, etc)
         name_no_ext = fileName.split(".")[0]
+        # Clean current version suffix if present
         clean_name = re.sub(r"_[a-zA-Z]*\d+$", "", name_no_ext)
-        base_id = clean_name.lower() + "_"
+        base_id = clean_name.lower()
 
         versionsFolder = RamFileManager.getVersionFolder(filePath)
         if not os.path.isdir(versionsFolder):
@@ -69,32 +69,55 @@ if not hasattr(RamFileManager, "_fusion_patched"):
 
         candidates = []
         for f in os.listdir(versionsFolder):
-            if not f.lower().startswith(base_id):
-                continue
             path = os.path.join(versionsFolder, f)
-            if not os.path.isfile(path):
-                continue
+            
+            # Case A: File-based versioning (standard behavior of patch)
+            if os.path.isfile(path):
+                if not f.lower().startswith(base_id + "_"):
+                    continue
+                m = re.search(r"(\d+)\.[^.]+$", f)
+                if m:
+                    candidates.append((int(m.group(1)), path))
 
-            # Extract version from the end: ...STATE001.comp
-            m = re.search(r"(\d+)\.[^.]+$", f)
-            if m:
-                version = int(m.group(1))
-                candidates.append((version, path))
+            # Case B: Directory-based versioning (Ramses-Ingest style: 001_OK or BG_001_OK)
+            elif os.path.isdir(path):
+                # Check if folder looks like a version (001... or res_001...)
+                # Regex matches: (optional resource_)(3 digits)(optional _state)
+                # e.g. "001", "001_OK", "BG_001_OK"
+                m_ver = re.match(r"^(?:.*_)?(\d{3})(?:_.*)?$", f)
+                if m_ver:
+                    version = int(m_ver.group(1))
+                    
+                    # Look for matching file inside this version folder
+                    # We expect a file that matches our base_id (ignoring sequence extensions)
+                    found_file = None
+                    try:
+                        for sub_f in os.listdir(path):
+                            if sub_f.lower().startswith(base_id):
+                                # Check extensions to avoid random clutter
+                                if sub_f.lower().endswith(('.exr', '.jpg', '.png', '.dpx', '.mov', '.mp4')):
+                                    found_file = os.path.join(path, sub_f)
+                                    break
+                    except OSError:
+                        pass
+                        
+                    if found_file:
+                        candidates.append((version, found_file))
 
         if not candidates:
             return ""
-        candidates.sort()  # Sort by version number
+        candidates.sort()  # Sort by version number (key 0)
 
         if previous:
             return candidates[-2][1] if len(candidates) > 1 else ""
         return candidates[-1][1]
 
     def _patched_getVersionFilePaths(filePath):
-        """Returns a list of all version files associated with the current composition's identity."""
+        """Returns all version files, checking both flat files and version subfolders."""
         fileName = os.path.basename(filePath)
         name_no_ext = fileName.split(".")[0]
         clean_name = re.sub(r"_[a-zA-Z]*\d+$", "", name_no_ext)
-        base_id = clean_name.lower() + "_"
+        base_id = clean_name.lower()
 
         versionsFolder = RamFileManager.getVersionFolder(filePath)
         if not os.path.isdir(versionsFolder):
@@ -102,16 +125,28 @@ if not hasattr(RamFileManager, "_fusion_patched"):
 
         candidates = []
         for f in os.listdir(versionsFolder):
-            if not f.lower().startswith(base_id):
-                continue
             path = os.path.join(versionsFolder, f)
-            if not os.path.isfile(path):
-                continue
 
-            m = re.search(r"(\d+)\.[^.]+$", f)
-            if m:
-                version = int(m.group(1))
-                candidates.append((version, path))
+            # Case A: File-based
+            if os.path.isfile(path):
+                if not f.lower().startswith(base_id + "_"):
+                    continue
+                m = re.search(r"(\d+)\.[^.]+$", f)
+                if m:
+                    candidates.append((int(m.group(1)), path))
+            
+            # Case B: Directory-based
+            elif os.path.isdir(path):
+                m_ver = re.match(r"^(?:.*_)?(\d{3})(?:_.*)?$", f)
+                if m_ver:
+                    # Look for match inside
+                    try:
+                        for sub_f in os.listdir(path):
+                            if sub_f.lower().startswith(base_id) and sub_f.lower().endswith(('.exr', '.jpg', '.png', '.dpx', '.mov', '.mp4')):
+                                candidates.append((int(m_ver.group(1)), os.path.join(path, sub_f)))
+                                break
+                    except OSError:
+                        pass
 
         candidates.sort()
         return [c[1] for c in candidates]

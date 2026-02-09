@@ -1,6 +1,7 @@
 import sys
 import os
 import re
+import time
 import concurrent.futures
 from typing import Optional, List, Any
 
@@ -92,6 +93,7 @@ class RamsesFusionApp:
         self._step_cache = None
         self._context_path = ""
         self._last_synced_path = None
+        self._last_refresh_time = 0.0
 
         # UI State
         self._section_states = {}  # {content_id: is_collapsed}
@@ -253,7 +255,7 @@ class RamsesFusionApp:
                 else:
                     # STRICT MODE: No Metadata = Mismatch/Invalid
                     # But only flag if the file has been SAVED (new comps don't have metadata yet)
-                    current_path = self._host.currentFilePath()
+                    current_path = self.ramses.host.currentFilePath()
                     if current_path:  # File has been saved
                         self.log(
                             "Identity Error: Saved file lacks Ramses Metadata.",
