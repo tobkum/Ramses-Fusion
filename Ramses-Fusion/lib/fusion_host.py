@@ -2082,14 +2082,19 @@ class FusionHost(RamHost):
             latest_dir = item.latestPublishedVersionFolderPath(step=step)
             
             if latest_dir:
-                latest_dir = self.normalizePath(latest_dir)
-                current_dir = os.path.dirname(path)
+                # PATH HARDENING: Ensure robust comparison across platforms
+                def _sanitize(p):
+                    if not p: return ""
+                    return self.normalizePath(p).lower().rstrip("/")
+
+                latest_dir_clean = _sanitize(latest_dir)
+                current_dir_clean = _sanitize(os.path.dirname(path))
                 
                 self._log(f"Scanner: Comparing {item.shortName()} | {step.shortName()}", LogLevel.Debug)
-                self._log(f"  Current: {current_dir}", LogLevel.Debug)
-                self._log(f"  Latest:  {latest_dir}", LogLevel.Debug)
+                self._log(f"  Current: {current_dir_clean}", LogLevel.Debug)
+                self._log(f"  Latest:  {latest_dir_clean}", LogLevel.Debug)
 
-                if current_dir != latest_dir:
+                if current_dir_clean != latest_dir_clean:
                     # OUTDATED
                     node.TileColor = { "R": 1.0, "G": 0.5, "B": 0.0 } # Orange
                     v_name = os.path.basename(latest_dir)

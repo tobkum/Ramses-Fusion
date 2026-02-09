@@ -168,29 +168,41 @@ class AssetBrowser:
             return
             
         # Get published version folders
-        # RamShot.publishedVersionFolderPaths(step) -> list of strings
         folders = self.current_shot.publishedVersionFolderPaths(step)
         
         # Reverse to show newest first
         for folder in reversed(folders):
-            v_name = os.path.basename(folder)
+            v_folder = os.path.basename(folder) 
+            
+            # API STRICT PARSING: [RESOURCE]_[VERSION]_[STATE] or [VERSION]_[STATE]
+            # Standard: 001_WIP (2 blocks) -> display v001
+            # Resource: BG_001_OK (3 blocks) -> display v001 [BG]
+            blocks = v_folder.split('_')
+            num_blocks = len(blocks)
+            
+            if num_blocks == 3:
+                display_v = f"v{blocks[1]} [{blocks[0]}]"
+            elif num_blocks == 2:
+                display_v = f"v{blocks[0]}"
+            else:
+                display_v = f"v{v_folder}" if v_folder.isdigit() else v_folder
             
             # Find main media file
             media_file = self._find_media(folder)
             if media_file:
                 # Create Tree Item
-                item = tree.NewItem()
-                # Display text
-                item.Text[0] = f"{v_name}  ({os.path.basename(media_file)})"
-                # Hidden Data (Full Path)
+                item = self.ui.TreeItem()
+                item.Text[0] = f"{display_v}  ({os.path.basename(media_file)})"
                 item.Text[1] = media_file
-                
                 tree.AddTopLevelItem(item)
 
     def _find_media(self, folder):
         """Finds the most relevant media file in a folder."""
         try:
-            files = [f for f in os.listdir(folder) if not f.startswith(".")]
+            # FILTER: Ignore hidden files, temp files, and metadata sidecars
+            IGNORE_EXT = ('.json', '.tmp', '.xml', '.txt', '.log', '.ramses_complete')
+            files = [f for f in os.listdir(folder) if not f.startswith(".") and not f.lower().endswith(IGNORE_EXT)]
+            files.sort() # Ensure deterministic first-frame selection
         except OSError:
             return None
             
@@ -200,7 +212,7 @@ class AssetBrowser:
                 return os.path.join(folder, f)
         
         # Priority 2: Sequences (exr, dpx, png)
-        # We just need to return the first frame or a representative file
+        # Return the first frame
         for f in files:
             if f.lower().endswith(('.exr', '.dpx', '.png', '.jpg', '.tif', '.tiff')):
                 return os.path.join(folder, f)
