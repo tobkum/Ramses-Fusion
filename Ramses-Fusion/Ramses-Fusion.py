@@ -571,8 +571,10 @@ class RamsesFusionApp:
                 # Create if missing, using calculated coordinates directly
                 if not node:
                     node = comp.AddTool("Saver", cfg["target_x"], cfg["target_y"])
-                    if node:
-                        node.SetAttrs({"TOOLS_Name": name})
+                    if not node:
+                        self.ramses.host.log(f"Failed to create {name} Saver node", ram.LogLevel.Error)
+                        continue
+                    node.SetAttrs({"TOOLS_Name": name})
 
                 # Always enforce critical pipeline settings (even if node existed)
                 if node:

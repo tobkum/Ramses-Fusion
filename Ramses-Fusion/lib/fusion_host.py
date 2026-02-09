@@ -357,6 +357,7 @@ class FusionHost(RamHost):
         self.hostName = "Fusion"
         self._status_cache = None  # Used for UI badge caching
         self._node_version_cache = {} # {node_name: (last_path, is_outdated, latest_dir)}
+        self._cache_lock = threading.Lock()  # Thread-safe cache access
 
         try:
             self.hostVersion = str(
@@ -1249,6 +1250,9 @@ class FusionHost(RamHost):
                 target_y = start_y
 
                 loader = self.comp.AddTool("Loader", target_x, target_y)
+                if not loader:
+                    self.log(f"Failed to create Loader at ({target_x}, {target_y})", LogLevel.Error)
+                    continue
                 if loader:
                     # Explicitly set the clip path with forward slashes for cross-platform safety
                     normalized_path = self.normalizePath(path)
@@ -1302,7 +1306,7 @@ class FusionHost(RamHost):
             return True
         except Exception as e:
             self.log(f"Import failed: {e}", LogLevel.Error)
-            raise
+            return False
         finally:
             self.comp.Unlock()
             self.comp.EndUndo(success)  # Commit if successful, discard if failed
@@ -1315,7 +1319,7 @@ class FusionHost(RamHost):
             step (RamStep): Context step.
 
         Returns:
-            dict: {'filePaths': [path]} or None if cancelled.
+            dict: {'filePaths': [path]} or empty dict if cancelled.
         """
         # Use the smart browser if we have the App reference (for UI)
         if hasattr(self, "app") and self.app:
@@ -1323,11 +1327,11 @@ class FusionHost(RamHost):
             path = browser.show()
             if path:
                 return {"filePaths": [path]}
-            return None
+            return {}
 
         # Fallback to native file picker
         path = self.fusion.RequestFile()
-        return {"filePaths": [path]} if path else None
+        return {"filePaths": [path]} if path else {}
 
     def _openUI(self, item: RamItem = None, step: RamStep = None) -> dict:
         """Shows the native Fusion file request dialog for opening a composition.
@@ -1337,10 +1341,10 @@ class FusionHost(RamHost):
             step (RamStep, optional): Context step.
 
         Returns:
-            dict: {'filePath': path} or None if cancelled.
+            dict: {'filePath': path} or empty dict if cancelled.
         """
         path = self.fusion.RequestFile()
-        return {"filePath": path} if path else None
+        return {"filePath": path} if path else {}
 
     def _preview(
         self,
@@ -1813,6 +1817,11 @@ class FusionHost(RamHost):
         self.comp.Lock()
         success = False
         try:
+            # Re-validate active tool hasn't changed
+            if not self.comp.ActiveTool or self.comp.ActiveTool != active:
+                self.log("Selection changed during operation.", LogLevel.Warning)
+                return False
+
             path = self.normalizePath(filePaths[0])
             active.Clip[1] = path
 
@@ -1849,7 +1858,7 @@ class FusionHost(RamHost):
             return True
         except Exception as e:
             self.log(f"Replace failed: {e}", LogLevel.Error)
-            raise
+            return False
         finally:
             self.comp.Unlock()
             self.comp.EndUndo(success)  # Commit if successful, discard if failed
@@ -1862,12 +1871,12 @@ class FusionHost(RamHost):
             step (RamStep): Context step.
 
         Returns:
-            dict: {'filePaths': [path]} or None if cancelled.
+            dict: {'filePaths': [path]} or empty dict if cancelled.
         """
         res = self._openUI(item, step)
         if res:
             return {"filePaths": [res["filePath"]]}
-        return None
+        return {}
 
     def _restoreVersionUI(self, versionFiles: list) -> str:
         """Shows a UI to select a version to restore.
@@ -2143,30 +2152,24 @@ class FusionHost(RamHost):
             new_attrs["COMPN_RenderEnd"] = float(end)
 
         # Only apply changes if needed (wrap in undo if changes are made)
-        if new_prefs or new_attrs:
-            self.comp.StartUndo("Setup Ramses Scene")
-            success = False
-            try:
-                if new_prefs:
-                    self.comp.SetPrefs(new_prefs)
+        self.comp.StartUndo("Setup Ramses Scene")
+        success = False
+        try:
+            if new_prefs:
+                self.comp.SetPrefs(new_prefs)
+            if new_attrs:
+                self.comp.SetAttrs(new_attrs)
 
-                if new_attrs:
-                    self.comp.SetAttrs(new_attrs)
-
-                # Persist Identity Metadata (includes Step UUID now)
-                self._store_ramses_metadata(item)
-
-                success = True
-                return True
-            except Exception as e:
-                self.log(f"Setup failed: {e}", LogLevel.Error)
-                raise
-            finally:
-                self.comp.EndUndo(success)  # Commit if successful, discard if failed
-        else:
-            # No changes needed, just update metadata
+            # MOVE THIS INSIDE: Always store metadata inside undo block
             self._store_ramses_metadata(item)
+
+            success = True
             return True
+        except Exception as e:
+            self.log(f"Setup failed: {e}", LogLevel.Error)
+            return False
+        finally:
+            self.comp.EndUndo(success)
 
     def _statusUI(self, currentStatus: RamStatus = None) -> dict:
         """Shows the dialog to update status, note, and publish settings.
@@ -2240,41 +2243,53 @@ class FusionHost(RamHost):
         if not self.comp:
             return 0
 
-        # Lock comp during visual updates (but no undo - this is automatic feedback)
+        # Phase 1: Collect loader data (fast, with lock)
         self.comp.Lock()
         try:
-            count = 0
             loaders = self.comp.GetToolList(False, "Loader")
             if not loaders:
-                # Clear cache if no loaders found
-                self._node_version_cache = {}
+                with self._cache_lock:
+                    self._node_version_cache = {}
                 return 0
 
             # Clean up cache for deleted nodes
-            current_names = set(loaders.keys())
-            cached_names = list(self._node_version_cache.keys())
-            for name in cached_names:
-                if name not in current_names:
-                    del self._node_version_cache[name]
-
-            for name, node in loaders.items():
-                # Fast Check: Path string
-                path = self.normalizePath(node.Clip[1])
-                if "/_published/" not in path:
-                    # If it was previously a Ramses asset but now isn't, clear it
-                    if name in self._node_version_cache:
+            with self._cache_lock:
+                current_names = set(loaders.keys())
+                cached_names = list(self._node_version_cache.keys())
+                for name in cached_names:
+                    if name not in current_names:
                         del self._node_version_cache[name]
-                    continue
 
-                # --- PERFORMANCE CACHE (Audit 2.1) ---
-                cached = self._node_version_cache.get(name)
-                if cached and cached[0] == path:
-                    # Path hasn't changed since last scan, use cached result
-                    is_outdated = cached[1]
-                    if is_outdated:
-                        count += 1
+            # Build list of (name, path) tuples while lock is held
+            loaders_data = []
+            for name, node in loaders.items():
+                try:
+                    path = self.normalizePath(node.Clip[1])
+                    if "/_published/" in path:
+                        # Check cache first
+                        with self._cache_lock:
+                            cached = self._node_version_cache.get(name)
+                        if cached and cached[0] == path:
+                            # Already processed this path, skip expensive check
+                            continue
+                        loaders_data.append((name, path, node))
+                    else:
+                        # Clear cache if no longer a Ramses asset
+                        with self._cache_lock:
+                            if name in self._node_version_cache:
+                                del self._node_version_cache[name]
+                except Exception:
                     continue
+        finally:
+            self.comp.Unlock()
 
+        # Phase 2: Process data (slow, without lock)
+        count = 0
+        updates = {}  # Collect visual updates
+
+        for name, path, node in loaders_data:
+            try:
+                # Do expensive DB/file operations here without lock
                 # 1. Identify Context (Virtual avoids DB hit)
                 item = RamItem.fromPath(path, virtualIfNotFound=True)
                 if not item or item.shortName() == "Unknown":
@@ -2306,25 +2321,49 @@ class FusionHost(RamHost):
                     if current_dir_clean != latest_dir_clean:
                         # OUTDATED
                         is_outdated = True
-                        node.TileColor = { "R": 1.0, "G": 0.5, "B": 0.0 } # Orange
                         v_name = os.path.basename(latest_dir)
                         msg = f"New version available: {v_name}"
-                        if msg not in str(node.Comments[1]):
-                            node.Comments[1] = msg
+                        updates[name] = {"color": {"R": 1.0, "G": 0.5, "B": 0.0}, "comment": msg}
                         count += 1
                     else:
-                        # UP TO DATE: Self-heal visuals
-                        color = node.TileColor
-                        if color and abs(color.get("R", 0) - 1.0) < 0.1 and abs(color.get("G", 0) - 0.5) < 0.1:
-                            node.TileColor = { "R": 0.0, "G": 0.0, "B": 0.0 }
-                            node.Comments[1] = ""
+                        # UP TO DATE: Clear warning visuals
+                        updates[name] = {"color": {"R": 0.0, "G": 0.0, "B": 0.0}, "comment": ""}
 
                 # Update Cache
-                self._node_version_cache[name] = (path, is_outdated, latest_dir)
+                with self._cache_lock:
+                    self._node_version_cache[name] = (path, is_outdated, latest_dir)
 
-            return count
-        finally:
-            self.comp.Unlock()
+            except Exception:
+                continue
+
+        # Also count cached outdated loaders
+        with self._cache_lock:
+            for name, (path, is_outdated, latest_dir) in self._node_version_cache.items():
+                if is_outdated and name not in updates:
+                    count += 1
+
+        # Phase 3: Apply visual updates (fast, with lock)
+        if updates:
+            self.comp.Lock()
+            try:
+                for name, data in updates.items():
+                    node = self.comp.FindTool(name)
+                    if node:
+                        # Only update if current color differs
+                        color = node.TileColor
+                        target_color = data["color"]
+                        if not color or abs(color.get("R", 0) - target_color["R"]) > 0.01 or abs(color.get("G", 0) - target_color["G"]) > 0.01:
+                            node.TileColor = target_color
+                        # Only update comment if different
+                        current_comment = str(node.Comments[1])
+                        if data["comment"] and data["comment"] not in current_comment:
+                            node.Comments[1] = data["comment"]
+                        elif not data["comment"] and current_comment:
+                            node.Comments[1] = ""
+            finally:
+                self.comp.Unlock()
+
+        return count
 
     def importItem(self, paths:list=(), item:RamItem=None, step:RamStep=None, resource:str="", importOptions:list = None) -> bool:
         """Overridden to suppress noisy 'empty settings' warnings from base API."""
@@ -2392,11 +2431,16 @@ class FusionHost(RamHost):
                                         # Look for any valid media file in the new folder
                                         found = False
                                         EXTS = ('.mov', '.mp4', '.mxf', '.exr', '.dpx', '.png', '.jpg')
-                                        for f in sorted(os.listdir(latest_dir)):
-                                            if f.lower().endswith(EXTS) and not f.startswith("."):
-                                                new_path = os.path.join(latest_dir, f)
-                                                found = True
-                                                break
+                                        try:
+                                            for f in sorted(os.listdir(latest_dir)):
+                                                if f.lower().endswith(EXTS) and not f.startswith("."):
+                                                    new_path = os.path.join(latest_dir, f)
+                                                    found = True
+                                                    break
+                                        except OSError as e:
+                                            self.log(f"Cannot access directory {latest_dir}: {e}", LogLevel.Error)
+                                            return False
+
                                         if not found:
                                             self.log(f"Update failed: No media found in {latest_dir}", LogLevel.Error)
                                             return False
@@ -2436,7 +2480,7 @@ class FusionHost(RamHost):
                                         return True
                                     except Exception as e:
                                         self.log(f"Update failed: {e}", LogLevel.Error)
-                                        raise
+                                        return False
                                     finally:
                                         self.comp.Unlock()
                                         self.comp.EndUndo(success)  # Commit if successful, discard if failed
