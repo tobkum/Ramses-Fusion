@@ -509,7 +509,7 @@ class RamsesFusionApp:
         fn_info = self._build_file_info(
             ram.ItemType.SHOT, step, shot.shortName(), "comp"
         )
-        predicted_path = os.path.join(folder, fn_info.fileName())
+        predicted_path = os.path.abspath(os.path.join(folder, fn_info.fileName()))
         return predicted_path, False
 
     def _create_render_anchors(self) -> None:
@@ -793,6 +793,7 @@ class RamsesFusionApp:
             force_full (bool): If True, invalidates project/user caches to force a full re-fetch.
         """
         is_online = self._check_connection(silent=True)
+        self._outdated_count = 0  # Reset count to ensure accurate UI state
 
         if is_online:
             try:
@@ -1918,15 +1919,15 @@ class RamsesFusionApp:
                 selected_step = session_cache["current_steps"][step_idx]
 
                 if not shot_data["exists"]:
-                    selected_path = shot_data["path"]
+                    selected_path = os.path.abspath(shot_data["path"])
 
                     # Ensure the target directory exists before saving
                     target_dir = os.path.dirname(selected_path)
-                    if target_dir and not os.path.exists(target_dir):
+                    if target_dir:
                         try:
-                            os.makedirs(target_dir)
+                            os.makedirs(target_dir, exist_ok=True)
                             self.log(
-                                f"Created directory: {target_dir}", ram.LogLevel.Debug
+                                f"Ensured directory exists: {target_dir}", ram.LogLevel.Debug
                             )
                         except OSError as e:
                             self.log(
@@ -2044,7 +2045,8 @@ class RamsesFusionApp:
         Args:
             ev: The event object (unused).
         """
-        self.ramses.host.importItem()
+        if self.ramses.host.importItem():
+            self.refresh_header()
 
     @requires_connection
     def on_replace(self, ev: object) -> None:
@@ -2055,7 +2057,8 @@ class RamsesFusionApp:
         Args:
             ev: The event object (unused).
         """
-        self.ramses.host.replaceItem()
+        if self.ramses.host.replaceItem():
+            self.refresh_header()
 
     @requires_connection
     def on_save(self, ev: object) -> None:

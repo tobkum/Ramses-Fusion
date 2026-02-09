@@ -323,18 +323,20 @@ class FusionHost(RamHost):
             self.hostVersion = "Unknown"
 
     @staticmethod
-    def normalizePath(path: object) -> str:
-        """Centralized path normalization for Fusion (forward slashes).
+    def normalizePath(self, path: object) -> str:
+        """Centralized path normalization for Fusion (Absolute + forward slashes).
 
         Args:
             path (object): The file path to normalize.
 
         Returns:
-            str: The normalized path with forward slashes, or empty string if input is None/empty.
+            str: The absolute normalized path, or empty string if input is None/empty.
         """
         if not path:
             return ""
-        return str(path).replace("\\", "/")
+        # Force absolute path to prevent WinError 3 in Fusion's default CWD
+        abs_path = os.path.abspath(str(path))
+        return abs_path.replace("\\", "/")
 
     @property
     def comp(self) -> object:
@@ -791,6 +793,15 @@ class FusionHost(RamHost):
             return False
         # Normalize path for Fusion
         filePath = self.normalizePath(filePath)
+        
+        # Ensure target directory exists (prevents WinError 3)
+        target_dir = os.path.dirname(filePath)
+        if target_dir and not os.path.exists(target_dir):
+            try:
+                os.makedirs(target_dir)
+            except Exception as e:
+                self.log(f"Could not create directory {target_dir}: {e}", LogLevel.Warning)
+
         try:
             self.comp.Save(filePath)
             return True
@@ -2085,6 +2096,8 @@ class FusionHost(RamHost):
                 # PATH HARDENING: Ensure robust comparison across platforms
                 def _sanitize(p):
                     if not p: return ""
+                    # Remove padding markers that might confuse dirname/abspath
+                    p = str(p).replace("####", "0000").replace(".%04d", ".0000")
                     return self.normalizePath(p).lower().rstrip("/")
 
                 latest_dir_clean = _sanitize(latest_dir)
@@ -2102,6 +2115,13 @@ class FusionHost(RamHost):
                     if msg not in str(node.Comments[1]):
                         node.Comments[1] = msg
                     count += 1
+                else:
+                    # UP TO DATE: Self-heal visuals if they were orange
+                    # We check if it was orange (R=1.0, G=0.5)
+                    color = node.TileColor
+                    if color and abs(color.get("R", 0) - 1.0) < 0.1 and abs(color.get("G", 0) - 0.5) < 0.1:
+                        node.TileColor = { "R": 0.0, "G": 0.0, "B": 0.0 }
+                        node.Comments[1] = ""
             else:
                 self._log(f"Scanner: No published version found for {item.shortName()} | {step.shortName()}", LogLevel.Debug)
 
