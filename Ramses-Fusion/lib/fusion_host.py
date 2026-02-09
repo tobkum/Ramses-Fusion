@@ -1226,6 +1226,7 @@ class FusionHost(RamHost):
         undo_name = f"Import {num_files} Loader{'s' if num_files > 1 else ''}"
         self.comp.StartUndo(undo_name)
         self.comp.Lock()
+        success = False
         try:
             # Get start frame for alignment
             start_frame = RAM_SETTINGS.userSettings.get("compStartFrame", 1001)
@@ -1297,14 +1298,14 @@ class FusionHost(RamHost):
                     # Automatic Alignment
                     loader.GlobalIn[1] = float(start_frame)
 
+            success = True
             return True
         except Exception as e:
             self.log(f"Import failed: {e}", LogLevel.Error)
-            self.comp.EndUndo(False)  # Discard undo on failure
             raise
         finally:
             self.comp.Unlock()
-            self.comp.EndUndo(True)  # Commit undo group
+            self.comp.EndUndo(success)  # Commit if successful, discard if failed
 
     def _importUI(self, item: RamItem, step: RamStep) -> dict:
         """Shows the Ramses Asset Browser for importing.
@@ -1810,6 +1811,7 @@ class FusionHost(RamHost):
         # Start undo group for atomic operation
         self.comp.StartUndo("Replace Loader")
         self.comp.Lock()
+        success = False
         try:
             path = self.normalizePath(filePaths[0])
             active.Clip[1] = path
@@ -1843,14 +1845,14 @@ class FusionHost(RamHost):
                 name = self._sanitizeNodeName(raw_name)
                 active.SetAttrs({"TOOLS_Name": name})
 
+            success = True
             return True
         except Exception as e:
             self.log(f"Replace failed: {e}", LogLevel.Error)
-            self.comp.EndUndo(False)  # Discard undo on failure
             raise
         finally:
             self.comp.Unlock()
-            self.comp.EndUndo(True)  # Commit undo group
+            self.comp.EndUndo(success)  # Commit if successful, discard if failed
 
     def _replaceUI(self, item: RamItem, step: RamStep) -> dict:
         """Shows the native Fusion file request dialog for replacing.
@@ -2143,6 +2145,7 @@ class FusionHost(RamHost):
         # Only apply changes if needed (wrap in undo if changes are made)
         if new_prefs or new_attrs:
             self.comp.StartUndo("Setup Ramses Scene")
+            success = False
             try:
                 if new_prefs:
                     self.comp.SetPrefs(new_prefs)
@@ -2153,13 +2156,13 @@ class FusionHost(RamHost):
                 # Persist Identity Metadata (includes Step UUID now)
                 self._store_ramses_metadata(item)
 
+                success = True
                 return True
             except Exception as e:
                 self.log(f"Setup failed: {e}", LogLevel.Error)
-                self.comp.EndUndo(False)  # Discard on failure
                 raise
             finally:
-                self.comp.EndUndo(True)
+                self.comp.EndUndo(success)  # Commit if successful, discard if failed
         else:
             # No changes needed, just update metadata
             self._store_ramses_metadata(item)
@@ -2394,6 +2397,7 @@ class FusionHost(RamHost):
                                     # Wrap update in undo group with Lock/Unlock
                                     self.comp.StartUndo("Update Loader to Latest")
                                     self.comp.Lock()
+                                    success = False
                                     try:
                                         new_path_normalized = self.normalizePath(new_path)
                                         active.Clip[1] = new_path_normalized
@@ -2421,14 +2425,14 @@ class FusionHost(RamHost):
                                         active.Comments[1] = ""
 
                                         self.log(f"Updated loader to {os.path.basename(latest_dir)}")
+                                        success = True
                                         return True
                                     except Exception as e:
                                         self.log(f"Update failed: {e}", LogLevel.Error)
-                                        self.comp.EndUndo(False)  # Discard on failure
                                         raise
                                     finally:
                                         self.comp.Unlock()
-                                        self.comp.EndUndo(True)
+                                        self.comp.EndUndo(success)  # Commit if successful, discard if failed
                                 else:
                                     # Fallthrough to Browse...
                                     item = itm
