@@ -41,6 +41,9 @@ CODEC_PRORES_422_HQ = "Apple ProRes 422 HQ_apch"
 
 from ramses import RamFileManager
 
+# Module-level lock for thread-safe daemon initialization
+_DAEMON_INIT_LOCK = threading.Lock()
+
 # Use a flag to ensure patches are only applied once
 if not hasattr(RamFileManager, "_fusion_patched"):
     RamFileManager._fusion_patched = True
@@ -157,10 +160,14 @@ if not hasattr(RamFileManager, "_fusion_patched"):
     RamFileManager.getVersionFilePaths = staticmethod(_patched_getVersionFilePaths)
 
     # 3. Thread-Safe Socket Communication for RamDaemonInterface
-    # We add a lock to the Singleton instance
+    # We add a lock to the Singleton instance using double-checked locking
+    # to prevent race conditions during initialization
     daemon = RamDaemonInterface.instance()
     if not hasattr(daemon, "_lock"):
-        daemon._lock = threading.Lock()
+        with _DAEMON_INIT_LOCK:
+            # Double-check after acquiring lock
+            if not hasattr(daemon, "_lock"):
+                daemon._lock = threading.Lock()
 
     original_post = getattr(daemon, "_RamDaemonInterface__post")
 
@@ -1077,15 +1084,19 @@ class FusionHost(RamHost):
             dlg.Show()
             disp.RunLoop()
         finally:
-            # Cleanup handlers safely
+            # Hide dialog first to prevent event processing during cleanup
+            dlg.Hide()
+
+            # Cleanup event handlers to prevent memory leaks
+            # Fusion's UIManager can leak memory if handlers reference closed windows
             try:
                 dlg.On.OkBtn.Clicked = None
-                dlg.On.CancelBtn.Clicked = None
+                if cancel_text:
+                    dlg.On.CancelBtn.Clicked = None
                 dlg.On[win_id].Close = None
             except Exception:
                 pass
 
-            dlg.Hide()
             # Re-enable main window
             if main_win:
                 main_win.Enabled = True
@@ -1196,60 +1207,62 @@ class FusionHost(RamHost):
         """
         if not self.comp:
             return False
+
         self.comp.Lock()
+        try:
+            # Get start frame for alignment
+            start_frame = RAM_SETTINGS.userSettings.get("compStartFrame", 1001)
 
-        # Get start frame for alignment
-        start_frame = RAM_SETTINGS.userSettings.get("compStartFrame", 1001)
+            # Determine Reference Position (Grid Units)
+            flow = self.comp.CurrentFrame.FlowView
+            start_x, start_y = 0, 0
 
-        # Determine Reference Position (Grid Units)
-        flow = self.comp.CurrentFrame.FlowView
-        start_x, start_y = 0, 0
+            active = self.comp.ActiveTool
+            if active and flow:
+                pos = flow.GetPosTable(active)
+                # Fusion returns {1.0: x, 2.0: y} in Grid Units
+                if pos:
+                    start_x = pos[1]
+                    start_y = pos[2] + 1  # Start one unit below active tool
 
-        active = self.comp.ActiveTool
-        if active and flow:
-            pos = flow.GetPosTable(active)
-            # Fusion returns {1.0: x, 2.0: y} in Grid Units
-            if pos:
-                start_x = pos[1]
-                start_y = pos[2] + 1  # Start one unit below active tool
+            for i, path in enumerate(filePaths):
+                # Stagger horizontally
+                target_x = start_x + i
+                target_y = start_y
 
-        for i, path in enumerate(filePaths):
-            # Stagger horizontally
-            target_x = start_x + i
-            target_y = start_y
+                loader = self.comp.AddTool("Loader", target_x, target_y)
+                if loader:
+                    # Explicitly set the clip path with forward slashes for cross-platform safety
+                    loader.Clip[1] = self.normalizePath(path)
 
-            loader = self.comp.AddTool("Loader", target_x, target_y)
-            if loader:
-                # Explicitly set the clip path with forward slashes for cross-platform safety
-                loader.Clip[1] = self.normalizePath(path)
+                    # Smart Naming with safety fallback
+                    if item:
+                        raw_name = (
+                            f"{item.shortName()}_{step.shortName()}"
+                            if step
+                            else item.shortName()
+                        )
+                    else:
+                        # Fallback to sanitized base filename
+                        raw_name = os.path.splitext(os.path.basename(path))[0]
 
-                # Smart Naming with safety fallback
-                if item:
-                    raw_name = (
-                        f"{item.shortName()}_{step.shortName()}"
-                        if step
-                        else item.shortName()
-                    )
-                else:
-                    # Fallback to sanitized base filename
-                    raw_name = os.path.splitext(os.path.basename(path))[0]
+                    name = self._sanitizeNodeName(raw_name)
 
-                name = self._sanitizeNodeName(raw_name)
+                    if name:
+                        # Prevent name collisions by checking if node exists and appending counter
+                        final_name = name
+                        counter = 1
+                        while self.comp.FindTool(final_name):
+                            final_name = f"{name}_{counter}"
+                            counter += 1
+                        loader.SetAttrs({"TOOLS_Name": final_name})
 
-                if name:
-                    # Prevent name collisions by checking if node exists and appending counter
-                    final_name = name
-                    counter = 1
-                    while self.comp.FindTool(final_name):
-                        final_name = f"{name}_{counter}"
-                        counter += 1
-                    loader.SetAttrs({"TOOLS_Name": final_name})
+                    # Automatic Alignment
+                    loader.GlobalIn[1] = float(start_frame)
 
-                # Automatic Alignment
-                loader.GlobalIn[1] = float(start_frame)
-
-        self.comp.Unlock()
-        return True
+            return True
+        finally:
+            self.comp.Unlock()
 
     def _importUI(self, item: RamItem, step: RamStep) -> dict:
         """Shows the Ramses Asset Browser for importing.

@@ -808,23 +808,24 @@ class RamsesFusionApp:
         self._last_refresh_time = current_time
         
         is_online = self._check_connection(silent=True)
-        self._outdated_count = 0  # Reset count to ensure accurate UI state
 
         if is_online:
             try:
-                # 1. Check for outdated assets (Always do this if online)
-                self._outdated_count = self.ramses.host.check_outdated_loaders()
-
-                # 2. Performance Gate: Skip database re-fetching if path hasn't changed
+                # Performance Gate: Skip expensive operations if path hasn't changed
                 current_path = self.ramses.host.currentFilePath()
                 if (
                     not force_full
                     and self._last_synced_path == current_path
                     and self._item_cache
                 ):
-                    # We still need to update the UI state to show the badge if it changed
+                    # Path unchanged - skip expensive database queries and loader checks
+                    # The outdated count is already cached from the last check
                     self._update_ui_state(is_online)
                     return
+
+                # 1. Check for outdated assets (expensive: iterates all Loaders in comp)
+                # Only run when path changes or force_full is requested
+                self._outdated_count = self.ramses.host.check_outdated_loaders()
 
                 # Force cache refresh for project and user only if requested
                 if force_full:
