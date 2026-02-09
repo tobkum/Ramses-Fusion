@@ -798,6 +798,7 @@ class RamsesFusionApp:
 
         Args:
             force_full (bool): If True, invalidates project/user caches to force a full re-fetch.
+                               Also bypasses the time-based debouncing timer.
         """
         # Time-based debouncing: Skip refresh if <5s since last refresh (unless forced)
         current_time = time.time()
@@ -1942,8 +1943,12 @@ class RamsesFusionApp:
                         # Create main step folder
                         os.makedirs(target_dir, exist_ok=True)
                         # PRE-EMPTIVE API FOLDERS: Prevent WinError 3 during API's internal backup/versioning
-                        os.makedirs(os.path.join(target_dir, "_versions"), exist_ok=True)
-                        os.makedirs(os.path.join(target_dir, "_published"), exist_ok=True)
+                        os.makedirs(
+                            os.path.join(target_dir, "_versions"), exist_ok=True
+                        )
+                        os.makedirs(
+                            os.path.join(target_dir, "_published"), exist_ok=True
+                        )
 
                     use_template = None
                     tpl_folder = selected_step.templatesFolderPath()
@@ -1960,12 +1965,21 @@ class RamsesFusionApp:
                             tpl_opts[str(i + 1)] = f
                         tpl_res = host._request_input(
                             "Select Template",
-                            [{"id": "Tpl", "label": "Template:", "type": "combo", "options": tpl_opts}],
+                            [
+                                {
+                                    "id": "Tpl",
+                                    "label": "Template:",
+                                    "type": "combo",
+                                    "options": tpl_opts,
+                                }
+                            ],
                         )
                         if tpl_res:
                             idx = int(tpl_res["Tpl"])
                             if idx > 0:
-                                use_template = os.path.join(tpl_folder, template_files[idx - 1])
+                                use_template = os.path.join(
+                                    tpl_folder, template_files[idx - 1]
+                                )
                             else:
                                 host.fusion.NewComp()
                         else:
@@ -1977,11 +1991,23 @@ class RamsesFusionApp:
                     elif not template_files:
                         init_res = host._request_input(
                             "Initialize Shot",
-                            [{"id": "Mode", "label": "No template found. Use:", "type": "combo", "options": {"0": "Empty Composition", "1": "Current Composition as base"}}]
+                            [
+                                {
+                                    "id": "Mode",
+                                    "label": "No template found. Use:",
+                                    "type": "combo",
+                                    "options": {
+                                        "0": "Empty Composition",
+                                        "1": "Current Composition as base",
+                                    },
+                                }
+                            ],
                         )
-                        if not init_res: return
-                        if init_res["Mode"] == 0: host.fusion.NewComp()
-                    
+                        if not init_res:
+                            return
+                        if init_res["Mode"] == 0:
+                            host.fusion.NewComp()
+
                     # Perform the initial save via host.comp.Save directly to establish file identity
                     # using our verified absolute path.
                     host.comp.Save(selected_path)
@@ -2015,16 +2041,23 @@ class RamsesFusionApp:
                                 status.setComment("Initial creation")
                                 # Push to daemon
                                 status.setVersion(host.currentVersion())
-                                self.log(f"Auto-updated status to {target_state.shortName()}", ram.LogLevel.Info)
+                                self.log(
+                                    f"Auto-updated status to {target_state.shortName()}",
+                                    ram.LogLevel.Info,
+                                )
                         except Exception as e:
-                            self.log(f"Could not force status update: {e}", ram.LogLevel.Warning)
+                            self.log(
+                                f"Could not force status update: {e}",
+                                ram.LogLevel.Warning,
+                            )
 
-                        self.refresh_header()
+                        self.refresh_header(force_full=True)
                         self.log(f"New shot initialized: {selected_path}", ram.LogLevel.Info)
                 else:
                     # Let RamHost handle the open/prompt logic (handles dirty checks internally)
                     if host.open(shot_data["path"]):
-                        self.refresh_header()
+                        self.refresh_header(force_full=True)
+                        self.log(f"Opened existing shot: {shot_data['path']}")
 
     @requires_connection
     def on_import(self, ev: object) -> None:
@@ -2120,23 +2153,23 @@ class RamsesFusionApp:
                     "label": "Save as New Version:",
                     "type": "checkbox",
                     "default": False,
-                }
+                },
             ],
         )
 
         if res is not None:
             comment_changed = res["Comment"] != current_note
             is_incremental = res["Incremental"]
-            
+
             # Proceed if note changed OR if user explicitly asked for a new version
             if comment_changed or is_incremental:
                 has_project = self.ramses.project() is not None
 
                 if host.save(
-                    comment=res["Comment"], 
-                    setupFile=has_project, 
+                    comment=res["Comment"],
+                    setupFile=has_project,
                     incremental=is_incremental,
-                    state=state
+                    state=state,
                 ):
                     # 1. Update Database Status
                     if status:
@@ -2411,12 +2444,22 @@ class RamsesFusionApp:
                                                     "#B24C4C",
                                                     extras=[
                                                         ui.VGap(10),
-                                                        ui.Label({"Text": "Export Destination:", "Weight": 0}),
-                                                        ui.ComboBox({
-                                                            "ID": "FinalDest",
-                                                            "Weight": 0,
-                                                            "MinimumSize": [200, 24],
-                                                        }),
+                                                        ui.Label(
+                                                            {
+                                                                "Text": "Export Destination:",
+                                                                "Weight": 0,
+                                                            }
+                                                        ),
+                                                        ui.ComboBox(
+                                                            {
+                                                                "ID": "FinalDest",
+                                                                "Weight": 0,
+                                                                "MinimumSize": [
+                                                                    200,
+                                                                    24,
+                                                                ],
+                                                            }
+                                                        ),
                                                     ],
                                                 ),
                                             ],
@@ -2461,34 +2504,59 @@ class RamsesFusionApp:
                         ui.VGap(10),
                         # Naming Convention Section
                         ui.VGroup(
-                            {"Spacing": 5, "Weight": 0}, 
+                            {"Spacing": 5, "Weight": 0},
                             [
                                 ui.HGroup(
                                     [
                                         ui.HGap(20),
-                                        ui.Label({"Text": "<b><font color='#888'>NAMING CONVENTION</font></b>", "Weight": 1}),
+                                        ui.Label(
+                                            {
+                                                "Text": "<b><font color='#888'>NAMING CONVENTION</font></b>",
+                                                "Weight": 1,
+                                            }
+                                        ),
                                     ]
                                 ),
                                 ui.HGroup(
                                     [
                                         ui.HGap(20),
-                                        ui.Label({"Text": "Identity Suffix (Final):", "Weight": 0, "MinimumSize": [150, 24]}),
-                                        ui.LineEdit({
-                                            "ID": "FinalSuffix", 
-                                            "Text": current_data.get("naming", {}).get("final_suffix", "_vfx"), 
-                                            "Weight": 1
-                                        }),
+                                        ui.Label(
+                                            {
+                                                "Text": "Identity Suffix (Final):",
+                                                "Weight": 0,
+                                                "MinimumSize": [150, 24],
+                                            }
+                                        ),
+                                        ui.LineEdit(
+                                            {
+                                                "ID": "FinalSuffix",
+                                                "Text": current_data.get(
+                                                    "naming", {}
+                                                ).get("final_suffix", "_vfx"),
+                                                "Weight": 1,
+                                            }
+                                        ),
                                         ui.HGap(20),
-                                        ui.Label({"Text": "Review Suffix (Preview):", "Weight": 0, "MinimumSize": [150, 24]}),
-                                        ui.LineEdit({
-                                            "ID": "PreviewSuffix", 
-                                            "Text": current_data.get("naming", {}).get("preview_suffix", "_vfx_preview"), 
-                                            "Weight": 1
-                                        }),
+                                        ui.Label(
+                                            {
+                                                "Text": "Review Suffix (Preview):",
+                                                "Weight": 0,
+                                                "MinimumSize": [150, 24],
+                                            }
+                                        ),
+                                        ui.LineEdit(
+                                            {
+                                                "ID": "PreviewSuffix",
+                                                "Text": current_data.get(
+                                                    "naming", {}
+                                                ).get("preview_suffix", "_vfx_preview"),
+                                                "Weight": 1,
+                                            }
+                                        ),
                                         ui.HGap(20),
                                     ]
                                 ),
-                            ]
+                            ],
                         ),
                         ui.VGap(20),
                     ],
@@ -2502,7 +2570,9 @@ class RamsesFusionApp:
         # Populate Export Destination dropdown
         itm["FinalDest"].AddItem("Project Export (06-EXPORT)")
         itm["FinalDest"].AddItem("Step Published (_published)")
-        itm["FinalDest"].CurrentIndex = 1 if final_cfg.get("export_dest") == "step" else 0
+        itm["FinalDest"].CurrentIndex = (
+            1 if final_cfg.get("export_dest") == "step" else 0
+        )
 
         def on_ok(ev):
             # 1. Preview Parsing
@@ -2556,7 +2626,7 @@ class RamsesFusionApp:
             # 4. Naming Convention
             if "naming" not in new_data:
                 new_data["naming"] = {}
-            
+
             new_data["naming"]["final_suffix"] = itm["FinalSuffix"].Text
             new_data["naming"]["preview_suffix"] = itm["PreviewSuffix"].Text
 
