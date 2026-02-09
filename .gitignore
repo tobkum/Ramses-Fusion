@@ -39,3 +39,5 @@ wiki/
 *.log
 *.tmp
 **/examples
+todo.md
+TODO.md
