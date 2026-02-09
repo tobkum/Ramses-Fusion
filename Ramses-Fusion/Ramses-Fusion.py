@@ -1919,22 +1919,17 @@ class RamsesFusionApp:
                 selected_step = session_cache["current_steps"][step_idx]
 
                 if not shot_data["exists"]:
-                    selected_path = os.path.abspath(shot_data["path"])
+                    # FORCE ABSOLUTE PATH
+                    selected_path = host.normalizePath(shot_data["path"])
 
-                    # Ensure the target directory exists before saving
+                    # Ensure the target directory exists before any save
                     target_dir = os.path.dirname(selected_path)
                     if target_dir:
-                        try:
-                            os.makedirs(target_dir, exist_ok=True)
-                            self.log(
-                                f"Ensured directory exists: {target_dir}", ram.LogLevel.Debug
-                            )
-                        except OSError as e:
-                            self.log(
-                                f"Failed to create directory: {e}",
-                                ram.LogLevel.Critical,
-                            )
-                            return
+                        # Create main step folder
+                        os.makedirs(target_dir, exist_ok=True)
+                        # PRE-EMPTIVE API FOLDERS: Prevent WinError 3 during API's internal backup/versioning
+                        os.makedirs(os.path.join(target_dir, "_versions"), exist_ok=True)
+                        os.makedirs(os.path.join(target_dir, "_published"), exist_ok=True)
 
                     use_template = None
                     tpl_folder = selected_step.templatesFolderPath()
@@ -1945,92 +1940,73 @@ class RamsesFusionApp:
                         ]
 
                     if template_files:
+                        # ... (template selection logic) ...
                         tpl_opts = {"0": "None - Empty Composition"}
                         for i, f in enumerate(template_files):
                             tpl_opts[str(i + 1)] = f
                         tpl_res = host._request_input(
                             "Select Template",
-                            [
-                                {
-                                    "id": "Tpl",
-                                    "label": "Template:",
-                                    "type": "combo",
-                                    "options": tpl_opts,
-                                }
-                            ],
+                            [{"id": "Tpl", "label": "Template:", "type": "combo", "options": tpl_opts}],
                         )
                         if tpl_res:
                             idx = int(tpl_res["Tpl"])
                             if idx > 0:
-                                use_template = os.path.join(
-                                    tpl_folder, template_files[idx - 1]
-                                )
+                                use_template = os.path.join(tpl_folder, template_files[idx - 1])
                             else:
                                 host.fusion.NewComp()
                         else:
                             return
 
                     if use_template:
-                        self.log(
-                            f"Creating shot from template: {use_template}",
-                            ram.LogLevel.Info,
-                        )
-                        if host.open(use_template):
-                            host.comp.Save(host.normalizePath(selected_path))
+                        self.log(f"Creating shot from template: {use_template}")
+                        host.open(use_template)
                     elif not template_files:
                         init_res = host._request_input(
                             "Initialize Shot",
-                            [
-                                {
-                                    "id": "Mode",
-                                    "label": "No template found. Use:",
-                                    "type": "combo",
-                                    "options": {
-                                        "0": "Empty Composition",
-                                        "1": "Current Composition as base",
-                                    },
-                                }
-                            ],
+                            [{"id": "Mode", "label": "No template found. Use:", "type": "combo", "options": {"0": "Empty Composition", "1": "Current Composition as base"}}]
                         )
-                        if not init_res:
-                            return
-                        if init_res["Mode"] == 0:
-                            host.fusion.NewComp()
-                        host.comp.Save(host.normalizePath(selected_path))
-                    else:
-                        host.comp.Save(host.normalizePath(selected_path))
+                        if not init_res: return
+                        if init_res["Mode"] == 0: host.fusion.NewComp()
+                    
+                    # Perform the initial save via host.comp.Save directly to establish file identity
+                    # using our verified absolute path.
+                    host.comp.Save(selected_path)
 
-                    target_state = self.ramses.defaultState()
+                    # FORCE WIP STATE
+                    target_state = None
+                    all_states = self.ramses.states()
+                    # Try to find 'WIP' specifically
+                    for s in all_states:
+                        if s.shortName().upper() == "WIP":
+                            target_state = s
+                            break
+                    # Fallback to first 'Work' state if WIP not found
+                    if not target_state:
+                        for s in all_states:
+                            if s.stateType() == ram.StateType.WORK:
+                                target_state = s
+                                break
+                    # Final fallback to default
+                    if not target_state:
+                        target_state = self.ramses.defaultState()
+
                     if host.save(
                         comment="Initial creation", setupFile=True, state=target_state
                     ):
-                        # Auto-update status to WIP if needed
+                        # FORCE STATUS UPDATE: Explicitly commit to DB
                         try:
                             status = host.currentStatus()
-
-                            if (
-                                status
-                                and target_state
-                                and status.state().shortName()
-                                != target_state.shortName()
-                            ):
+                            if status and target_state:
                                 status.setState(target_state)
                                 status.setComment("Initial creation")
+                                # Push to daemon
                                 status.setVersion(host.currentVersion())
-                                self.log(
-                                    f"Auto-updated status to {target_state.name()}",
-                                    ram.LogLevel.Info,
-                                )
+                                self.log(f"Auto-updated status to {target_state.shortName()}", ram.LogLevel.Info)
                         except Exception as e:
-                            self.log(
-                                f"Could not auto-update status: {e}",
-                                ram.LogLevel.Warning,
-                            )
+                            self.log(f"Could not force status update: {e}", ram.LogLevel.Warning)
 
                         self.refresh_header()
-                        self.log(
-                            f"New shot initialized: {selected_path}", ram.LogLevel.Info
-                        )
+                        self.log(f"New shot initialized: {selected_path}", ram.LogLevel.Info)
                 else:
                     # Let RamHost handle the open/prompt logic (handles dirty checks internally)
                     if host.open(shot_data["path"]):

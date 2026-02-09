@@ -322,20 +322,24 @@ class FusionHost(RamHost):
         except Exception:
             self.hostVersion = "Unknown"
 
-    @staticmethod
     def normalizePath(self, path: object) -> str:
-        """Centralized path normalization for Fusion (Absolute + forward slashes).
-
-        Args:
-            path (object): The file path to normalize.
-
-        Returns:
-            str: The absolute normalized path, or empty string if input is None/empty.
-        """
+        """Centralized path normalization for Fusion (Project-Rooted + forward slashes)."""
         if not path:
             return ""
-        # Force absolute path to prevent WinError 3 in Fusion's default CWD
-        abs_path = os.path.abspath(str(path))
+        
+        path_str = str(path)
+        # If relative, try to root it to the project path
+        if not os.path.isabs(path_str):
+            try:
+                # Attempt to get project root from RAM_SETTINGS or active project
+                from ramses.constants import RAM_SETTINGS
+                proj_root = RAM_SETTINGS.userSettings.get("projectsPath")
+                if proj_root and os.path.isdir(proj_root):
+                    path_str = os.path.join(proj_root, path_str)
+            except Exception:
+                pass
+
+        abs_path = os.path.abspath(path_str)
         return abs_path.replace("\\", "/")
 
     @property

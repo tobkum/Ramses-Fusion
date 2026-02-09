@@ -39,25 +39,24 @@ class AssetBrowser:
                 "ID": win_id,
                 "Geometry": [300, 300, 600, 400],
             },
-            [
-                self.ui.VGroup([
-                    self.ui.Label({"Text": "Select Source Step:", "Weight": 0}),
-                    self.ui.ComboBox({"ID": "StepCombo", "Weight": 0}),
-                    self.ui.VGap(10),
-                    self.ui.Label({"Text": "Published Versions:", "Weight": 0}),
-                    self.ui.Tree({"ID": "VersionTree", "Weight": 1, "HeaderHidden": False, "ColumnCount": 2}),
-                    self.ui.VGap(10),
-                    self.ui.HGroup({"Weight": 0}, [
-                        self.ui.HGap(0, 1),
-                        self.ui.Button({"ID": "ImportBtn", "Text": "Import", "Weight": 0, "MinimumSize": [100, 30]}),
-                        self.ui.Button({"ID": "CancelBtn", "Text": "Cancel", "Weight": 0, "MinimumSize": [100, 30]}),
-                    ])
+            self.ui.VGroup([
+                self.ui.Label({"Text": "Select Source Step:", "Weight": 0}),
+                self.ui.ComboBox({"ID": "StepCombo", "Weight": 0}),
+                self.ui.VGap(10),
+                self.ui.Label({"Text": "Published Versions:", "Weight": 0}),
+                self.ui.Tree({"ID": "VersionTree", "Weight": 1, "HeaderHidden": False, "ColumnCount": 2}),
+                self.ui.VGap(10),
+                self.ui.HGroup({"Weight": 0}, [
+                    self.ui.HGap(0, 1),
+                    self.ui.Button({"ID": "ImportBtn", "Text": "Import", "Weight": 0, "MinimumSize": [100, 30]}),
+                    self.ui.Button({"ID": "CancelBtn", "Text": "Cancel", "Weight": 0, "MinimumSize": [100, 30]}),
                 ])
-            ]
+            ])
         )
         
         # Setup Tree Columns
-        tree = self.dlg.GetItems()["VersionTree"]
+        items = self.dlg.GetItems()
+        tree = items["VersionTree"]
         tree.SetHeaderLabels(["Version", "Path"])
         # Hide Path column (index 1) by setting width to 0
         tree.ColumnWidth[1] = 0
@@ -68,7 +67,7 @@ class AssetBrowser:
         # Fetch all shot production steps
         all_steps = project.steps(StepType.SHOT_PRODUCTION)
         
-        combo = self.dlg.GetItems()["StepCombo"]
+        combo = items["StepCombo"]
         self.step_map = {}
         
         select_idx = 0
@@ -96,6 +95,9 @@ class AssetBrowser:
         def on_import(ev):
             # Handle potential PyFunctionCall wrapper
             item_or_func = tree.CurrentItem
+            if item_or_func is None:
+                return
+
             if callable(item_or_func):
                 item = item_or_func()
             else:
@@ -190,8 +192,8 @@ class AssetBrowser:
             # Find main media file
             media_file = self._find_media(folder)
             if media_file:
-                # Create Tree Item
-                item = self.ui.TreeItem()
+                # Create Tree Item correctly via tree.NewItem()
+                item = tree.NewItem()
                 item.Text[0] = f"{display_v}  ({os.path.basename(media_file)})"
                 item.Text[1] = media_file
                 tree.AddTopLevelItem(item)
