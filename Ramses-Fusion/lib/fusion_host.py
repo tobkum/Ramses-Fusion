@@ -24,6 +24,7 @@ try:
 except ImportError:
     import yaml
 from fusion_config import FusionConfig
+from asset_browser import AssetBrowser
 
 __all__ = ["FusionHost"]
 
@@ -644,14 +645,28 @@ class FusionHost(RamHost):
                 preview_folder = os.path.dirname(fallback_path)
 
             # Previews are typically non-versioned "Masters"
-            pub_info = self.publishInfo()
-            preview_info = pub_info.copy()
-            preview_info.version = -1
-            preview_info.state = ""
-            preview_info.resource = ""
-            preview_info.extension = ""  # Exclude from base filename for sequence logic
+            
+            # CLIENT NAMING WORKFLOW
+            item = self.currentItem()
+            source_media = item.get("sourceMedia") if item else None
 
-            base_filename = preview_info.fileName().rstrip(".")
+            if source_media:
+                # Get suffix from Step Config (default: _vfx_preview)
+                step = self.currentStep()
+                step_cfg = step.publishSettings("yaml") if step else {}
+                naming_cfg = step_cfg.get("naming", {})
+                suffix = naming_cfg.get("preview_suffix", "_vfx_preview")
+                
+                base_filename = f"{source_media}{suffix}"
+            else:
+                # FALLBACK TO RAMSES STANDARD
+                pub_info = self.publishInfo()
+                preview_info = pub_info.copy()
+                preview_info.version = -1
+                preview_info.state = ""
+                preview_info.resource = ""
+                preview_info.extension = ""  # Exclude from base filename for sequence logic
+                base_filename = preview_info.fileName().rstrip(".")
 
             if is_sequence:
                 padding_str = self._calculate_padding_str()
@@ -706,11 +721,27 @@ class FusionHost(RamHost):
                 export_folder = project.exportPath()
 
                 if export_folder:
-                    # Master Render (No versioning in filename)
-                    master_info = pub_info.copy()
-                    master_info.version = -1
-                    master_info.extension = ""
-                    base_filename = master_info.fileName().rstrip(".")
+                    # CLIENT NAMING WORKFLOW
+                    # Check if we have source media metadata to preserve original naming
+                    item = self.currentItem()
+                    source_media = item.get("sourceMedia") if item else None
+
+                    if source_media:
+                        # Get suffix from Step Config (default: _vfx)
+                        step = self.currentStep()
+                        step_cfg = step.publishSettings("yaml") if step else {}
+                        naming_cfg = step_cfg.get("naming", {})
+                        suffix = naming_cfg.get("final_suffix", "_vfx")
+                        
+                        base_filename = f"{source_media}{suffix}"
+                    else:
+                        # FALLBACK TO RAMSES STANDARD
+                        # Master Render (No versioning in filename)
+                        master_info = pub_info.copy()
+                        master_info.version = -1
+                        master_info.extension = ""
+                        base_filename = master_info.fileName().rstrip(".")
+                    
                     target_dir = export_folder
                 else:
                     # Archival Render (Versioned fallback when no export folder set)
@@ -1159,7 +1190,7 @@ class FusionHost(RamHost):
         return True
 
     def _importUI(self, item: RamItem, step: RamStep) -> dict:
-        """Shows the native Fusion file request dialog for importing.
+        """Shows the Ramses Asset Browser for importing.
 
         Args:
             item (RamItem): Context item.
@@ -1168,6 +1199,15 @@ class FusionHost(RamHost):
         Returns:
             dict: {'filePaths': [path]} or None if cancelled.
         """
+        # Use the smart browser if we have the App reference (for UI)
+        if hasattr(self, "app") and self.app:
+            browser = AssetBrowser(self, self.app.ui, self.app.disp)
+            path = browser.show()
+            if path:
+                return {"filePaths": [path]}
+            return None
+
+        # Fallback to native file picker
         path = self.fusion.RequestFile()
         return {"filePaths": [path]} if path else None
 
@@ -2005,3 +2045,132 @@ class FusionHost(RamHost):
             "showPublishUI": False,
             "savePreview": False,
         }
+
+    def check_outdated_loaders(self) -> int:
+        """Scans all Loaders, coloring outdated ones Orange.
+        
+        Compares the directory of the loaded file against the latest 
+        published version directory.
+        """
+        if not self.comp:
+            return 0
+            
+        count = 0
+        loaders = self.comp.GetToolList(False, "Loader")
+        if not loaders:
+            return 0
+            
+        for node in loaders.values():
+            # Fast Check: Path string
+            path = self.normalizePath(node.Clip[1])
+            if "/_published/" not in path:
+                continue
+                
+            # 1. Identify Context (Virtual avoids DB hit)
+            item = RamItem.fromPath(path, virtualIfNotFound=True)
+            if not item or item.shortName() == "Unknown": 
+                self._log(f"Scanner: Could not resolve Ramses Item for {os.path.basename(path)}", LogLevel.Debug)
+                continue
+            
+            step = RamStep.fromPath(path)
+            if not step:
+                self._log(f"Scanner: Could not resolve Pipeline Step for {os.path.basename(path)}", LogLevel.Debug)
+                continue
+            
+            # 2. Check Latest Version Folder
+            # Use correct API: latestPublishedVersionFolderPath
+            latest_dir = item.latestPublishedVersionFolderPath(step=step)
+            
+            if latest_dir:
+                latest_dir = self.normalizePath(latest_dir)
+                current_dir = os.path.dirname(path)
+                
+                self._log(f"Scanner: Comparing {item.shortName()} | {step.shortName()}", LogLevel.Debug)
+                self._log(f"  Current: {current_dir}", LogLevel.Debug)
+                self._log(f"  Latest:  {latest_dir}", LogLevel.Debug)
+
+                if current_dir != latest_dir:
+                    # OUTDATED
+                    node.TileColor = { "R": 1.0, "G": 0.5, "B": 0.0 } # Orange
+                    v_name = os.path.basename(latest_dir)
+                    msg = f"New version available: {v_name}"
+                    if msg not in str(node.Comments[1]):
+                        node.Comments[1] = msg
+                    count += 1
+            else:
+                self._log(f"Scanner: No published version found for {item.shortName()} | {step.shortName()}", LogLevel.Debug)
+
+        return count
+
+    def importItem(self, paths:list=(), item:RamItem=None, step:RamStep=None, resource:str="", importOptions:list = None) -> bool:
+        """Overridden to suppress noisy 'empty settings' warnings from base API."""
+        if importOptions is None:
+            importOptions = []
+        return super(FusionHost, self).importItem(paths, item, step, resource, importOptions)
+
+    def replaceItem(self, paths:list=(), item:RamItem=None, step:RamStep=None, resource:str="", importOptions:list = None) -> bool:
+        """!
+        @brief Replaces an item in the current file.
+        
+        **Smart Update:** If the selected loader is an outdated Ramses asset,
+        prompts to update immediately.
+        """
+
+        # --- SMART UPDATE LOGIC ---
+        # Only trigger on interactive calls (no paths provided)
+        if len(paths) == 0 and not item and self.comp:
+            active = self.comp.ActiveTool
+            if active and active.ID == "Loader":
+                path = self.normalizePath(active.Clip[1])
+                # Fast Filter
+                if "/_published/" in path:
+                    itm = RamItem.fromPath(path, virtualIfNotFound=True)
+                    stp = RamStep.fromPath(path)
+                    
+                    if itm:
+                        # Use correct API: latestPublishedVersionFolderPath
+                        latest_dir = itm.latestPublishedVersionFolderPath(step=stp)
+                        
+                        # If outdated, intervene with Smart Dialog
+                        if latest_dir and os.path.dirname(path) != self.normalizePath(latest_dir):
+                            res = self._request_input(
+                                "Update Available",
+                                [
+                                    {
+                                        "id": "Info", 
+                                        "type": "label", 
+                                        "label": "", 
+                                        "default": f"Current: <font color='#F50'>{os.path.basename(os.path.dirname(path))}</font><br>Latest: <font color='#5F0'><b>{os.path.basename(latest_dir)}</b></font>"
+                                    },
+                                    {
+                                        "id": "Action", 
+                                        "label": "Action:", 
+                                        "type": "combo", 
+                                        "options": {"0": "Update to Latest", "1": "Browse Versions..."}
+                                    }
+                                ],
+                                ok_text="Go"
+                            )
+                            
+                            if res:
+                                if res["Action"] == 0:
+                                    # EXECUTE UPDATE
+                                    # Assume same filename in new version folder
+                                    filename = os.path.basename(path)
+                                    new_path = os.path.join(latest_dir, filename)
+                                    
+                                    active.Clip[1] = self.normalizePath(new_path)
+                                    # Reset Visuals
+                                    active.TileColor = { "R": 0.0, "G": 0.0, "B": 0.0 }
+                                    active.Comments[1] = ""
+                                    self.log(f"Updated loader to {os.path.basename(latest_dir)}")
+                                    return True
+                                else:
+                                    # Fallthrough to Browse...
+                                    item = itm
+                                    step = stp
+                            else:
+                                return False # Cancelled
+
+        # Fall back to base class implementation
+        return super(FusionHost, self).replaceItem(paths, item, step, resource, importOptions)

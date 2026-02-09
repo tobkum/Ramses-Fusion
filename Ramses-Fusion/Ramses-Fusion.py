@@ -95,6 +95,7 @@ class RamsesFusionApp:
 
         # UI State
         self._section_states = {}  # {content_id: is_collapsed}
+        self._outdated_count = 0
 
     def _get_icon(self, icon_name: str) -> object:
         """Retrieves an icon from the cache, loading it if necessary.
@@ -420,11 +421,16 @@ class RamsesFusionApp:
             pass
 
         # HERO ID Layout
-        return (
+        html = (
             f"<font color='#777' size='3'>{project_name.upper()}</font><br>"
             f"{seq_prefix}<font color='#FFF' size='5'><b>{item_name}</b>{priority_suffix}</font><br>"
             f"<font size='3'>{step_name}{state_label}</font>"
         )
+
+        if self._outdated_count > 0:
+            html += f"<br><font color='#ff8800' size='3'><b>⚠️ {self._outdated_count} Inputs Outdated</b></font>"
+
+        return html
 
     def log(self, message: str, level: int = ram.LogLevel.Info) -> None:
         """Logs a message to the Fusion Console.
@@ -790,13 +796,18 @@ class RamsesFusionApp:
 
         if is_online:
             try:
-                # Performance Gate: Don't refresh if the path hasn't changed unless forced
+                # 1. Check for outdated assets (Always do this if online)
+                self._outdated_count = self.ramses.host.check_outdated_loaders()
+
+                # 2. Performance Gate: Skip database re-fetching if path hasn't changed
                 current_path = self.ramses.host.currentFilePath()
                 if (
                     not force_full
                     and self._last_synced_path == current_path
                     and self._item_cache
                 ):
+                    # We still need to update the UI state to show the badge if it changed
+                    self._update_ui_state(is_online)
                     return
 
                 # Force cache refresh for project and user only if requested
@@ -899,7 +910,7 @@ class RamsesFusionApp:
                                                                 "Weight": 1,
                                                                 "MinimumSize": [
                                                                     220,
-                                                                    70,
+                                                                    85,
                                                                 ],
                                                             }
                                                         ),
@@ -933,7 +944,7 @@ class RamsesFusionApp:
                                                         "Text": "",
                                                         "Flat": True,
                                                         "ToolTip": "Click to refresh",
-                                                        "MinimumSize": [220, 70],
+                                                        "MinimumSize": [220, 85],
                                                         "StyleSheet": "QPushButton { background-color: transparent; border: none; } QPushButton:hover { background-color: rgba(255, 255, 255, 12); border: 1px solid #4a5562; border-radius: 4px; } QPushButton:pressed { background-color: rgba(0, 0, 0, 25); }",
                                                     }
                                                 ),
@@ -2454,6 +2465,38 @@ class RamsesFusionApp:
                                 ui.HGap(20),
                             ],
                         ),
+                        ui.VGap(10),
+                        # Naming Convention Section
+                        ui.VGroup(
+                            {"Spacing": 5, "Weight": 0}, 
+                            [
+                                ui.HGroup(
+                                    [
+                                        ui.HGap(20),
+                                        ui.Label({"Text": "<b><font color='#888'>NAMING CONVENTION</font></b>", "Weight": 1}),
+                                    ]
+                                ),
+                                ui.HGroup(
+                                    [
+                                        ui.HGap(20),
+                                        ui.Label({"Text": "Identity Suffix (Final):", "Weight": 0, "MinimumSize": [150, 24]}),
+                                        ui.LineEdit({
+                                            "ID": "FinalSuffix", 
+                                            "Text": current_data.get("naming", {}).get("final_suffix", "_vfx"), 
+                                            "Weight": 1
+                                        }),
+                                        ui.HGap(20),
+                                        ui.Label({"Text": "Review Suffix (Preview):", "Weight": 0, "MinimumSize": [150, 24]}),
+                                        ui.LineEdit({
+                                            "ID": "PreviewSuffix", 
+                                            "Text": current_data.get("naming", {}).get("preview_suffix", "_vfx_preview"), 
+                                            "Weight": 1
+                                        }),
+                                        ui.HGap(20),
+                                    ]
+                                ),
+                            ]
+                        ),
                         ui.VGap(20),
                     ],
                 )
@@ -2516,6 +2559,13 @@ class RamsesFusionApp:
             new_data["fusion"]["final"]["export_dest"] = (
                 "step" if itm["FinalDest"].CurrentIndex == 1 else "project"
             )
+
+            # 4. Naming Convention
+            if "naming" not in new_data:
+                new_data["naming"] = {}
+            
+            new_data["naming"]["final_suffix"] = itm["FinalSuffix"].Text
+            new_data["naming"]["preview_suffix"] = itm["PreviewSuffix"].Text
 
             result[0] = new_data
             self.disp.ExitLoop()
