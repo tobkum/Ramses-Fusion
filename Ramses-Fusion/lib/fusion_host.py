@@ -2231,93 +2231,100 @@ class FusionHost(RamHost):
 
     def check_outdated_loaders(self) -> int:
         """Scans all Loaders, coloring outdated ones Orange.
-        
-        Compares the directory of the loaded file against the latest 
+
+        Compares the directory of the loaded file against the latest
         published version directory.
+
+        Note: Does NOT create undo entries (automatic visual feedback, not user edit).
         """
         if not self.comp:
             return 0
-            
-        count = 0
-        loaders = self.comp.GetToolList(False, "Loader")
-        if not loaders:
-            # Clear cache if no loaders found
-            self._node_version_cache = {}
-            return 0
-            
-        # Clean up cache for deleted nodes
-        current_names = set(loaders.keys())
-        cached_names = list(self._node_version_cache.keys())
-        for name in cached_names:
-            if name not in current_names:
-                del self._node_version_cache[name]
 
-        for name, node in loaders.items():
-            # Fast Check: Path string
-            path = self.normalizePath(node.Clip[1])
-            if "/_published/" not in path:
-                # If it was previously a Ramses asset but now isn't, clear it
-                if name in self._node_version_cache:
+        # Lock comp during visual updates (but no undo - this is automatic feedback)
+        self.comp.Lock()
+        try:
+            count = 0
+            loaders = self.comp.GetToolList(False, "Loader")
+            if not loaders:
+                # Clear cache if no loaders found
+                self._node_version_cache = {}
+                return 0
+
+            # Clean up cache for deleted nodes
+            current_names = set(loaders.keys())
+            cached_names = list(self._node_version_cache.keys())
+            for name in cached_names:
+                if name not in current_names:
                     del self._node_version_cache[name]
-                continue
-            
-            # --- PERFORMANCE CACHE (Audit 2.1) ---
-            cached = self._node_version_cache.get(name)
-            if cached and cached[0] == path:
-                # Path hasn't changed since last scan, use cached result
-                is_outdated = cached[1]
-                if is_outdated:
-                    count += 1
-                continue
-                
-            # 1. Identify Context (Virtual avoids DB hit)
-            item = RamItem.fromPath(path, virtualIfNotFound=True)
-            if not item or item.shortName() == "Unknown": 
-                continue
-            
-            step = RamStep.fromPath(path)
-            if not step:
-                continue
-            
-            # 2. Identify Resource context
-            info = RamFileInfo()
-            info.setFilePath(path)
-            res = info.resource
-            
-            # 3. Check Latest Version Folder
-            latest_dir = item.latestPublishedVersionFolderPath(step=step, resource=res)
-            is_outdated = False
-            
-            if latest_dir:
-                # PATH HARDENING
-                def _sanitize(p):
-                    if not p: return ""
-                    p = str(p).replace("####", "0000").replace(".%04d", ".0000")
-                    return self.normalizePath(p).lower().rstrip("/")
 
-                latest_dir_clean = _sanitize(latest_dir)
-                current_dir_clean = _sanitize(os.path.dirname(path))
-                
-                if current_dir_clean != latest_dir_clean:
-                    # OUTDATED
-                    is_outdated = True
-                    node.TileColor = { "R": 1.0, "G": 0.5, "B": 0.0 } # Orange
-                    v_name = os.path.basename(latest_dir)
-                    msg = f"New version available: {v_name}"
-                    if msg not in str(node.Comments[1]):
-                        node.Comments[1] = msg
-                    count += 1
-                else:
-                    # UP TO DATE: Self-heal visuals
-                    color = node.TileColor
-                    if color and abs(color.get("R", 0) - 1.0) < 0.1 and abs(color.get("G", 0) - 0.5) < 0.1:
-                        node.TileColor = { "R": 0.0, "G": 0.0, "B": 0.0 }
-                        node.Comments[1] = ""
-            
-            # Update Cache
-            self._node_version_cache[name] = (path, is_outdated, latest_dir)
+            for name, node in loaders.items():
+                # Fast Check: Path string
+                path = self.normalizePath(node.Clip[1])
+                if "/_published/" not in path:
+                    # If it was previously a Ramses asset but now isn't, clear it
+                    if name in self._node_version_cache:
+                        del self._node_version_cache[name]
+                    continue
 
-        return count
+                # --- PERFORMANCE CACHE (Audit 2.1) ---
+                cached = self._node_version_cache.get(name)
+                if cached and cached[0] == path:
+                    # Path hasn't changed since last scan, use cached result
+                    is_outdated = cached[1]
+                    if is_outdated:
+                        count += 1
+                    continue
+
+                # 1. Identify Context (Virtual avoids DB hit)
+                item = RamItem.fromPath(path, virtualIfNotFound=True)
+                if not item or item.shortName() == "Unknown":
+                    continue
+
+                step = RamStep.fromPath(path)
+                if not step:
+                    continue
+
+                # 2. Identify Resource context
+                info = RamFileInfo()
+                info.setFilePath(path)
+                res = info.resource
+
+                # 3. Check Latest Version Folder
+                latest_dir = item.latestPublishedVersionFolderPath(step=step, resource=res)
+                is_outdated = False
+
+                if latest_dir:
+                    # PATH HARDENING
+                    def _sanitize(p):
+                        if not p: return ""
+                        p = str(p).replace("####", "0000").replace(".%04d", ".0000")
+                        return self.normalizePath(p).lower().rstrip("/")
+
+                    latest_dir_clean = _sanitize(latest_dir)
+                    current_dir_clean = _sanitize(os.path.dirname(path))
+
+                    if current_dir_clean != latest_dir_clean:
+                        # OUTDATED
+                        is_outdated = True
+                        node.TileColor = { "R": 1.0, "G": 0.5, "B": 0.0 } # Orange
+                        v_name = os.path.basename(latest_dir)
+                        msg = f"New version available: {v_name}"
+                        if msg not in str(node.Comments[1]):
+                            node.Comments[1] = msg
+                        count += 1
+                    else:
+                        # UP TO DATE: Self-heal visuals
+                        color = node.TileColor
+                        if color and abs(color.get("R", 0) - 1.0) < 0.1 and abs(color.get("G", 0) - 0.5) < 0.1:
+                            node.TileColor = { "R": 0.0, "G": 0.0, "B": 0.0 }
+                            node.Comments[1] = ""
+
+                # Update Cache
+                self._node_version_cache[name] = (path, is_outdated, latest_dir)
+
+            return count
+        finally:
+            self.comp.Unlock()
 
     def importItem(self, paths:list=(), item:RamItem=None, step:RamStep=None, resource:str="", importOptions:list = None) -> bool:
         """Overridden to suppress noisy 'empty settings' warnings from base API."""
