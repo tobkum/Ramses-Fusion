@@ -506,15 +506,28 @@ class FusionHost(RamHost):
         return item
 
     def currentStep(self) -> RamStep:
-        """Gets the current working Step, prioritizing path-based resolution."""
+        """Gets the current working Step, prioritizing path-based resolution.
+
+        Falls back to Step UUID from composition metadata if path-based resolution fails.
+        """
         if not self.comp:
             return None
 
         # Standard API behavior (path-based)
         step = super().currentStep()
 
-        # Note: If the file is moved, step will be None.
-        # In the future, we could store StepUUID in metadata to resolve this.
+        # Fallback to metadata UUID if path-based lookup failed
+        if not step or step.shortName() == "Unknown":
+            step_uuid = self.comp.GetData("Ramses.StepUUID")
+            if step_uuid:
+                from ramses import RamStep
+                try:
+                    step = RamStep(step_uuid)
+                    # Verify the step actually exists in DB
+                    if step.shortName() != "Unknown":
+                        return step
+                except Exception as e:
+                    self._log(f"Step UUID recovery failed: {e}", LogLevel.Debug)
 
         return step
 
@@ -1208,6 +1221,10 @@ class FusionHost(RamHost):
         if not self.comp:
             return False
 
+        # Start undo group with descriptive name
+        num_files = len(filePaths)
+        undo_name = f"Import {num_files} Loader{'s' if num_files > 1 else ''}"
+        self.comp.StartUndo(undo_name)
         self.comp.Lock()
         try:
             # Get start frame for alignment
@@ -1233,7 +1250,27 @@ class FusionHost(RamHost):
                 loader = self.comp.AddTool("Loader", target_x, target_y)
                 if loader:
                     # Explicitly set the clip path with forward slashes for cross-platform safety
-                    loader.Clip[1] = self.normalizePath(path)
+                    normalized_path = self.normalizePath(path)
+                    loader.Clip[1] = normalized_path
+
+                    # Store Ramses metadata on Loader node
+                    if item:
+                        loader.SetData("Ramses.AssetUUID", str(item.uuid()))
+                        project = item.project()
+                        if project:
+                            loader.SetData("Ramses.ProjectUUID", str(project.uuid()))
+
+                    if step:
+                        loader.SetData("Ramses.StepUUID", str(step.uuid()))
+
+                    # Store version and resource information
+                    from ramses import RamFileInfo
+                    info = RamFileInfo()
+                    info.setFilePath(normalized_path)
+                    if info.version > 0:
+                        loader.SetData("Ramses.Version", info.version)
+                    if info.resource:
+                        loader.SetData("Ramses.Resource", info.resource)
 
                     # Smart Naming with safety fallback
                     if item:
@@ -1261,8 +1298,13 @@ class FusionHost(RamHost):
                     loader.GlobalIn[1] = float(start_frame)
 
             return True
+        except Exception as e:
+            self.log(f"Import failed: {e}", LogLevel.Error)
+            self.comp.EndUndo(False)  # Discard undo on failure
+            raise
         finally:
             self.comp.Unlock()
+            self.comp.EndUndo(True)  # Commit undo group
 
     def _importUI(self, item: RamItem, step: RamStep) -> dict:
         """Shows the Ramses Asset Browser for importing.
@@ -1762,8 +1804,35 @@ class FusionHost(RamHost):
             self.log("Please select a Loader node to replace.", LogLevel.Warning)
             return False
 
-        if filePaths:
-            active.Clip[1] = self.normalizePath(filePaths[0])
+        if not filePaths:
+            return False
+
+        # Start undo group for atomic operation
+        self.comp.StartUndo("Replace Loader")
+        self.comp.Lock()
+        try:
+            path = self.normalizePath(filePaths[0])
+            active.Clip[1] = path
+
+            # Store Ramses metadata on Loader node
+            if item:
+                active.SetData("Ramses.AssetUUID", str(item.uuid()))
+                project = item.project()
+                if project:
+                    active.SetData("Ramses.ProjectUUID", str(project.uuid()))
+
+            if step:
+                active.SetData("Ramses.StepUUID", str(step.uuid()))
+
+            # Store version and resource information
+            from ramses import RamFileInfo
+            info = RamFileInfo()
+            info.setFilePath(path)
+            if info.version > 0:
+                active.SetData("Ramses.Version", info.version)
+            if info.resource:
+                active.SetData("Ramses.Resource", info.resource)
+
             # Rename if it was a generic name
             if "Loader" in active.GetAttrs()["TOOLS_Name"]:
                 raw_name = (
@@ -1772,10 +1841,16 @@ class FusionHost(RamHost):
                     else item.shortName()
                 )
                 name = self._sanitizeNodeName(raw_name)
-
                 active.SetAttrs({"TOOLS_Name": name})
+
             return True
-        return False
+        except Exception as e:
+            self.log(f"Replace failed: {e}", LogLevel.Error)
+            self.comp.EndUndo(False)  # Discard undo on failure
+            raise
+        finally:
+            self.comp.Unlock()
+            self.comp.EndUndo(True)  # Commit undo group
 
     def _replaceUI(self, item: RamItem, step: RamStep) -> dict:
         """Shows the native Fusion file request dialog for replacing.
@@ -1939,15 +2014,19 @@ class FusionHost(RamHost):
                 node.SetInput(compression_key, CODEC_PRORES_422_HQ, 0)
 
     def _store_ramses_metadata(self, item: RamItem) -> None:
-        """Embeds Ramses identity (Project/Item UUIDs) into Fusion composition metadata.
+        """Embeds Ramses identity (Project/Item/Step UUIDs) into Fusion composition metadata.
 
         Optimized to only write data if it differs from current metadata.
+        Preserves the composition's Modified flag to avoid marking as dirty unnecessarily.
 
         Args:
             item (RamItem): The item whose identity to store.
         """
         if not self.comp or not item:
             return
+
+        # Save original modified state
+        was_modified = self.comp.Modified
 
         try:
             item_uuid = str(item.uuid())
@@ -1960,6 +2039,18 @@ class FusionHost(RamHost):
                 proj_uuid = str(project.uuid())
                 if self.comp.GetData("Ramses.ProjectUUID") != proj_uuid:
                     self.comp.SetData("Ramses.ProjectUUID", proj_uuid)
+
+            # Store Step UUID (Enables step recovery when file is moved)
+            step = self.currentStep()
+            if step:
+                step_uuid = str(step.uuid())
+                if self.comp.GetData("Ramses.StepUUID") != step_uuid:
+                    self.comp.SetData("Ramses.StepUUID", step_uuid)
+
+            # Restore original modified state if it was clean
+            # (Metadata storage shouldn't mark comp as dirty)
+            if not was_modified:
+                self.comp.Modified = False
 
             self.log(f"Embedded Ramses Metadata: {item.name()}", LogLevel.Debug)
         except Exception as e:
@@ -2036,9 +2127,6 @@ class FusionHost(RamHost):
         if abs(curr_pa_y - 1.0) > 0.001:
             new_prefs["Comp.FrameFormat.AspectY"] = 1.0
 
-        if new_prefs:
-            self.comp.SetPrefs(new_prefs)
-
         # Apply Timeline Ranges via Attrs (Immediate and more reliable)
         attrs = self.comp.GetAttrs()
         new_attrs = {}
@@ -2052,13 +2140,30 @@ class FusionHost(RamHost):
         if attrs.get("COMPN_RenderEnd") != float(end):
             new_attrs["COMPN_RenderEnd"] = float(end)
 
-        if new_attrs:
-            self.comp.SetAttrs(new_attrs)
+        # Only apply changes if needed (wrap in undo if changes are made)
+        if new_prefs or new_attrs:
+            self.comp.StartUndo("Setup Ramses Scene")
+            try:
+                if new_prefs:
+                    self.comp.SetPrefs(new_prefs)
 
-        # Persist Identity Metadata
-        self._store_ramses_metadata(item)
+                if new_attrs:
+                    self.comp.SetAttrs(new_attrs)
 
-        return True
+                # Persist Identity Metadata (includes Step UUID now)
+                self._store_ramses_metadata(item)
+
+                return True
+            except Exception as e:
+                self.log(f"Setup failed: {e}", LogLevel.Error)
+                self.comp.EndUndo(False)  # Discard on failure
+                raise
+            finally:
+                self.comp.EndUndo(True)
+        else:
+            # No changes needed, just update metadata
+            self._store_ramses_metadata(item)
+            return True
 
     def _statusUI(self, currentStatus: RamStatus = None) -> dict:
         """Shows the dialog to update status, note, and publish settings.
@@ -2271,7 +2376,7 @@ class FusionHost(RamHost):
                                     # EXECUTE UPDATE
                                     filename = os.path.basename(path)
                                     new_path = os.path.join(latest_dir, filename)
-                                    
+
                                     # If filename changed (e.g. contains version), find the new one
                                     if not os.path.exists(new_path):
                                         # Look for any valid media file in the new folder
@@ -2286,12 +2391,44 @@ class FusionHost(RamHost):
                                             self.log(f"Update failed: No media found in {latest_dir}", LogLevel.Error)
                                             return False
 
-                                    active.Clip[1] = self.normalizePath(new_path)
-                                    # Reset Visuals
-                                    active.TileColor = { "R": 0.0, "G": 0.0, "B": 0.0 }
-                                    active.Comments[1] = ""
-                                    self.log(f"Updated loader to {os.path.basename(latest_dir)}")
-                                    return True
+                                    # Wrap update in undo group with Lock/Unlock
+                                    self.comp.StartUndo("Update Loader to Latest")
+                                    self.comp.Lock()
+                                    try:
+                                        new_path_normalized = self.normalizePath(new_path)
+                                        active.Clip[1] = new_path_normalized
+
+                                        # Store updated Ramses metadata
+                                        if itm:
+                                            active.SetData("Ramses.AssetUUID", str(itm.uuid()))
+                                            project = itm.project()
+                                            if project:
+                                                active.SetData("Ramses.ProjectUUID", str(project.uuid()))
+
+                                        if stp:
+                                            active.SetData("Ramses.StepUUID", str(stp.uuid()))
+
+                                        # Update version and resource
+                                        new_info = RamFileInfo()
+                                        new_info.setFilePath(new_path)
+                                        if new_info.version > 0:
+                                            active.SetData("Ramses.Version", new_info.version)
+                                        if new_info.resource:
+                                            active.SetData("Ramses.Resource", new_info.resource)
+
+                                        # Reset Visuals
+                                        active.TileColor = { "R": 0.0, "G": 0.0, "B": 0.0 }
+                                        active.Comments[1] = ""
+
+                                        self.log(f"Updated loader to {os.path.basename(latest_dir)}")
+                                        return True
+                                    except Exception as e:
+                                        self.log(f"Update failed: {e}", LogLevel.Error)
+                                        self.comp.EndUndo(False)  # Discard on failure
+                                        raise
+                                    finally:
+                                        self.comp.Unlock()
+                                        self.comp.EndUndo(True)
                                 else:
                                     # Fallthrough to Browse...
                                     item = itm
