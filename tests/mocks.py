@@ -5,9 +5,10 @@ from unittest.mock import MagicMock
 class MockTool:
     def __init__(self, name, attrs=None):
         self.Name = name
+        self.ID = "Loader" if "Loader" in name else "Saver" if "Saver" in name else "Tool"
         self.attrs = attrs or {}
         # Simulate inputs as a dictionary
-        self.Input = {}  
+        self.Input = {}
         # Attributes are stored here
         self.TileColor = {}
         self.Comments = {}
@@ -15,6 +16,8 @@ class MockTool:
         # GlobalIn/Out
         self.GlobalIn = {}
         self.GlobalOut = {}
+        # Metadata storage
+        self.metadata = {}
 
     def __setattr__(self, name, value):
         if name in ["TileColor", "Comments", "Clip", "GlobalIn", "GlobalOut"]:
@@ -40,12 +43,9 @@ class MockTool:
         base = self.attrs.copy()
         if "TOOLS_Name" not in base:
             base["TOOLS_Name"] = self.Name
-        # Default reg ID if not set
+        # Default reg ID if not set (always include it)
         if "TOOLS_RegID" not in base:
-            if "Loader" in self.Name:
-                base["TOOLS_RegID"] = "Loader"
-            elif "Saver" in self.Name:
-                base["TOOLS_RegID"] = "Saver"
+            base["TOOLS_RegID"] = self.ID
         return base
         
     def SetInput(self, name, value, time=0):
@@ -71,6 +71,14 @@ class MockTool:
         """Test helper to simulate a disconnected input."""
         if hasattr(self, '_main_input'):
             self._main_input.disconnect()
+
+    def GetData(self, key):
+        """Retrieve metadata from the tool."""
+        return self.metadata.get(key)
+
+    def SetData(self, key, value):
+        """Store metadata on the tool."""
+        self.metadata[key] = value
 
 class MockInput:
     def __init__(self, owner, connected=False):
@@ -208,10 +216,18 @@ class MockComp:
         
     def Lock(self):
         self.locked = True
-        
+
     def Unlock(self):
         self.locked = False
-        
+
+    def StartUndo(self, name):
+        """Mock undo group start."""
+        pass
+
+    def EndUndo(self, success):
+        """Mock undo group end."""
+        pass
+
     def GetData(self, key):
         return self.metadata.get(key)
 
