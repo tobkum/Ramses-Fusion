@@ -81,6 +81,8 @@ Copy contents to Fusion Scripts directory:
 2. Access Ramses panel: `Scripts > Ramses-Fusion` (or via menu integration)
 3. Connect to Ramses Daemon (automatic if Ramses Client is running)
 
+<img src="images/screenshot.png" alt="Ramses-Fusion Panel" width="400">
+
 ### Typical Workflow
 1. **Open/Create Shot**: Use project browser to select shot and step
 2. **Setup Scene**: Click "Setup Scene" to apply project specs
