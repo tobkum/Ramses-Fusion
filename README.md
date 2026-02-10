@@ -65,7 +65,7 @@ Fusion Studio integration for [Ramses](https://ramses.rxlab.guide/) production m
 ## Installation
 
 ```bash
-git clone https://github.com/your-org/ramses-fusion.git
+git clone https://github.com/tobkum/Ramses-Fusion.git
 cd ramses-fusion
 ```
 
