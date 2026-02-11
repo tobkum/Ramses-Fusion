@@ -671,7 +671,18 @@ class RamsesFusionApp:
                 f"<font color='#ffcc00'><b>Framerate Mismatch</b></font><br><font color='#999'>Database: <b>{db_fps} fps</b> | Composition: <b>{comp_fps} fps</b></font>"
             )
 
-        # 4. Check Saver Connections
+        # 4. Check Pixel Aspect Ratio
+        db_par = float(settings.get("pixelAspectRatio", 1.0))
+        comp_pa_x = float(frame_format.get("AspectX", 1.0))
+        comp_pa_y = float(frame_format.get("AspectY", 1.0))
+        comp_par = comp_pa_x / comp_pa_y if comp_pa_y != 0 else 1.0
+
+        if abs(db_par - comp_par) > 0.001:
+            errors.append(
+                f"<font color='#ffcc00'><b>Pixel Aspect Ratio Mismatch</b></font><br><font color='#999'>Database: <b>{db_par:.3f}</b> | Composition: <b>{comp_par:.3f}</b></font>"
+            )
+
+        # 5. Check Saver Connections
         def check_anchor(tool_name):
             node = comp.FindTool(tool_name)
             if not node:
