@@ -200,6 +200,11 @@ class TestFusionHost(unittest.TestCase):
         # Return a name WITHOUT extension, as resolvePreviewPath appends it
         mock_info.fileName.return_value = "TEST_S_Shot01_COMP"
         self.host.publishInfo = MagicMock(return_value=mock_info)
+
+        # Mock currentItem to avoid MagicMock strings in base_filename (fallback to Ramses Standard)
+        mock_item = MagicMock()
+        mock_item.get.return_value = None
+        self.host.currentItem = MagicMock(return_value=mock_item)
         
         # We need to ensure the verify check passes
         self.host._verify_render_output = MagicMock(return_value=True)
@@ -453,6 +458,11 @@ class TestFusionHost(unittest.TestCase):
         mock_info.copy.return_value = mock_info
         mock_info.fileName.return_value = "Shot01"
         self.host.publishInfo = MagicMock(return_value=mock_info)
+
+        # Mock currentItem to avoid MagicMock strings in base_filename (fallback to Ramses Standard)
+        mock_item = MagicMock()
+        mock_item.get.return_value = None
+        self.host.currentItem = MagicMock(return_value=mock_item)
         
         path = self.host.resolveFinalPath()
         

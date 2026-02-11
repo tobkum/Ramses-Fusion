@@ -210,10 +210,12 @@ class TestRamsesFusionApp(unittest.TestCase):
         with patch("os.path.exists", return_value=False):
             path, exists = self.app._resolve_shot_path(mock_shot, mock_step)
             self.assertFalse(exists)
+            # Normalize for cross-platform comparison
+            norm_path = path.replace("\\", "/")
             # Should predict name using Ramses convention: Project_Type_Name_Step_v-1.comp
             # (Note: fileName helper in app uses version -1 for predicted paths)
-            self.assertIn("PROJ_S_SH010_COMP.comp", path)
-            self.assertIn("D:/NewFolder", path)
+            self.assertIn("PROJ_S_SH010_COMP.comp", norm_path)
+            self.assertIn("D:/NewFolder", norm_path)
 
     def test_context_caching(self):
         """Verify that Project/Shot context is cached and only re-fetched when the file path changes."""
