@@ -804,12 +804,12 @@ class TestFusionUndoAndLocking(unittest.TestCase):
         import ramses
         ramses.RAM_SETTINGS.userSettings = {"compStartFrame": 1001}
 
-        # Note: _setupCurrentFile doesn't use Lock/Unlock pattern
-        # It only uses StartUndo/EndUndo
+        # _setupCurrentFile uses Lock/Unlock pattern for atomic application
         self.host._setupCurrentFile(mock_item, None, setup_options)
 
-        # Verify that Lock was NOT called (setup uses different pattern)
-        comp.Lock.assert_not_called()
+        # Verify Lock/Unlock were both called
+        comp.Lock.assert_called_once()
+        comp.Unlock.assert_called_once()
 
     def test_lock_released_on_exception(self):
         """Verify Unlock even on errors (via finally block)."""
