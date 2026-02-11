@@ -1388,39 +1388,45 @@ class FusionHost(RamHost):
 
         # Ensure directory exists
         prev_dir = os.path.dirname(dst)
-        if not os.path.exists(prev_dir):
-            os.makedirs(prev_dir)
+        if prev_dir:
+            os.makedirs(prev_dir, exist_ok=True)
 
-        preview_node.Clip[1] = dst
-        self.apply_render_preset(preview_node, "preview")
-        preview_node.SetAttrs({"TOOLB_PassThrough": False})
-
+        # Lock comp during state modification and render
+        comp = self.comp
+        comp.Lock()
         try:
-            # 4. Trigger Fusion Render
-            if self.comp.Render(True):
-                # 5. Verify the output
-                if self._verify_render_output(dst):
-                    # Disarm immediately after render
-                    preview_node.SetAttrs({"TOOLB_PassThrough": True})
+            preview_node.Clip[1] = dst
+            self.apply_render_preset(preview_node, "preview")
+            preview_node.SetAttrs({"TOOLB_PassThrough": False})
 
-                    # Save after render to ensure comp is clean and context is preserved
-                    src = self.currentFilePath()
-                    if src:
-                        self.comp.Save(src)
-                    return [dst]
-                else:
-                    self.log(
-                        f"Preview render produced an invalid file: {dst}",
-                        LogLevel.Critical,
-                    )
-            return []
-        except Exception as e:
-            self.log(f"Preview render failed: {e}", LogLevel.Critical)
-            return []
+            try:
+                # 4. Trigger Fusion Render
+                if comp.Render(True):
+                    # 5. Verify the output
+                    if self._verify_render_output(dst):
+                        # Disarm immediately after render
+                        preview_node.SetAttrs({"TOOLB_PassThrough": True})
+
+                        # Save after render to ensure comp is clean and context is preserved
+                        src = self.currentFilePath()
+                        if src:
+                            comp.Save(src)
+                        return [dst]
+                    else:
+                        self.log(
+                            f"Preview render produced an invalid file: {dst}",
+                            LogLevel.Critical,
+                        )
+                return []
+            except Exception as e:
+                self.log(f"Preview render failed: {e}", LogLevel.Critical)
+                return []
+            finally:
+                # 6. Always disarm (redundant safety)
+                if preview_node:
+                    preview_node.SetAttrs({"TOOLB_PassThrough": True})
         finally:
-            # 6. Always disarm (redundant safety)
-            if preview_node:
-                preview_node.SetAttrs({"TOOLB_PassThrough": True})
+            comp.Unlock()
 
     def _publishOptions(
         self, proposedOptions: dict, showPublishUI: bool = False
@@ -1666,7 +1672,8 @@ class FusionHost(RamHost):
         Returns:
             list: List of published file paths (rendered file + backup file).
         """
-        if not self.comp:
+        comp = self.comp
+        if not comp:
             return []
 
         src = self.currentFilePath()
@@ -1698,7 +1705,7 @@ class FusionHost(RamHost):
         try:
             # 1. Automated Final Render
             # Find the _FINAL anchor node
-            final_node = self.comp.FindTool("_FINAL")
+            final_node = comp.FindTool("_FINAL")
             if not final_node:
                 self.log(
                     "Publish ABORTED: No _FINAL anchor found. Use 'Setup Scene' to add one.",
@@ -1707,40 +1714,47 @@ class FusionHost(RamHost):
                 return []
 
             self.log("Starting final master render...", LogLevel.Info)
-            # Enable the node
-            final_node.SetAttrs({"TOOLB_PassThrough": False})
-            render_success = False
 
             # Resolve and create directory before render
             render_path = self.normalizePath(final_node.Clip[1])
             render_dir = os.path.dirname(render_path)
-            if render_dir and not os.path.exists(render_dir):
-                os.makedirs(render_dir)
+            if render_dir:
+                os.makedirs(render_dir, exist_ok=True)
 
+            render_success = False
+
+            # Lock comp during state modification and render
+            comp.Lock()
             try:
-                # Execute render - comp.Render returns True only on success
-                if self.comp.Render(True):
-                    # Secondary Verification: Check file existence and size
-                    if self._verify_render_output(render_path):
-                        self.log(
-                            f"Final render complete and verified: {render_path}",
-                            LogLevel.Info,
-                        )
-                        render_success = True
-                        published_files.append(render_path)
+                # Enable the node
+                final_node.SetAttrs({"TOOLB_PassThrough": False})
+
+                try:
+                    # Execute render - comp.Render returns True only on success
+                    if comp.Render(True):
+                        # Secondary Verification: Check file existence and size
+                        if self._verify_render_output(render_path):
+                            self.log(
+                                f"Final render complete and verified: {render_path}",
+                                LogLevel.Info,
+                            )
+                            render_success = True
+                            published_files.append(render_path)
+                        else:
+                            self.log(
+                                f"Final render produced an invalid file: {render_path}",
+                                LogLevel.Critical,
+                            )
                     else:
                         self.log(
-                            f"Final render produced an invalid file: {render_path}",
-                            LogLevel.Critical,
+                            "Final render failed or was cancelled by user.",
+                            LogLevel.Warning,
                         )
-                else:
-                    self.log(
-                        "Final render failed or was cancelled by user.",
-                        LogLevel.Warning,
-                    )
+                finally:
+                    # Always disarm
+                    final_node.SetAttrs({"TOOLB_PassThrough": True})
             finally:
-                # Always disarm
-                final_node.SetAttrs({"TOOLB_PassThrough": True})
+                comp.Unlock()
 
             # GATEKEEPER: If render failed or was invalid, abort everything
             if not render_success:
@@ -1760,10 +1774,10 @@ class FusionHost(RamHost):
                 comp_publish_info.extension = ext
                 dst_comp = self.normalizePath(comp_publish_info.filePath())
 
-                # Ensure directory exists (monkey-patched API no longer creates it automatically)
+                # Ensure directory exists
                 comp_dir = os.path.dirname(dst_comp)
-                if not os.path.exists(comp_dir):
-                    os.makedirs(comp_dir)
+                if comp_dir:
+                    os.makedirs(comp_dir, exist_ok=True)
 
                 # src is our current working file, which was just saved by RamHost.publish()
                 RamFileManager.copy(src, dst_comp, separateThread=False)
@@ -1841,7 +1855,7 @@ class FusionHost(RamHost):
             if info.resource:
                 active.SetData("Ramses.Resource", info.resource)
 
-            # Rename if it was a generic name
+            # Rename if it was a generic name (with collision avoidance)
             if "Loader" in active.GetAttrs()["TOOLS_Name"]:
                 raw_name = (
                     f"{item.shortName()}_{step.shortName()}"
@@ -1849,7 +1863,15 @@ class FusionHost(RamHost):
                     else item.shortName()
                 )
                 name = self._sanitizeNodeName(raw_name)
-                active.SetAttrs({"TOOLS_Name": name})
+                if name:
+                    final_name = name
+                    counter = 1
+                    existing = self.comp.FindTool(final_name)
+                    while existing and existing != active:
+                        final_name = f"{name}_{counter}"
+                        counter += 1
+                        existing = self.comp.FindTool(final_name)
+                    active.SetAttrs({"TOOLS_Name": final_name})
 
             success = True
             return True
@@ -2030,35 +2052,36 @@ class FusionHost(RamHost):
         Args:
             item (RamItem): The item whose identity to store.
         """
-        if not self.comp or not item:
+        comp = self.comp
+        if not comp or not item:
             return
 
         # Save original modified state
-        was_modified = self.comp.Modified
+        was_modified = comp.Modified
 
         try:
             item_uuid = str(item.uuid())
-            if self.comp.GetData("Ramses.ItemUUID") != item_uuid:
-                self.comp.SetData("Ramses.ItemUUID", item_uuid)
+            if comp.GetData("Ramses.ItemUUID") != item_uuid:
+                comp.SetData("Ramses.ItemUUID", item_uuid)
 
             # Store Project UUID (Resolves cross-project ambiguity)
             project = item.project() or RAMSES.project()
             if project:
                 proj_uuid = str(project.uuid())
-                if self.comp.GetData("Ramses.ProjectUUID") != proj_uuid:
-                    self.comp.SetData("Ramses.ProjectUUID", proj_uuid)
+                if comp.GetData("Ramses.ProjectUUID") != proj_uuid:
+                    comp.SetData("Ramses.ProjectUUID", proj_uuid)
 
             # Store Step UUID (Enables step recovery when file is moved)
             step = self.currentStep()
             if step:
                 step_uuid = str(step.uuid())
-                if self.comp.GetData("Ramses.StepUUID") != step_uuid:
-                    self.comp.SetData("Ramses.StepUUID", step_uuid)
+                if comp.GetData("Ramses.StepUUID") != step_uuid:
+                    comp.SetData("Ramses.StepUUID", step_uuid)
 
             # Restore original modified state if it was clean
             # (Metadata storage shouldn't mark comp as dirty)
             if not was_modified:
-                self.comp.Modified = False
+                comp.Modified = False
 
             self.log(f"Embedded Ramses Metadata: {item.name()}", LogLevel.Debug)
         except Exception as e:
@@ -2080,7 +2103,8 @@ class FusionHost(RamHost):
         Returns:
             bool: True on success.
         """
-        if not self.comp:
+        comp = self.comp
+        if not comp:
             return False
 
         # Get duration from options or fallback to item
@@ -2114,7 +2138,7 @@ class FusionHost(RamHost):
         pa = setupOptions.get("pixelAspectRatio", 1.0)
 
         # Check if changes are actually needed (avoid dirtying the comp)
-        curr_prefs = self.comp.GetPrefs("Comp.FrameFormat") or {}
+        curr_prefs = comp.GetPrefs("Comp.FrameFormat") or {}
         curr_w = int(curr_prefs.get("Width", 0))
         curr_h = int(curr_prefs.get("Height", 0))
         curr_fps = float(curr_prefs.get("Rate", 24.0))
@@ -2139,7 +2163,7 @@ class FusionHost(RamHost):
             new_prefs["Comp.FrameFormat.AspectY"] = target_pa_y
 
         # Apply Timeline Ranges via Attrs (Immediate and more reliable)
-        attrs = self.comp.GetAttrs()
+        attrs = comp.GetAttrs()
         new_attrs = {}
 
         if attrs.get("COMPN_GlobalStart") != float(start):
@@ -2151,16 +2175,17 @@ class FusionHost(RamHost):
         if attrs.get("COMPN_RenderEnd") != float(end):
             new_attrs["COMPN_RenderEnd"] = float(end)
 
-        # Only apply changes if needed (wrap in undo if changes are made)
-        self.comp.StartUndo("Setup Ramses Scene")
+        # Lock comp and wrap in undo for atomic application
+        comp.Lock()
+        comp.StartUndo("Setup Ramses Scene")
         success = False
         try:
             if new_prefs:
-                self.comp.SetPrefs(new_prefs)
+                comp.SetPrefs(new_prefs)
             if new_attrs:
-                self.comp.SetAttrs(new_attrs)
+                comp.SetAttrs(new_attrs)
 
-            # MOVE THIS INSIDE: Always store metadata inside undo block
+            # Always store metadata inside undo block
             self._store_ramses_metadata(item)
 
             success = True
@@ -2169,7 +2194,8 @@ class FusionHost(RamHost):
             self.log(f"Setup failed: {e}", LogLevel.Error)
             return False
         finally:
-            self.comp.EndUndo(success)
+            comp.EndUndo(success)
+            comp.Unlock()
 
     def _statusUI(self, currentStatus: RamStatus = None) -> dict:
         """Shows the dialog to update status, note, and publish settings.
@@ -2394,14 +2420,14 @@ class FusionHost(RamHost):
                         # Identify Resource context
                         info = RamFileInfo()
                         info.setFilePath(path)
-                        res = info.resource
+                        loader_resource = info.resource
 
                         # Use correct API: latestPublishedVersionFolderPath with resource filter
-                        latest_dir = itm.latestPublishedVersionFolderPath(step=stp, resource=res)
-                        
+                        latest_dir = itm.latestPublishedVersionFolderPath(step=stp, resource=loader_resource)
+
                         # If outdated, intervene with Smart Dialog
                         if latest_dir and os.path.dirname(path) != self.normalizePath(latest_dir):
-                            res = self._request_input(
+                            dialog_result = self._request_input(
                                 "Update Available",
                                 [
                                     {
@@ -2420,8 +2446,8 @@ class FusionHost(RamHost):
                                 ok_text="Go"
                             )
                             
-                            if res:
-                                if res["Action"] == 0:
+                            if dialog_result:
+                                if dialog_result["Action"] == 0:
                                     # EXECUTE UPDATE
                                     filename = os.path.basename(path)
                                     new_path = os.path.join(latest_dir, filename)
@@ -2488,6 +2514,7 @@ class FusionHost(RamHost):
                                     # Fallthrough to Browse...
                                     item = itm
                                     step = stp
+                                    resource = loader_resource
                             else:
                                 return False # Cancelled
 
