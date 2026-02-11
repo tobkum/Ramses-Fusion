@@ -1884,13 +1884,13 @@ class RamsesFusionApp:
             proj_uuid = str(proj.uuid())
             self.log(f"Loading {proj.name()}...", ram.LogLevel.Info)
 
-            # 1. Chunked Shot Fetching
+            # 1. Chunked Shot Fetching (lazyLoading=False fetches full data in bulk)
             sequences = proj.sequences()
             seq_map = {str(s.uuid()): s.shortName() for s in sequences}
             shots = []
             for seq in sequences:
-                shots.extend(proj.shots(sequence=seq))
-            shots.extend(proj.shots(sequence=""))
+                shots.extend(proj.shots(sequence=seq, lazyLoading=False))
+            shots.extend(proj.shots(sequence="", lazyLoading=False))
 
             unique_shots = []
             seen_uuids = set()

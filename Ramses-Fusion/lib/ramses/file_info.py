@@ -102,7 +102,7 @@ class RamFileInfo():
         """Gets the original filename without any change"""
         return self.__fileName
 
-    def fileName( self ):
+    def fileName( self, omitVersion = False ):
         """Constructs and returns the fileName"""
 
         nameList = []
@@ -118,9 +118,6 @@ class RamFileInfo():
         if self.step != "":
             nameList.append( self.step )
 
-        if self.ramType == ItemType.GENERAL and self.shortName != "" and self.shortName != self.step:
-            nameList.append( self.shortName )
-
         if self.resource != '' or self.isRestoredVersion or self.isBackup:
             resource = self.resource.replace('_', ' ')
             if self.isRestoredVersion:
@@ -132,12 +129,12 @@ class RamFileInfo():
                 resource = resource + "+backup+"
             nameList.append( resource )
 
-        if self.version != -1:
+        if not omitVersion and self.version > -1:
             v = self.state + intToStr(self.version)
             nameList.append( v )
 
         ramsesFileName = '_'.join( nameList )
-        
+
         if self.extension != '':
             if not self.extension.startswith('.'):
                 self.extension = '.' + self.extension

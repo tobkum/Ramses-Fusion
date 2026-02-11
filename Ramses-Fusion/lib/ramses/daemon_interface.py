@@ -24,6 +24,29 @@ import os
 from .logger import log, printException
 from .constants import LogLevel, Log, StepType
 
+class RamDaemonCachedObject( ):
+
+    def __init__(self, key:str, data, category:str ):
+        self.__key = key
+        self.__category = category
+        self.__data = data
+        self.__time = time.time()
+
+    def key(self):
+        return self.__key
+        
+    def category(self):
+        return self.__category
+
+    def data(self):
+        return self.__data
+
+    def time(self):
+        return self.__time
+
+    def elapsed(self):
+        return time.time() - self.__time
+
 class RamDaemonInterface( object ):
     """The Class used to communicate with the Ramses Daemon
 
@@ -35,6 +58,8 @@ class RamDaemonInterface( object ):
     """
 
     _instance = None
+    _address = 'localhost'
+    _cache:dict = {}
 
     @staticmethod
     def checkReply( obj ):
@@ -51,8 +76,6 @@ class RamDaemonInterface( object ):
         if cls._instance is None:
             cls._instance = cls.__new__(cls)
             cls._port = RamSettings.instance().ramsesClientPort
-            cls._address = 'localhost'
-            cls._dataCache = {}
 
         return cls._instance
 
@@ -125,6 +148,9 @@ class RamDaemonInterface( object ):
         for obj in objs:
             uuid = obj.get("uuid", "")
             data = obj.get("data", {})
+            # Cache data
+            self.__cacheObjectData(uuid, data)
+
             o = None
             if objectType == "RamObject":
                 o = RamObject( uuid, data=data)
@@ -158,25 +184,39 @@ class RamDaemonInterface( object ):
                 objects.append(o)
         return objects
 
-    def getShots(self, sequenceUuid=""):
+    def getShots(self, sequenceUuid="", includeData=False):
         """Gets the list of shots for this project"""
 
         from .ram_shot import RamShot
         
+        includeDataStr = "0"
+        if includeData:
+            includeDataStr = "1"
+
         shots = []
 
         reply =  self.__post(
             (
                 "getShots",
-                ('sequenceUuid', sequenceUuid)
+                ('sequenceUuid', sequenceUuid),
+                ('includeData', includeDataStr)
             ),
-            65536 )
+            bufsize=6553600,
+            timeout=5
+        )
 
         content = self.checkReply(reply)
-        shotListUuid = content.get("shots", ())
-        for uuid in shotListUuid:
-            shot = RamShot( uuid )
-            shots.append( shot )
+        shotList = content.get("shots", ())
+        for shot in shotList:
+            if includeData:
+                uuid = shot.get('uuid', "")
+                data = shot.get('data', {})
+                ramShot = RamShot( uuid, data=data )
+                # Cache Data
+                self.__cacheObjectData(uuid, data)
+            else:
+                ramShot = RamShot( shot )
+            shots.append( ramShot )
         return shots
 
     def getAssetGroups(self):
@@ -219,25 +259,40 @@ class RamDaemonInterface( object ):
             sequences.append( seq )
         return sequences
 
-    def getAssets(self, groupUuid=""):
+    def getAssets(self, groupUuid="", includeData=False):
         """Gets the list of assets for this project"""
 
         from .ram_asset import RamAsset
+
+        includeDataStr = "0"
+        if includeData:
+            includeDataStr = "1"
 
         assets = []
 
         reply =  self.__post(
             (
                 "getAssets",
-                ('groupUuid', groupUuid)
+                ('groupUuid', groupUuid),
+                ('includeData', includeDataStr)
             ),
-            65536 )
+            bufsize=6553600,
+            timeout=5 # May be a big list
+        )
 
         content = self.checkReply(reply)
-        assetListUuid = content.get("assets", ())
-        for uuid in assetListUuid:
-            asset = RamAsset( uuid )
-            assets.append( asset )
+        assetList = content.get("assets", ())
+        for asset in assetList:
+            if includeData:
+                uuid = asset.get('uuid', "")
+                data = asset.get('data', {})
+                ramAsset = RamAsset( uuid, data=data )
+                # Cache Data
+                self.__cacheObjectData(uuid, data)
+            else:
+                ramAsset = RamAsset( asset )
+
+            assets.append( ramAsset )
         return assets
 
     def getPipes(self):
@@ -318,11 +373,9 @@ class RamDaemonInterface( object ):
         """
 
         # Check if it is available in the cache
-        cacheData = self._dataCache.get(uuid, {})
-        if cacheData:
-            cacheElapsed = time.time() - cacheData.get('_daemonCacheTime', 0)
-            if cacheElapsed < cacheTimeout:
-                return cacheData
+        cache = self.__getCacheObjectData(uuid, cacheTimeout)
+        if cache:
+            return cache.data()
 
         reply =  self.__post(
             (
@@ -332,9 +385,9 @@ class RamDaemonInterface( object ):
             ),
             65536 )
         content = self.checkReply(reply)
-        self._dataCache[uuid] = content.get("data", {})
-        self._dataCache[uuid]['_daemonCacheTime'] = time.time()
-        return self._dataCache[uuid]
+        data = content.get('data', {})
+        self.__cacheObjectData(uuid, data)
+        return data
 
     def setData(self, uuid:str, data:str, objectType:str):
         """Sets the data of a specific RamObject.
@@ -354,7 +407,7 @@ class RamDaemonInterface( object ):
             ('objectType', objectType),
             ), 65536 )
 
-    def getPath(self, uuid:str, objectType:str):
+    def getPath(self, uuid:str, objectType:str, cacheTimeout=30):
         """Gets the path for a specific RamObject.
 
         Read the Ramses Daemon reference at http://ramses.rxlab.guide/dev/daemon-reference/ for more information.
@@ -362,14 +415,21 @@ class RamDaemonInterface( object ):
         Returns: dict.
         """
 
+        # Get in cache
+        cache = self.__getCacheObjectPath(uuid, cacheTimeout)
+        if cache:
+            return cache.data()
+
         reply =  self.__post( (
             "getPath",
             ('uuid', uuid),
             ('objectType', objectType),
             ), 65536 )
         content = self.checkReply(reply)
+        path = content.get("path", "")
 
-        return content.get("path", "")
+        self.__cacheObjectPath(uuid, path)
+        return path
 
     def uuidFromPath(self, path, ramType ):
         """Gets the uuid of an Object using its path.
@@ -471,12 +531,17 @@ class RamDaemonInterface( object ):
             if isinstance(arg, str):
                 if arg:
                     queryList.append(arg)
-            else:
-                queryList.append( "=".join(arg) )
+            elif len(arg) == 1:
+                queryList.append(arg[0])
+            elif len(arg) > 1:
+                if arg[1] == "":
+                    queryList.append(arg[0])
+                else:
+                    queryList.append( "=".join(arg) )
 
         return "&".join(queryList)
 
-    def __post(self, query, bufsize = 0):
+    def __post(self, query, bufsize = 0, timeout=2):
         """Posts a query and returns a dict corresponding to the json reply
         
         Args:
@@ -484,6 +549,8 @@ class RamDaemonInterface( object ):
                 The list of arguments, which are themselves 2-tuples of key-value pairs (value may be an empty string)
             bufsize: int.
                 The maximum amount of data to be received at once is specified by bufsize.
+            timeout: int.
+                The request timeout in seconds
                 
         Returns: dict or None.
             The Daemon reply converted from json to a python dict.
@@ -493,7 +560,7 @@ class RamDaemonInterface( object ):
         from .ramses import Ramses
 
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.settimeout(2)
+        s.settimeout(timeout)
 
         query = self.__buildQuery( query )
 
@@ -521,6 +588,7 @@ class RamDaemonInterface( object ):
             obj = json.loads(data)
         except: # pylint: disable=bare-except
             log("Invalid reply data from the Ramses Daemon.", LogLevel.Critical)
+            log(str(data), LogLevel.Debug)
             printException()
             obj = {
                 'accepted': False,
@@ -587,3 +655,37 @@ class RamDaemonInterface( object ):
             'query': query,
             'content': None
         }
+
+    def __cacheObjectData(self, uuid, data):
+        self.__cache('data', uuid, data)
+
+    def __getCacheObjectData(self, uuid, timeout=2):
+        return self.__getCache('data', uuid, timeout)
+
+    def __cacheObjectPath(self, uuid, path):
+        self.__cache('path', uuid, path)
+
+    def __getCacheObjectPath(self, uuid, timeout=30):
+        return self.__getCache('path', uuid, timeout)
+
+    def __cache(self, category, key, data):
+        cache = RamDaemonCachedObject(key, data, category)
+        if not category in self._cache:
+            self._cache[category]  = {}
+        self._cache[category][key] = cache
+
+    def __getCache(self, category, key, timeout=-1):
+        if not category in self._cache:
+            return None
+        cat = self._cache[category]
+        cache = cat.get(key, None)
+        if not cache:
+            return None
+
+        if timeout <= 0:
+            return cache
+
+        if cache.elapsed() > timeout:
+            return None
+
+        return cache

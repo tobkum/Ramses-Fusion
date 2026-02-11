@@ -126,6 +126,7 @@ class RamObject(object):
 
         if isinstance(data, str):
             data = json.loads(data)
+
         if data:
             self.__data = data
             self.__cacheTime = time.time()

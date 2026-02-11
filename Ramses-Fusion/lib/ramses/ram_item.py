@@ -103,6 +103,14 @@ class RamItem( RamObject ):
         Args:
             uuid (str)
         """
+
+        if objectType == ItemType.SHOT:
+            objectType = 'RamShot'
+        elif objectType == ItemType.ASSET:
+            objectType = 'RamAsset'
+        elif objectType == ItemType.GENERAL:
+            objectType = 'RamItem'
+
         super(RamItem, self).__init__( uuid, data, create, objectType )
         if objectType == "RamShot":
             self.__itemType = ItemType.SHOT

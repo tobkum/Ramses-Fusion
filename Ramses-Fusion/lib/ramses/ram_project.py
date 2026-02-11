@@ -259,7 +259,7 @@ class RamProject( RamObject ):
         
         return thePath
 
-    def assets( self, assetGroup=None ):
+    def assets( self, assetGroup=None, lazyLoading = True ):
         """Available assets in this project and group.
         If groupName is an empty string, returns all assets.
 
@@ -271,7 +271,7 @@ class RamProject( RamObject ):
         """
 
         groupUuid = RamObject.getUuid(assetGroup)
-        return DAEMON.getAssets(groupUuid)
+        return DAEMON.getAssets(groupUuid, includeData=(not lazyLoading))
 
     def assetGroups( self ):
         """Available asset groups in this project
@@ -282,7 +282,7 @@ class RamProject( RamObject ):
         
         return DAEMON.getAssetGroups()
 
-    def shots( self, nameFilter = "*", sequence = None ):
+    def shots( self, nameFilter = "*", sequence = None, lazyLoading = True ):
         """Available shots in this project
 
         Args:
@@ -293,7 +293,7 @@ class RamProject( RamObject ):
         """
 
         groupUuid = RamObject.getUuid(sequence)
-        shots = DAEMON.getShots(groupUuid)
+        shots = DAEMON.getShots(groupUuid, includeData=(not lazyLoading))
 
         if nameFilter == "*" or nameFilter == "":
             return shots

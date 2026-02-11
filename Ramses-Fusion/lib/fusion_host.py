@@ -171,11 +171,11 @@ if not hasattr(RamFileManager, "_fusion_patched"):
 
     original_post = getattr(daemon, "_RamDaemonInterface__post")
 
-    def _patched_post(self, query, bufsize=0):
+    def _patched_post(self, query, bufsize=0, timeout=2):
         with self._lock:
             # We must use the original method which handles the actual socket logic
             # Since it's a private method, we call it via the mangled name on the instance
-            return original_post(query, bufsize)
+            return original_post(query, bufsize, timeout)
 
     # Apply the patch to the class method (handling private name mangling)
     RamDaemonInterface._RamDaemonInterface__post = _patched_post
@@ -618,11 +618,8 @@ class FusionHost(RamHost):
             shot = item if isinstance(item, RamShot) else RamShot(item.uuid())
 
             settings["duration"] = float(shot.duration())
-            # Calculate frames manually using Project FPS (currently in settings['framerate'])
-            # We use round() to avoid truncation errors present in the API's shot.frames() which uses int()
-            settings["frames"] = int(
-                round(settings["duration"] * settings["framerate"])
-            )
+            # API RC9 now uses round() internally, so shot.frames() is accurate
+            settings["frames"] = shot.frames()
 
             seq = shot.sequence()
             if seq:

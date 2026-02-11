@@ -80,7 +80,7 @@ class RamShot( RamItem ):
         fps = 24.0
         if project:
             fps = project.framerate()
-        return int(duration * fps)
+        return round(duration * fps)
 
     def sequence(self):
         """The sequence containing this shot"""

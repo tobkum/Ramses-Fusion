@@ -428,6 +428,28 @@ class RamHost(object):
         SETTINGS.recentFiles = SETTINGS.recentFiles[0:20]
         SETTINGS.save()
 
+    def addToRecentImport(self, item:RamItem, step:RamStep):
+        """!
+        @brief Adds the item and step to the recent import list.
+        This is useful to add a "recent" list in the UI for importing items for example.
+
+        Parameters : 
+            @param item : the item
+            @param step : the step
+        """
+        if not item or not step:
+            return
+        import_data = {
+            'item': item.uuid(),
+            'itemType': item.itemType(),
+            'step': step.uuid()
+        }
+        if import_data in SETTINGS.recentImport:
+            SETTINGS.recentImport.pop( SETTINGS.recentImport.index(import_data) )
+        SETTINGS.recentImport.insert(0, import_data)
+        SETTINGS.recentImport = SETTINGS.recentImport[0:20]
+        SETTINGS.save()
+
     def checkAddOnUpdate(self) -> dict:
         """!
         @brief [Function's description]
@@ -616,6 +638,7 @@ class RamHost(object):
         if not self.__runUserScripts("on_import_item", paths, item, step, importOptions, showImportUI):
             return False
 
+        self.addToRecentImport(item, step)
         return True
 
     def isDirty(self) -> bool:
@@ -800,13 +823,14 @@ class RamHost(object):
         # Publish
         self.log("Publishing...", LogLevel.Debug)
         published_files = self._publish(publishInfo, publishOptions)
-        if not published_files:
+        if published_files is None or published_files is False:
             return False
         for file in published_files:
             self.__setPublishMetadata(file, publishInfo)
 
         # Load user scripts
         if not self.__runUserScripts("on_publish", published_files, publishInfo, item, step, publishOptions):
+            self.closeTempWorkingFile()
             return False
 
         status = self.currentStatus()

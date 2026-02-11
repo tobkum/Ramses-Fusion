@@ -23,7 +23,7 @@ import json
 from .constants import FolderNames, LogLevel
 from .logger import log
 
-theVersion = "1.0.0-RC8"
+theVersion = "1.0.0-RC9"
 
 class RamSettings( object ):
     """Gets and saves settings used by Ramses.
@@ -70,6 +70,9 @@ class RamSettings( object ):
             cls.userScripts = []
             # Recent files
             cls.recentFiles = []
+            # Recent import
+            # Stored as dicts { 'item': "uuid", 'step': "uuid" }
+            cls.recentImport = []
             # The custom settings
             cls.userSettings = {}
 
@@ -119,6 +122,8 @@ class RamSettings( object ):
                         cls.userScripts = settingsDict['userScripts']
                     if 'recentFiles' in settingsDict:
                         cls.recentFiles = settingsDict['recentFiles']
+                    if 'recentImport' in settingsDict:
+                        cls.recentImport = settingsDict['recentImport']
                     if 'lastUpdateCheck' in settingsDict:
                         cls.lastUpdateCheck = settingsDict['lastUpdateCheck']
 
@@ -145,6 +150,7 @@ class RamSettings( object ):
             'debugMode': self.debugMode,
             'userScripts': self.userScripts,
             'recentFiles': self.recentFiles,
+            'recentImport': self.recentImport,
             'lastUpdateCheck': self.lastUpdateCheck
         }
 
