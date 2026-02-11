@@ -18,7 +18,7 @@ sys.modules["fusionscript"] = MagicMock()
 # --- 2. Setup Path ---
 current_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(current_dir)
-lib_path = os.path.join(project_root, "Ramses-Fusion", "lib")
+lib_path = os.path.join(os.path.dirname(project_root), "lib")
 app_path = os.path.join(project_root, "Ramses-Fusion")
 
 if lib_path not in sys.path:
