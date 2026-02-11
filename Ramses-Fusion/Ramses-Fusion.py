@@ -608,7 +608,8 @@ class RamsesFusionApp:
         1. Frame Range (RenderStart/End vs. Database Frames).
         2. Resolution (Width/Height vs. Database Resolution).
         3. Framerate (FPS).
-        4. Saver Node Connections (Input availability).
+        4. Pixel Aspect Ratio (PAR).
+        5. Saver Node Connections (Input availability).
 
         Args:
             check_preview (bool): Whether to check the `_PREVIEW` node.
