@@ -2130,10 +2130,13 @@ class FusionHost(RamHost):
             new_prefs["Comp.FrameFormat.Height"] = int(height)
         if abs(curr_fps - float(fps)) > 0.001:
             new_prefs["Comp.FrameFormat.Rate"] = float(fps)
-        if abs(curr_pa_x - float(pa)) > 0.001:
-            new_prefs["Comp.FrameFormat.AspectX"] = float(pa)
-        if abs(curr_pa_y - 1.0) > 0.001:
-            new_prefs["Comp.FrameFormat.AspectY"] = 1.0
+        # PAR convention: AspectX=1.0, AspectY=1/PAR (squish vertical, keeps native pixel res)
+        target_pa_x = 1.0
+        target_pa_y = 1.0 / float(pa) if float(pa) != 0 else 1.0
+        if abs(curr_pa_x - target_pa_x) > 0.001:
+            new_prefs["Comp.FrameFormat.AspectX"] = target_pa_x
+        if abs(curr_pa_y - target_pa_y) > 0.001:
+            new_prefs["Comp.FrameFormat.AspectY"] = target_pa_y
 
         # Apply Timeline Ranges via Attrs (Immediate and more reliable)
         attrs = self.comp.GetAttrs()
