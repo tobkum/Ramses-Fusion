@@ -2426,7 +2426,7 @@ class FusionHost(RamHost):
                         latest_dir = itm.latestPublishedVersionFolderPath(step=stp, resource=loader_resource)
 
                         # If outdated, intervene with Smart Dialog
-                        if latest_dir and os.path.dirname(path) != self.normalizePath(latest_dir):
+                        if latest_dir and os.path.dirname(path).lower().rstrip("/") != self.normalizePath(latest_dir).lower().rstrip("/"):
                             dialog_result = self._request_input(
                                 "Update Available",
                                 [
