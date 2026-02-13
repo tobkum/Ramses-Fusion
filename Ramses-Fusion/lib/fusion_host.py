@@ -26,6 +26,18 @@ except ImportError:
 from fusion_config import FusionConfig
 from asset_browser import AssetBrowser
 
+# =============================================================================
+# APPLY RUNTIME PATCHES
+# =============================================================================
+try:
+    import ramses_patches
+
+    ramses_patches.apply()
+except ImportError:
+    print(
+        "[Ramses] Warning: ramses_patches module not found. Critical fixes may be missing."
+    )
+
 __all__ = ["FusionHost"]
 
 # =============================================================================
@@ -73,7 +85,7 @@ if not hasattr(RamFileManager, "_fusion_patched"):
         candidates = []
         for f in os.listdir(versionsFolder):
             path = os.path.join(versionsFolder, f)
-            
+
             # Case A: File-based versioning (standard behavior of patch)
             if os.path.isfile(path):
                 if not f.lower().startswith(base_id + "_"):
@@ -90,7 +102,7 @@ if not hasattr(RamFileManager, "_fusion_patched"):
                 m_ver = re.match(r"^(?:.*_)?(\d{3})(?:_.*)?$", f)
                 if m_ver:
                     version = int(m_ver.group(1))
-                    
+
                     # Look for matching file inside this version folder
                     # We expect a file that matches our base_id (ignoring sequence extensions)
                     found_file = None
@@ -98,12 +110,14 @@ if not hasattr(RamFileManager, "_fusion_patched"):
                         for sub_f in os.listdir(path):
                             if sub_f.lower().startswith(base_id):
                                 # Check extensions to avoid random clutter
-                                if sub_f.lower().endswith(('.exr', '.jpg', '.png', '.dpx', '.mov', '.mp4')):
+                                if sub_f.lower().endswith(
+                                    (".exr", ".jpg", ".png", ".dpx", ".mov", ".mp4")
+                                ):
                                     found_file = os.path.join(path, sub_f)
                                     break
                     except OSError:
                         pass
-                        
+
                     if found_file:
                         candidates.append((version, found_file))
 
@@ -137,7 +151,7 @@ if not hasattr(RamFileManager, "_fusion_patched"):
                 m = re.search(r"(\d+)\.[^.]+$", f)
                 if m:
                     candidates.append((int(m.group(1)), path))
-            
+
             # Case B: Directory-based
             elif os.path.isdir(path):
                 m_ver = re.match(r"^(?:.*_)?(\d{3})(?:_.*)?$", f)
@@ -145,8 +159,14 @@ if not hasattr(RamFileManager, "_fusion_patched"):
                     # Look for match inside
                     try:
                         for sub_f in os.listdir(path):
-                            if sub_f.lower().startswith(base_id) and sub_f.lower().endswith(('.exr', '.jpg', '.png', '.dpx', '.mov', '.mp4')):
-                                candidates.append((int(m_ver.group(1)), os.path.join(path, sub_f)))
+                            if sub_f.lower().startswith(
+                                base_id
+                            ) and sub_f.lower().endswith(
+                                (".exr", ".jpg", ".png", ".dpx", ".mov", ".mp4")
+                            ):
+                                candidates.append(
+                                    (int(m_ver.group(1)), os.path.join(path, sub_f))
+                                )
                                 break
                     except OSError:
                         pass
@@ -356,7 +376,7 @@ class FusionHost(RamHost):
         self.fusion = fusion_obj
         self.hostName = "Fusion"
         self._status_cache = None  # Used for UI badge caching
-        self._node_version_cache = {} # {node_name: (last_path, is_outdated, latest_dir)}
+        self._node_version_cache = {}  # {node_name: (last_path, is_outdated, latest_dir)}
         self._cache_lock = threading.Lock()  # Thread-safe cache access
 
         try:
@@ -370,13 +390,14 @@ class FusionHost(RamHost):
         """Centralized path normalization for Fusion (Project-Rooted + forward slashes)."""
         if not path:
             return ""
-        
+
         path_str = str(path)
         # If relative, try to root it to the project path
         if not os.path.isabs(path_str):
             try:
                 # Attempt to get project root from RAM_SETTINGS or active project
                 from ramses.constants import RAM_SETTINGS
+
                 proj_root = RAM_SETTINGS.userSettings.get("projectsPath")
                 if proj_root and os.path.isdir(proj_root):
                     path_str = os.path.join(proj_root, path_str)
@@ -522,6 +543,7 @@ class FusionHost(RamHost):
             step_uuid = self.comp.GetData("Ramses.StepUUID")
             if step_uuid:
                 from ramses import RamStep
+
                 try:
                     step = RamStep(step_uuid)
                     # Verify the step actually exists in DB
@@ -705,7 +727,7 @@ class FusionHost(RamHost):
                 preview_folder = os.path.dirname(fallback_path)
 
             # Previews are typically non-versioned "Masters"
-            
+
             # CLIENT NAMING WORKFLOW
             item = self.currentItem()
             source_media = item.get("sourceMedia") if item else None
@@ -716,7 +738,7 @@ class FusionHost(RamHost):
                 step_cfg = step.publishSettings("yaml") if step else {}
                 naming_cfg = step_cfg.get("naming", {})
                 suffix = naming_cfg.get("preview_suffix", "_vfx_preview")
-                
+
                 base_filename = f"{source_media}{suffix}"
             else:
                 # FALLBACK TO RAMSES STANDARD
@@ -725,7 +747,9 @@ class FusionHost(RamHost):
                 preview_info.version = -1
                 preview_info.state = ""
                 preview_info.resource = ""
-                preview_info.extension = ""  # Exclude from base filename for sequence logic
+                preview_info.extension = (
+                    ""  # Exclude from base filename for sequence logic
+                )
                 base_filename = preview_info.fileName().rstrip(".")
 
             if is_sequence:
@@ -793,17 +817,17 @@ class FusionHost(RamHost):
                         step_cfg = step.publishSettings("yaml") if step else {}
                         naming_cfg = step_cfg.get("naming", {})
                         suffix = naming_cfg.get("final_suffix", "_vfx")
-                        
+
                         base_filename = f"{source_media}{suffix}"
                     else:
                         # FALLBACK TO RAMSES STANDARD
                         # Master Render (HERO ONLY: Strip resource from deliverable name)
                         master_info = pub_info.copy()
                         master_info.version = -1
-                        master_info.resource = "" # Force Hero naming
+                        master_info.resource = ""  # Force Hero naming
                         master_info.extension = ""
                         base_filename = master_info.fileName().rstrip(".")
-                    
+
                     target_dir = export_folder
                 else:
                     # Archival Render (Versioned fallback when no export folder set)
@@ -811,10 +835,10 @@ class FusionHost(RamHost):
                     pub_info = self.publishInfo()
                     master_info = pub_info.copy()
                     master_info.version = -1
-                    master_info.resource = "" # Force strip resource
+                    master_info.resource = ""  # Force strip resource
                     master_info.extension = ""
                     base_filename = master_info.fileName().rstrip(".")
-                    
+
                     # Target the current version's folder or step folder?
                     # API standard archival render goes to the step root or _published
                     fallback_path = self.publishFilePath(ext, "")
@@ -862,14 +886,16 @@ class FusionHost(RamHost):
             return False
         # Normalize path for Fusion
         filePath = self.normalizePath(filePath)
-        
+
         # Ensure target directory exists (prevents WinError 3)
         target_dir = os.path.dirname(filePath)
         if target_dir and not os.path.exists(target_dir):
             try:
                 os.makedirs(target_dir)
             except Exception as e:
-                self.log(f"Could not create directory {target_dir}: {e}", LogLevel.Warning)
+                self.log(
+                    f"Could not create directory {target_dir}: {e}", LogLevel.Warning
+                )
 
         try:
             self.comp.Save(filePath)
@@ -1248,7 +1274,10 @@ class FusionHost(RamHost):
 
                 loader = self.comp.AddTool("Loader", target_x, target_y)
                 if not loader:
-                    self.log(f"Failed to create Loader at ({target_x}, {target_y})", LogLevel.Error)
+                    self.log(
+                        f"Failed to create Loader at ({target_x}, {target_y})",
+                        LogLevel.Error,
+                    )
                     continue
                 if loader:
                     # Explicitly set the clip path with forward slashes for cross-platform safety
@@ -1267,6 +1296,7 @@ class FusionHost(RamHost):
 
                     # Store version and resource information
                     from ramses import RamFileInfo
+
                     info = RamFileInfo()
                     info.setFilePath(normalized_path)
                     if info.version > 0:
@@ -1848,6 +1878,7 @@ class FusionHost(RamHost):
 
             # Store version and resource information
             from ramses import RamFileInfo
+
             info = RamFileInfo()
             info.setFilePath(path)
             if info.version > 0:
@@ -2331,13 +2362,16 @@ class FusionHost(RamHost):
                 res = info.resource
 
                 # 3. Check Latest Version Folder
-                latest_dir = item.latestPublishedVersionFolderPath(step=step, resource=res)
+                latest_dir = item.latestPublishedVersionFolderPath(
+                    step=step, resource=res
+                )
                 is_outdated = False
 
                 if latest_dir:
                     # PATH HARDENING
                     def _sanitize(p):
-                        if not p: return ""
+                        if not p:
+                            return ""
                         p = str(p).replace("####", "0000").replace(".%04d", ".0000")
                         return self.normalizePath(p).lower().rstrip("/")
 
@@ -2349,11 +2383,17 @@ class FusionHost(RamHost):
                         is_outdated = True
                         v_name = os.path.basename(latest_dir)
                         msg = f"New version available: {v_name}"
-                        updates[name] = {"color": {"R": 1.0, "G": 0.5, "B": 0.0}, "comment": msg}
+                        updates[name] = {
+                            "color": {"R": 1.0, "G": 0.5, "B": 0.0},
+                            "comment": msg,
+                        }
                         count += 1
                     else:
                         # UP TO DATE: Clear warning visuals
-                        updates[name] = {"color": {"R": 0.0, "G": 0.0, "B": 0.0}, "comment": ""}
+                        updates[name] = {
+                            "color": {"R": 0.0, "G": 0.0, "B": 0.0},
+                            "comment": "",
+                        }
 
                 # Update Cache
                 with self._cache_lock:
@@ -2364,7 +2404,11 @@ class FusionHost(RamHost):
 
         # Also count cached outdated loaders
         with self._cache_lock:
-            for name, (path, is_outdated, latest_dir) in self._node_version_cache.items():
+            for name, (
+                path,
+                is_outdated,
+                latest_dir,
+            ) in self._node_version_cache.items():
                 if is_outdated and name not in updates:
                     count += 1
 
@@ -2378,7 +2422,11 @@ class FusionHost(RamHost):
                         # Only update if current color differs
                         color = node.TileColor
                         target_color = data["color"]
-                        if not color or abs(color.get("R", 0) - target_color["R"]) > 0.01 or abs(color.get("G", 0) - target_color["G"]) > 0.01:
+                        if (
+                            not color
+                            or abs(color.get("R", 0) - target_color["R"]) > 0.01
+                            or abs(color.get("G", 0) - target_color["G"]) > 0.01
+                        ):
                             node.TileColor = target_color
                         # Only update comment if different
                         current_comment = str(node.Comments[1])
@@ -2391,16 +2439,32 @@ class FusionHost(RamHost):
 
         return count
 
-    def importItem(self, paths:list=(), item:RamItem=None, step:RamStep=None, resource:str="", importOptions:list = None) -> bool:
+    def importItem(
+        self,
+        paths: list = (),
+        item: RamItem = None,
+        step: RamStep = None,
+        resource: str = "",
+        importOptions: list = None,
+    ) -> bool:
         """Overridden to suppress noisy 'empty settings' warnings from base API."""
         if importOptions is None:
             importOptions = []
-        return super(FusionHost, self).importItem(paths, item, step, resource, importOptions)
+        return super(FusionHost, self).importItem(
+            paths, item, step, resource, importOptions
+        )
 
-    def replaceItem(self, paths:list=(), item:RamItem=None, step:RamStep=None, resource:str="", importOptions:list = None) -> bool:
+    def replaceItem(
+        self,
+        paths: list = (),
+        item: RamItem = None,
+        step: RamStep = None,
+        resource: str = "",
+        importOptions: list = None,
+    ) -> bool:
         """!
         @brief Replaces an item in the current file.
-        
+
         **Smart Update:** If the selected loader is an outdated Ramses asset,
         prompts to update immediately.
         """
@@ -2415,7 +2479,7 @@ class FusionHost(RamHost):
                 if "/_published/" in path:
                     itm = RamItem.fromPath(path, virtualIfNotFound=True)
                     stp = RamStep.fromPath(path)
-                    
+
                     if itm:
                         # Identify Resource context
                         info = RamFileInfo()
@@ -2423,29 +2487,36 @@ class FusionHost(RamHost):
                         loader_resource = info.resource
 
                         # Use correct API: latestPublishedVersionFolderPath with resource filter
-                        latest_dir = itm.latestPublishedVersionFolderPath(step=stp, resource=loader_resource)
+                        latest_dir = itm.latestPublishedVersionFolderPath(
+                            step=stp, resource=loader_resource
+                        )
 
                         # If outdated, intervene with Smart Dialog
-                        if latest_dir and os.path.dirname(path).lower().rstrip("/") != self.normalizePath(latest_dir).lower().rstrip("/"):
+                        if latest_dir and os.path.dirname(path).lower().rstrip(
+                            "/"
+                        ) != self.normalizePath(latest_dir).lower().rstrip("/"):
                             dialog_result = self._request_input(
                                 "Update Available",
                                 [
                                     {
-                                        "id": "Info", 
-                                        "type": "label", 
-                                        "label": "", 
-                                        "default": f"Current: <font color='#F50'>{os.path.basename(os.path.dirname(path))}</font><br>Latest: <font color='#5F0'><b>{os.path.basename(latest_dir)}</b></font>"
+                                        "id": "Info",
+                                        "type": "label",
+                                        "label": "",
+                                        "default": f"Current: <font color='#F50'>{os.path.basename(os.path.dirname(path))}</font><br>Latest: <font color='#5F0'><b>{os.path.basename(latest_dir)}</b></font>",
                                     },
                                     {
-                                        "id": "Action", 
-                                        "label": "Action:", 
-                                        "type": "combo", 
-                                        "options": {"0": "Update to Latest", "1": "Browse Versions..."}
-                                    }
+                                        "id": "Action",
+                                        "label": "Action:",
+                                        "type": "combo",
+                                        "options": {
+                                            "0": "Update to Latest",
+                                            "1": "Browse Versions...",
+                                        },
+                                    },
                                 ],
-                                ok_text="Go"
+                                ok_text="Go",
                             )
-                            
+
                             if dialog_result:
                                 if dialog_result["Action"] == 0:
                                     # EXECUTE UPDATE
@@ -2456,19 +2527,37 @@ class FusionHost(RamHost):
                                     if not os.path.exists(new_path):
                                         # Look for any valid media file in the new folder
                                         found = False
-                                        EXTS = ('.mov', '.mp4', '.mxf', '.exr', '.dpx', '.png', '.jpg')
+                                        EXTS = (
+                                            ".mov",
+                                            ".mp4",
+                                            ".mxf",
+                                            ".exr",
+                                            ".dpx",
+                                            ".png",
+                                            ".jpg",
+                                        )
                                         try:
                                             for f in sorted(os.listdir(latest_dir)):
-                                                if f.lower().endswith(EXTS) and not f.startswith("."):
-                                                    new_path = os.path.join(latest_dir, f)
+                                                if f.lower().endswith(
+                                                    EXTS
+                                                ) and not f.startswith("."):
+                                                    new_path = os.path.join(
+                                                        latest_dir, f
+                                                    )
                                                     found = True
                                                     break
                                         except OSError as e:
-                                            self.log(f"Cannot access directory {latest_dir}: {e}", LogLevel.Error)
+                                            self.log(
+                                                f"Cannot access directory {latest_dir}: {e}",
+                                                LogLevel.Error,
+                                            )
                                             return False
 
                                         if not found:
-                                            self.log(f"Update failed: No media found in {latest_dir}", LogLevel.Error)
+                                            self.log(
+                                                f"Update failed: No media found in {latest_dir}",
+                                                LogLevel.Error,
+                                            )
                                             return False
 
                                     # Wrap update in undo group with Lock/Unlock
@@ -2476,32 +2565,51 @@ class FusionHost(RamHost):
                                     self.comp.Lock()
                                     success = False
                                     try:
-                                        new_path_normalized = self.normalizePath(new_path)
+                                        new_path_normalized = self.normalizePath(
+                                            new_path
+                                        )
                                         active.Clip[1] = new_path_normalized
 
                                         # Store updated Ramses metadata
                                         if itm:
-                                            active.SetData("Ramses.AssetUUID", str(itm.uuid()))
+                                            active.SetData(
+                                                "Ramses.AssetUUID", str(itm.uuid())
+                                            )
                                             project = itm.project()
                                             if project:
-                                                active.SetData("Ramses.ProjectUUID", str(project.uuid()))
+                                                active.SetData(
+                                                    "Ramses.ProjectUUID",
+                                                    str(project.uuid()),
+                                                )
 
                                         if stp:
-                                            active.SetData("Ramses.StepUUID", str(stp.uuid()))
+                                            active.SetData(
+                                                "Ramses.StepUUID", str(stp.uuid())
+                                            )
 
                                         # Update version and resource
                                         new_info = RamFileInfo()
                                         new_info.setFilePath(new_path)
                                         if new_info.version > 0:
-                                            active.SetData("Ramses.Version", new_info.version)
+                                            active.SetData(
+                                                "Ramses.Version", new_info.version
+                                            )
                                         if new_info.resource:
-                                            active.SetData("Ramses.Resource", new_info.resource)
+                                            active.SetData(
+                                                "Ramses.Resource", new_info.resource
+                                            )
 
                                         # Reset Visuals
-                                        active.TileColor = { "R": 0.0, "G": 0.0, "B": 0.0 }
+                                        active.TileColor = {
+                                            "R": 0.0,
+                                            "G": 0.0,
+                                            "B": 0.0,
+                                        }
                                         active.Comments[1] = ""
 
-                                        self.log(f"Updated loader to {os.path.basename(latest_dir)}")
+                                        self.log(
+                                            f"Updated loader to {os.path.basename(latest_dir)}"
+                                        )
                                         success = True
                                         return True
                                     except Exception as e:
@@ -2509,14 +2617,18 @@ class FusionHost(RamHost):
                                         return False
                                     finally:
                                         self.comp.Unlock()
-                                        self.comp.EndUndo(success)  # Commit if successful, discard if failed
+                                        self.comp.EndUndo(
+                                            success
+                                        )  # Commit if successful, discard if failed
                                 else:
                                     # Fallthrough to Browse...
                                     item = itm
                                     step = stp
                                     resource = loader_resource
                             else:
-                                return False # Cancelled
+                                return False  # Cancelled
 
         # Fall back to base class implementation
-        return super(FusionHost, self).replaceItem(paths, item, step, resource, importOptions)
+        return super(FusionHost, self).replaceItem(
+            paths, item, step, resource, importOptions
+        )
