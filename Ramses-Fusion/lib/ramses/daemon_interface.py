@@ -301,7 +301,7 @@ class RamDaemonInterface( object ):
                 # Cache Data
                 self.__cacheObjectData(uuid, data)
             else:
-                ramSeq = RamSequence( uuid )
+                ramSeq = RamSequence( seq )
 
             sequences.append( ramSeq )
         return sequences
