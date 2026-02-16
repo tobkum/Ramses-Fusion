@@ -87,7 +87,7 @@ class RamFileInfo():
         ramses = Ramses.instance()
 
         if len( self.__stateShortNames ) == 0:
-            self.__stateShortNames = settings.versionPrefixes
+            self.__stateShortNames = list(settings.versionPrefixes)
             states = ramses.states()
             for state in states:
                 self.__stateShortNames.append( state.shortName() )
@@ -112,11 +112,14 @@ class RamFileInfo():
         if self.ramType != '':
             nameList.append( self.ramType )
 
-        if self.ramType in (ItemType.ASSET, ItemType.SHOT) and self.shortName != "":
-            nameList.append( self.shortName )
-
-        if self.step != "":
-            nameList.append( self.step )
+        if self.ramType in (ItemType.ASSET, ItemType.SHOT):
+            if self.shortName != "":
+                nameList.append( self.shortName )
+            if self.step != "":
+                nameList.append( self.step )
+        else:
+            if self.step != "":
+                nameList.append( self.step )
 
         if self.resource != '' or self.isRestoredVersion or self.isBackup:
             resource = self.resource.replace('_', ' ')

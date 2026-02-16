@@ -17,7 +17,7 @@
 #
 #======================= END GPL LICENSE BLOCK ========================
 
-import os, json, time
+import os, json, time, tempfile
 from datetime import datetime
 
 from .file_manager import RamFileManager
@@ -173,11 +173,15 @@ class RamMetaDataManager():
             return {}
 
         data = {}
-        with open(file, 'r') as f:
-            content = f.read()
+        for _attempt in range(3):
             try:
-                data = json.loads(content)
-            except:
+                with open(file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                break
+            except (json.JSONDecodeError, IOError):
+                if _attempt < 2:
+                    time.sleep(0.01 * (2 ** _attempt))
+                    continue
                 return {}
 
         folder = folderPath
@@ -209,5 +213,16 @@ class RamMetaDataManager():
         """Sets the metadata for the given path using the given dict"""
         file = RamMetaDataManager.getMetaDataFile( path )
 
-        with open(file, 'w') as f:
-            json.dump( data, f, indent = 4)
+        # Atomic write: save to temp file, then rename
+        folder = os.path.dirname(file)
+        os.makedirs(folder, exist_ok=True)
+
+        fd, temp_path = tempfile.mkstemp(dir=folder, prefix=".ram_meta_", suffix=".tmp")
+        try:
+            with os.fdopen(fd, 'w', encoding="utf8") as tf:
+                json.dump(data, tf, indent=4)
+            os.replace(temp_path, file)
+        except Exception:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+            raise

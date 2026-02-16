@@ -20,10 +20,11 @@
 import os
 import platform
 import json
+import tempfile
 from .constants import FolderNames, LogLevel
 from .logger import log
 
-theVersion = "1.0.0-RC9"
+theVersion = "1.0.0-RC10"
 
 class RamSettings( object ):
     """Gets and saves settings used by Ramses.
@@ -157,7 +158,18 @@ class RamSettings( object ):
         if self._filePath == '':
             raise (RuntimeError("Invalid path for the settings, I can't save them, sorry."))
 
-        with open(self._filePath, 'w', encoding="utf8") as settingsFile:
-            settingsFile.write( json.dumps( settingsDict, indent=4 ) )
+        # Atomic write: save to temp file, then rename
+        dir_name = os.path.dirname(self._filePath)
+        os.makedirs(dir_name, exist_ok=True)
 
-        log("Settings saved!")
+        try:
+            fd, temp_path = tempfile.mkstemp(dir=dir_name, prefix=".ram_settings_", suffix=".tmp")
+            with os.fdopen(fd, 'w', encoding="utf8") as tf:
+                json.dump(settingsDict, tf, indent=4)
+            os.replace(temp_path, self._filePath)
+            log("Settings saved!")
+        except Exception as e:
+            log(f"Error saving settings: {e}", LogLevel.Critical)
+            if 'temp_path' in locals() and os.path.exists(temp_path):
+                os.remove(temp_path)
+            raise

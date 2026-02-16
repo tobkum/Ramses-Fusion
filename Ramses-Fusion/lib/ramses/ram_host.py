@@ -1066,8 +1066,7 @@ class RamHost(object):
         nm.resource = resource
         fileName = nm.fileName()
 
-        if not os.path.isdir(folderPath):
-            os.makedirs(folderPath)
+        os.makedirs(folderPath, exist_ok=True)
 
         filePath = os.path.join(folderPath, fileName)
         # Check if file exists

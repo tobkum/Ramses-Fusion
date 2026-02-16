@@ -38,6 +38,8 @@ class RamFileManager():
     def copy( originPath, destinationPath, separateThread=True ):
         """Copies a file, in a separated thread if separateThread is True"""
         if separateThread:
+            # Prune dead threads to avoid memory leak
+            RamFileManager.__writingThreads = [t for t in RamFileManager.__writingThreads if t.is_alive()]
             t = Thread( target=RamFileManager.copy, args=(originPath, destinationPath, False) )
             log( "Launching parallel copy of a file.", LogLevel.Debug )
             t.start()
@@ -50,7 +52,8 @@ class RamFileManager():
     @staticmethod
     def waitFiles():
         """Waits for all writing operations to finish"""
-        for t in RamFileManager.__writingThreads:
+        while RamFileManager.__writingThreads:
+            t = RamFileManager.__writingThreads.pop(0)
             t.join()
 
     @staticmethod
@@ -256,6 +259,7 @@ class RamFileManager():
         fileInfo.setFilePath( filePath )
 
         publishFolder = RamFileManager.getPublishFolder( filePath )
+        os.makedirs( publishFolder, exist_ok=True )
 
         # Check version
         versionInfo = RamFileManager.getLatestVersionInfo( filePath )
@@ -304,6 +308,8 @@ class RamFileManager():
     def getPublishedVersions( filePath ):
         """"Gets all the version subfolders in the publish path"""
         folder = RamFileManager.getPublishFolder( filePath )
+        if not os.path.isdir( folder ):
+            return []
 
         folders = []
         for f in os.listdir(folder):
@@ -350,6 +356,7 @@ class RamFileManager():
         newFileName = fileInfo.fileName()
 
         versionsFolder = RamFileManager.getVersionFolder( filePath )
+        os.makedirs( versionsFolder, exist_ok=True )
 
         newFilePath = RamFileManager.buildPath(( versionsFolder, newFileName ))
         RamFileManager.copy( filePath, newFilePath )
@@ -379,6 +386,8 @@ class RamFileManager():
 
         # Get versions
         versionsFolder = RamFileManager.getVersionFolder( filePath )
+        if not os.path.isdir( versionsFolder ):
+            return ''
 
         foundFiles = os.listdir( versionsFolder )
         highestVersion = 0
@@ -427,6 +436,8 @@ class RamFileManager():
 
         # Get versions
         versionsFolder = RamFileManager.getVersionFolder( filePath )
+        if not os.path.isdir( versionsFolder ):
+            return []
 
         foundFiles = os.listdir( versionsFolder )
         versionFiles = []
@@ -472,9 +483,6 @@ class RamFileManager():
         else:
             versionsFolder = fileFolder + '/' + versionsFolderName
 
-        if not os.path.isdir( versionsFolder ):
-            os.makedirs( versionsFolder )
-
         return versionsFolder
 
     @staticmethod
@@ -493,9 +501,6 @@ class RamFileManager():
 
         else:
             publishFolder = fileFolder + '/' + publishFolderName
-
-        if not os.path.isdir( publishFolder ):
-            os.makedirs( publishFolder )
 
         return publishFolder
 

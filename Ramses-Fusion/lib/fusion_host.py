@@ -174,33 +174,19 @@ if not hasattr(RamFileManager, "_fusion_patched"):
         candidates.sort()
         return [c[1] for c in candidates]
 
+
     RamFileManager.getLatestVersionFilePath = staticmethod(
         _patched_getLatestVersionFilePath
     )
     RamFileManager.getVersionFilePaths = staticmethod(_patched_getVersionFilePaths)
 
-    # 3. Thread-Safe Socket Communication for RamDaemonInterface
-    # We add a lock to the Singleton instance using double-checked locking
-    # to prevent race conditions during initialization
-    daemon = RamDaemonInterface.instance()
-    if not hasattr(daemon, "_lock"):
-        with _DAEMON_INIT_LOCK:
-            # Double-check after acquiring lock
-            if not hasattr(daemon, "_lock"):
-                daemon._lock = threading.Lock()
+    # =========================================================================
+    # OBSOLETE PATCH REMOVED: Thread-safe daemon (Now in daemon_interface.py)
+    # =========================================================================
+    # Upstream API now includes _socket_lock in daemon_interface.py:87, 629
+    # =========================================================================
 
-    original_post = getattr(daemon, "_RamDaemonInterface__post")
-
-    def _patched_post(self, query, bufsize=0, timeout=2):
-        with self._lock:
-            # We must use the original method which handles the actual socket logic
-            # Since it's a private method, we call it via the mangled name on the instance
-            return original_post(query, bufsize, timeout)
-
-    # Apply the patch to the class method (handling private name mangling)
-    RamDaemonInterface._RamDaemonInterface__post = _patched_post
-
-    # 4. Fix Metadata Deletion in RamMetaDataManager
+    # 3. Fix Metadata Deletion in RamMetaDataManager
     # The API's auto-deletion logic is prone to race conditions and path mismatches.
     def _patched_getMetaData(folderPath):
         meta_file = RamMetaDataManager.getMetaDataFile(folderPath)

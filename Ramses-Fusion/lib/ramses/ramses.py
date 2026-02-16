@@ -74,8 +74,6 @@ class Ramses( object ):
             log("I'm trying to contact the Ramses Client.", LogLevel.Debug)
             cls._instance.connect()
 
-            cls._offline = True
-
             cls.host = None
 
             cls.publishScripts = []

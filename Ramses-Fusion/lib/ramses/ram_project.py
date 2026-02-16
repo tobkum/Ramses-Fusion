@@ -273,14 +273,14 @@ class RamProject( RamObject ):
         groupUuid = RamObject.getUuid(assetGroup)
         return DAEMON.getAssets(groupUuid, includeData=(not lazyLoading))
 
-    def assetGroups( self ):
+    def assetGroups( self, lazyLoading = True ):
         """Available asset groups in this project
 
         Returns:
             list of RamAssetGroup
         """
         
-        return DAEMON.getAssetGroups()
+        return DAEMON.getAssetGroups(includeData=(not lazyLoading))
 
     def shots( self, nameFilter = "*", sequence = None, lazyLoading = True ):
         """Available shots in this project
@@ -309,10 +309,10 @@ class RamProject( RamObject ):
 
         return result
 
-    def sequences( self ):
+    def sequences( self, lazyLoading = True ):
         """The sequences of this project"""
         
-        return DAEMON.getSequences()
+        return DAEMON.getSequences(includeData=(not lazyLoading))
 
     def step(self, shortName):
         """
@@ -321,13 +321,13 @@ class RamProject( RamObject ):
         return:
             RamStep
         """
-        stps = self.steps()
+        stps = self.steps(lazyLoading = False)
         for s in stps:
             if s.shortName() == shortName:
                 return s
         return None
 
-    def steps( self, stepType=StepType.ALL ):
+    def steps( self, stepType=StepType.ALL, lazyLoading = True ):
         """Available steps in this project. Use type to filter the results.
             One of: RamStep.ALL, RamStep.ASSET_PODUCTION, RamStep.SHOT_PRODUCTION, RamStep.PRE_PRODUCTION, RamStep.PRODUCTION, RamStep.POST_PRODUCTION.
             RamStep.PRODUCTION represents a combination of SHOT and ASSET
@@ -339,7 +339,7 @@ class RamProject( RamObject ):
             list of RamStep
         """
 
-        return DAEMON.getSteps(stepType)
+        return DAEMON.getSteps(stepType, includeData=(not lazyLoading))
 
     def pipes( self ):
         """Available pipes in this project

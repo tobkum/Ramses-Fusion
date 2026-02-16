@@ -81,7 +81,7 @@ def printException():
 
     log(
         'an EXCEPTION was thrown:\n\tfrom `{}`\n\tat line {}: "{}"\n\t\t{}'.format(filename, lineno, line.strip(), exc_obj),
-        LogLevel.Critical
+        LogLevel.Debug
         )
 
     return RAMSES.settings().debugMode

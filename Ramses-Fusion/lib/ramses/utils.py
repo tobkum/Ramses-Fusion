@@ -27,6 +27,7 @@ from json import loads, dumps
 from socket import timeout
 import platform
 import ssl
+import hashlib
 from uuid import uuid4
 from .logger import log, LogLevel
 
@@ -62,8 +63,9 @@ def removeDuplicateObjectsFromList( l ):
 
 def load_module_from_path( py_path ):
     """Loads a py file as a module and returns the new module's namespace"""
-    user_module_uuid = uuid4()
-    user_module_name = "dupyf_user_module." + user_module_uuid.hex
+    # Use a hash of the path to avoid leaking sys.modules with UUIDs
+    path_hash = hashlib.md5(py_path.encode('utf-8')).hexdigest()
+    user_module_name = "dupyf_user_module." + path_hash
     user_module_spec = importlib.util.spec_from_file_location(user_module_name, py_path)
     user_module = importlib.util.module_from_spec(user_module_spec)
     sys.modules[user_module_name] = user_module
@@ -106,7 +108,7 @@ def checkUpdate(url, toolName, version, host, hostVersion, preRelease = False, l
     except:
         return {}
 
-def request(url, args=None, secured=True, timeout=4):
+def request(url, args=None, secured=True, request_timeout=4):
     """Builds a GET request with the args"""
 
     response = ""
@@ -127,14 +129,20 @@ def request(url, args=None, secured=True, timeout=4):
     log("GET request: " + url, LogLevel.Debug)
 
     try:
-        response = urlopen(url, timeout=timeout)
+        response = urlopen(url, timeout=request_timeout)
     except URLError as error:
         if not secured and not isinstance(error.reason, timeout):
             sslContext = ssl._create_unverified_context()
             try:
-                response = urlopen(url, context=sslContext, timeout=timeout)
+                response = urlopen(url, context=sslContext, timeout=request_timeout)
             except URLError:
-                pass
+                log("> URL can't be reached")
+            except TimeoutError:
+                log("> Server timed out.", LogLevel.Debug)
+        else:
+            log("> Server timed out.")
+    except TimeoutError:
+        log("> Server timed out.", LogLevel.Debug)
 
     response_data = ""
     try:

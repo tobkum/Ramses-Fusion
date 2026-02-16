@@ -21,6 +21,7 @@ import socket
 import json
 import time
 import os
+import threading
 from .logger import log, printException
 from .constants import LogLevel, Log, StepType
 
@@ -61,6 +62,14 @@ class RamDaemonInterface( object ):
     _address = 'localhost'
     _cache:dict = {}
 
+    BUFFER_1kb = 1024
+    BUFFER_10kb = BUFFER_1kb*10
+    BUFFER_100kb = BUFFER_10kb*10
+    BUFFER_1Mb = BUFFER_1kb*1024
+    BUFFER_10Mb = BUFFER_1Mb*10
+
+    DATA_END = b'  '
+
     @staticmethod
     def checkReply( obj ):
         if not obj:
@@ -75,6 +84,7 @@ class RamDaemonInterface( object ):
 
         if cls._instance is None:
             cls._instance = cls.__new__(cls)
+            cls._socket_lock = threading.Lock()
             cls._port = RamSettings.instance().ramsesClientPort
 
         return cls._instance
@@ -195,13 +205,17 @@ class RamDaemonInterface( object ):
 
         shots = []
 
+        bufferSize = self.BUFFER_100kb
+        if includeData:
+            bufferSize = self.BUFFER_1Mb
+
         reply =  self.__post(
             (
                 "getShots",
                 ('sequenceUuid', sequenceUuid),
                 ('includeData', includeDataStr)
             ),
-            bufsize=6553600,
+            bufsize=bufferSize,
             timeout=5
         )
 
@@ -219,44 +233,77 @@ class RamDaemonInterface( object ):
             shots.append( ramShot )
         return shots
 
-    def getAssetGroups(self):
+    def getAssetGroups(self, includeData=False):
         """Gets the list of asset groups for this project"""
 
         from .ram_assetgroup import RamAssetGroup
 
+        includeDataStr = "0"
+        if includeData:
+            includeDataStr = "1"
+
         assetGroups = []
+
+        bufferSize = self.BUFFER_100kb
+        if includeData:
+            bufferSize = self.BUFFER_1Mb
 
         reply =  self.__post(
             (
                 "getAssetGroups",
+                ('includeData', includeDataStr),
             ),
-            65536 )
+            bufferSize )
 
         content = self.checkReply(reply)
-        agListUuid = content.get("assetGroups", ())
-        for uuid in agListUuid:
-            ag = RamAssetGroup( uuid )
-            assetGroups.append( ag )
+        agList = content.get("assetGroups", ())
+        for ag in agList:
+            if includeData:
+                uuid = ag.get('uuid', "")
+                data = ag.get('data', {})
+                ramAG = RamAssetGroup( uuid, data=data )
+                # Cache Data
+                self.__cacheObjectData(uuid, data)
+            else:
+                ramAG = RamAssetGroup( uuid )
+            assetGroups.append( ramAG )
         return assetGroups
 
-    def getSequences(self):
+    def getSequences(self, includeData=False):
         """Gets the list of sequences for this project"""
 
         from .ram_sequence import RamSequence
 
+        includeDataStr = "0"
+        if includeData:
+            includeDataStr = "1"
+
         sequences = []
+
+        bufferSize = self.BUFFER_100kb
+        if includeData:
+            bufferSize = self.BUFFER_1Mb
 
         reply =  self.__post(
             (
                 "getSequences",
+                ('includeData', includeDataStr),
             ),
-            65536 )
+            bufferSize )
 
         content = self.checkReply(reply)
-        seqListUuid = content.get("sequences", ())
-        for uuid in seqListUuid:
-            seq = RamSequence( uuid )
-            sequences.append( seq )
+        seqList = content.get("sequences", ())
+        for seq in seqList:
+            if includeData:
+                uuid = seq.get('uuid', "")
+                data = seq.get('data', {})
+                ramSeq = RamSequence( uuid, data=data )
+                # Cache Data
+                self.__cacheObjectData(uuid, data)
+            else:
+                ramSeq = RamSequence( uuid )
+
+            sequences.append( ramSeq )
         return sequences
 
     def getAssets(self, groupUuid="", includeData=False):
@@ -270,13 +317,17 @@ class RamDaemonInterface( object ):
 
         assets = []
 
+        bufferSize = self.BUFFER_100kb
+        if includeData:
+            bufferSize = self.BUFFER_1Mb
+
         reply =  self.__post(
             (
                 "getAssets",
                 ('groupUuid', groupUuid),
                 ('includeData', includeDataStr)
             ),
-            bufsize=6553600,
+            bufsize=bufferSize,
             timeout=5 # May be a big list
         )
 
@@ -315,25 +366,43 @@ class RamDaemonInterface( object ):
             pipes.append( pipe )
         return pipes
 
-    def getSteps(self, stepType=StepType.ALL):
+    def getSteps(self, stepType=StepType.ALL, includeData=False):
         """Gets the list of steps for this project"""
 
         from .ram_step import RamStep
 
+        includeDataStr = "0"
+        if includeData:
+            includeDataStr = "1"
+
         steps = []
+
+        bufferSize = self.BUFFER_10kb
+        if includeData:
+            bufferSize = self.BUFFER_1Mb
 
         reply =  self.__post(
             (
                 "getSteps",
-                ('type', stepType)
+                ('type', stepType),
+                ('includeData', includeDataStr)
             ),
-            65536 )
+            bufsize=bufferSize
+        )
 
         content = self.checkReply(reply)
-        stepListUuid = content.get("steps", ())
-        for uuid in stepListUuid:
-            step = RamStep( uuid )
-            steps.append( step )
+        stepList = content.get("steps", ())
+        for step in stepList:
+            if includeData:
+                uuid = step.get('uuid', "")
+                data = step.get('data', {})
+                ramStep = RamStep( uuid, data=data )
+                # Cache Data
+                self.__cacheObjectData(uuid, data)
+            else:
+                ramStep = RamStep( step )
+            steps.append( ramStep )
+
         return steps
 
     def getProject(self):
@@ -543,7 +612,7 @@ class RamDaemonInterface( object ):
 
     def __post(self, query, bufsize = 0, timeout=2):
         """Posts a query and returns a dict corresponding to the json reply
-        
+
         Args:
             query: tuple.
                 The list of arguments, which are themselves 2-tuples of key-value pairs (value may be an empty string)
@@ -551,58 +620,74 @@ class RamDaemonInterface( object ):
                 The maximum amount of data to be received at once is specified by bufsize.
             timeout: int.
                 The request timeout in seconds
-                
+
         Returns: dict or None.
             The Daemon reply converted from json to a python dict.
             None if there is an error or the Daemon is unavailable.
         """
 
-        from .ramses import Ramses
+        with self._socket_lock:
+            from .ramses import Ramses
 
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.settimeout(timeout)
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.settimeout(timeout)
 
-        query = self.__buildQuery( query )
+                try:
+                    s.connect((self._address, self._port))
+                except Exception as e: #pylint: disable=broad-except
+                    log("Daemon can't be reached", LogLevel.Debug)
+                    log(str(e), LogLevel.Critical)
+                    ramses = Ramses.instance()
+                    ramses.disconnect()
+                    return
 
-        log( query, LogLevel.DataSent)
+                query = self.__buildQuery( query )
+                log( query, LogLevel.DataSent)
 
-        try:
-            s.connect((self._address, self._port))
-        except Exception as e: #pylint: disable=broad-except
-            log("Daemon can't be reached", LogLevel.Debug)
-            log(str(e), LogLevel.Critical)
-            ramses = Ramses.instance()
-            ramses.disconnect()
-            return
+                startTime = time.time()
 
-        s.sendall(query.encode('utf-8'))
+                s.sendall(query.encode('utf-8'))
 
-        if bufsize == 0:
-            s.close()
-            return None
+                if bufsize == 0:
+                    return None
 
-        data = s.recv(bufsize)
-        s.close()
+                data = s.recv(bufsize)
+                if not data:
+                    log("Empty reply from the Ramses Daemon.", LogLevel.Critical)
+                    return {
+                        'accepted': False,
+                        'success': False
+                    }
 
-        try:
-            obj = json.loads(data)
-        except: # pylint: disable=bare-except
-            log("Invalid reply data from the Ramses Daemon.", LogLevel.Critical)
-            log(str(data), LogLevel.Debug)
-            printException()
-            obj = {
-                'accepted': False,
-                'success': False
-            }
+                # More data to get
+                while not data.endswith(self.DATA_END) and (time.time() - startTime) < timeout:
+                    moreData = s.recv(bufsize)
+                    if not moreData:
+                        break;
+                    data = data + moreData
+
+            if not data.endswith(self.DATA_END):
+                log("Data received from the Ramses Daemon looks unterminated.", LogLevel.Debug)
+
+            try:
+                obj = json.loads(data)
+            except: # pylint: disable=bare-except
+                log("Invalid reply data from the Ramses Daemon.", LogLevel.Critical)
+                log(str(data), LogLevel.Debug)
+                printException()
+                obj = {
+                    'accepted': False,
+                    'success': False
+                }
+                return obj
+
+            log (str(data), LogLevel.DataReceived )
+
+            if not obj['accepted']: log("Unknown Ramses Daemon query: " + obj['query'], LogLevel.Critical)
+            if not obj['success']: log("Warning: the Ramses Daemon could not reply to the query: " + obj['query'], LogLevel.Debug)
+            if obj['message']: log(obj['message'], LogLevel.Debug)
+
             return obj
-
-        log (str(data), LogLevel.DataReceived )
-
-        if not obj['accepted']: log("Unknown Ramses Daemon query: " + obj['query'], LogLevel.Critical)
-        if not obj['success']: log("Warning: the Ramses Daemon could not reply to the query: " + obj['query'], LogLevel.Debug)       
-        if obj['message']: log(obj['message'], LogLevel.Debug)
-
-        return obj
 
     def __testConnection(self):
         """Checks if the Ramses Daemon is available"""
@@ -657,6 +742,8 @@ class RamDaemonInterface( object ):
         }
 
     def __cacheObjectData(self, uuid, data):
+        if not data:
+            return
         self.__cache('data', uuid, data)
 
     def __getCacheObjectData(self, uuid, timeout=2):

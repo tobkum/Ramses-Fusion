@@ -3,9 +3,9 @@
 Ramses Ecosystem Runtime Patches
 ================================
 
-This module aggregates critical fixes for the Ramses core library and client tools.
-It is intended to be imported at application startup to monkeypatch defects
-that cannot yet be fixed in the upstream API.
+This module contains critical fixes for fragile Fusion Lua parsing.
+Upstream API has been upgraded with fixes for LogLevel.Error, thread-safe daemon,
+and atomic settings save.
 
 Usage:
     import ramses_patches
@@ -24,75 +24,17 @@ from ramses.logger import log
 
 def apply():
     """Applies all available runtime patches."""
-    _patch_loglevel()
-    _patch_ramsettings_save()
     _patch_fusion_config()
     log("Ramses runtime patches applied.", LogLevel.Debug)
 
 
-def _patch_loglevel():
-    """
-    Fixes CRITICAL crash where LogLevel.Error is missing.
-    Maps Error to Critical to match production code usage.
-    """
-    if not hasattr(LogLevel, "Error"):
-        LogLevel.Error = LogLevel.Critical
-
-
-def _patch_ramsettings_save():
-    """
-    Fixes HIGH risk of config corruption.
-    Replaces RamSettings.save with an atomic write operation.
-    """
-
-    def atomic_save(self):
-        log("Saving settings (Atomic)...", LogLevel.Info)
-
-        # NOTE: This dictionary must be kept in sync with RamSettings.save()
-        settingsDict = {
-            "clientPath": self.ramsesClientPath,
-            "clientPort": self.ramsesClientPort,
-            "logLevel": self.logLevel,
-            "autoIncrementTimeout": self.autoIncrementTimeout,
-            "userSettings": self.userSettings,
-            "debugMode": self.debugMode,
-            "userScripts": self.userScripts,
-            "recentFiles": self.recentFiles,
-            "recentImport": self.recentImport,
-            "lastUpdateCheck": self.lastUpdateCheck,
-        }
-
-        if not self._filePath:
-            raise RuntimeError("Invalid path for the settings, I can't save them.")
-
-        # Atomic write: save to temp file, then rename
-        dir_name = os.path.dirname(self._filePath)
-        os.makedirs(dir_name, exist_ok=True)
-
-        try:
-            with tempfile.NamedTemporaryFile(
-                mode="w", dir=dir_name, delete=False, encoding="utf8"
-            ) as tf:
-                json.dump(settingsDict, tf, indent=4)
-                temp_name = tf.name
-
-            # Atomic replacement
-            if os.path.exists(self._filePath):
-                os.replace(temp_name, self._filePath)
-            else:
-                os.rename(temp_name, self._filePath)
-
-            log("Settings saved!", LogLevel.Info)
-
-        except OSError as e:
-            # Ensure LogLevel.Error exists before using it (circular dependency safety)
-            level = getattr(LogLevel, "Error", LogLevel.Critical)
-            log(f"Error saving settings: {e}", level)
-            if "temp_name" in locals() and os.path.exists(temp_name):
-                os.remove(temp_name)
-            raise
-
-    RamSettings.save = atomic_save
+# ============================================================================
+# OBSOLETE PATCHES REMOVED (Fixed in Upstream API)
+# ============================================================================
+# - LogLevel.Error (now in constants.py:69)
+# - Thread-safe daemon (now in daemon_interface.py with _socket_lock)
+# - Atomic settings save (now in ram_settings.py:166-175)
+# ============================================================================
 
 
 def _patch_fusion_config():
