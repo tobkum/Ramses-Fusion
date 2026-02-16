@@ -205,73 +205,15 @@ if not hasattr(RamFileManager, "_fusion_patched"):
     RamMetaDataManager.getMetaData = staticmethod(_patched_getMetaData)
     RamMetaDataManager.getFileMetaData = staticmethod(_patched_getFileMetaData)
 
-    # 5. Fix Side-Effect: Prevent automatic directory creation during path resolution.
-    # The API's default behavior creates _versions and _published folders just by
-    # checking paths, which clutters the filesystem during UI refreshes.
-    def _patched_getVersionFolder(filePath):
-        """Resolves the versions subfolder path without automatically creating it."""
-        fileFolder = os.path.dirname(filePath)
-        from ramses import RAM_SETTINGS
+    # ============================================================================
+    # OBSOLETE PATCHES REMOVED (Fixed in Upstream API RC10)
+    # ============================================================================
+    # - getVersionFolder: No longer creates directories (now pure path resolver)
+    # - getPublishFolder: No longer creates directories (now pure path resolver)
+    # - getPublishInfo: Directory creation moved to publish workflow only
+    # ============================================================================
 
-        versionsFolderName = RAM_SETTINGS.folderNames.versions
-        if RamFileManager.inVersionsFolder(filePath):
-            return fileFolder
-        elif RamFileManager.inPublishFolder(filePath) or RamFileManager.inPreviewFolder(
-            filePath
-        ):
-            return os.path.join(
-                os.path.dirname(fileFolder), versionsFolderName
-            ).replace("\\", "/")
-        return os.path.join(fileFolder, versionsFolderName).replace("\\", "/")
-
-    def _patched_getPublishFolder(filePath):
-        """Resolves the published subfolder path without automatically creating it."""
-        fileFolder = os.path.dirname(filePath)
-        from ramses import RAM_SETTINGS
-
-        publishFolderName = RAM_SETTINGS.folderNames.publish
-        if RamFileManager.inPublishFolder(filePath):
-            return fileFolder
-        elif RamFileManager.inVersionsFolder(
-            filePath
-        ) or RamFileManager.inPreviewFolder(filePath):
-            return os.path.join(os.path.dirname(fileFolder), publishFolderName).replace(
-                "\\", "/"
-            )
-        return os.path.join(fileFolder, publishFolderName).replace("\\", "/")
-
-    def _patched_getPublishInfo(filePath):
-        """Resolves publish metadata for a file without creating any directories on disk."""
-        if not os.path.isfile(filePath):
-            return RamFileInfo()
-        fileInfo = RamFileInfo()
-        fileInfo.setFilePath(filePath)
-        publishFolder = RamFileManager.getPublishFolder(filePath)
-        versionInfo = RamFileManager.getLatestVersionInfo(filePath)
-        versionFolder = ""
-        if versionInfo.resource != "":
-            versionFolder = versionInfo.resource + "_"
-        from ramses.utils import intToStr
-
-        versionFolder += intToStr(max(1, versionInfo.version))
-        if versionInfo.state != "" and versionInfo.state.lower() != "v":
-            versionFolder += "_" + versionInfo.state
-        newFilePath = os.path.join(
-            publishFolder, versionFolder, fileInfo.fileName()
-        ).replace("\\", "/")
-        publishedInfo = RamFileInfo()
-        publishedInfo.setFilePath(newFilePath)
-        publishedInfo.date = fileInfo.date
-        publishedInfo.version = versionInfo.version
-        if versionInfo.state != "" and versionInfo.state.lower() != "v":
-            publishedInfo.state = versionInfo.state
-        return publishedInfo
-
-    RamFileManager.getVersionFolder = staticmethod(_patched_getVersionFolder)
-    RamFileManager.getPublishFolder = staticmethod(_patched_getPublishFolder)
-    RamFileManager.getPublishInfo = staticmethod(_patched_getPublishInfo)
-
-    # 6. Fix State Reversion: Allow passing target state to publish process.
+    # 5. Fix State Reversion: Allow passing target state to publish process.
     def _patched_publish(
         self,
         forceShowPublishUI=False,

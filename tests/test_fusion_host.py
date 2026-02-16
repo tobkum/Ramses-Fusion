@@ -17,7 +17,7 @@ sys.modules["ramses.daemon_interface"] = MagicMock(RamDaemonInterface=MagicMock(
 # --- 2. Setup Path ---
 current_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(current_dir)
-lib_path = os.path.join(os.path.dirname(project_root), "lib")
+lib_path = os.path.join(project_root, "Ramses-Fusion", "lib")
 if lib_path not in sys.path:
     sys.path.append(lib_path)
 
@@ -33,7 +33,7 @@ sys.modules["yaml"].safe_load.side_effect = lambda x: x # Simple pass-through or
 
 # --- 3. Import Code Under Test ---
 from fusion_host import FusionHost, FORMAT_QUICKTIME, CODEC_PRORES_422, CODEC_PRORES_422_HQ
-from tests.mocks import MockFusion
+from mocks import MockFusion
 from ramses import LogLevel
 
 # PATCH: fusion_host.py has bugs using LogLevel.Error which doesn't exist
@@ -482,8 +482,14 @@ class TestFusionHost(unittest.TestCase):
         # Mock Project (should be ignored when export_dest="step")
         mock_project = MagicMock()
         mock_project.exportPath.return_value = "D:/Exports"  # This should NOT be used
-        import ramses
-        ramses.RAMSES.project = MagicMock(return_value=mock_project)
+        
+        # Patch the RAMSES instance in fusion_host module (not ramses module)
+        import fusion_host
+        fusion_host.RAMSES.project = MagicMock(return_value=mock_project)
+        
+        # Mock publishInfo - required by resolveFinalPath
+        mock_pub_info = MagicMock()
+        self.host.publishInfo = MagicMock(return_value=mock_pub_info)
         
         # Mock publishFilePath (the versioned _published path)
         self.host.publishFilePath = MagicMock(return_value="D:/Steps/COMP/_published/Shot01_v003.mov")

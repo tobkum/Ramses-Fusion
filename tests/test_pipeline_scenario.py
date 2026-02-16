@@ -10,7 +10,7 @@ sys.modules["fusionscript"] = MagicMock()
 # --- 2. Setup Path ---
 current_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(current_dir)
-lib_path = os.path.join(os.path.dirname(project_root), "lib")
+lib_path = os.path.join(project_root, "Ramses-Fusion", "lib")
 app_path = os.path.join(project_root, "Ramses-Fusion")
 
 if lib_path not in sys.path:
@@ -50,7 +50,7 @@ sys.modules["Ramses_Fusion"] = ram_fusion_mod
 spec.loader.exec_module(ram_fusion_mod)
 
 from Ramses_Fusion import RamsesFusionApp
-from tests.mocks import MockFusion
+from mocks import MockFusion
 from ramses import ItemType, LogLevel
 
 

@@ -5,7 +5,7 @@ import os
 # Setup path to import fusion_config
 current_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(current_dir)
-lib_path = os.path.join(os.path.dirname(project_root), "lib")
+lib_path = os.path.join(project_root, "Ramses-Fusion", "lib")
 if lib_path not in sys.path:
     sys.path.append(lib_path)
 
