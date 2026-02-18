@@ -176,18 +176,19 @@ class AssetBrowser:
         for folder in reversed(folders):
             v_folder = os.path.basename(folder) 
             
-            # API STRICT PARSING: [RESOURCE]_[VERSION]_[STATE] or [VERSION]_[STATE]
-            # Standard: 001_WIP (2 blocks) -> display v001
-            # Resource: BG_001_OK (3 blocks) -> display v001 [BG]
+            # Parse from the right: [RESOURCE_]VERSION_STATE
+            # VERSION is always the second-to-last block, STATE is the last.
+            # RESOURCE may contain underscores (e.g. BG_CITY_001_OK -> resource=BG_CITY).
             blocks = v_folder.split('_')
-            num_blocks = len(blocks)
-            
-            if num_blocks == 3:
-                display_v = f"v{blocks[1]} [{blocks[0]}]"
-            elif num_blocks == 2:
-                display_v = f"v{blocks[0]}"
+            if len(blocks) >= 2:
+                version_part = blocks[-2]
+                resource_parts = blocks[:-2]
+                if resource_parts:
+                    display_v = f"v{version_part} [{('_'.join(resource_parts))}]"
+                else:
+                    display_v = f"v{version_part}"
             else:
-                display_v = f"v{v_folder}" if v_folder.isdigit() else v_folder
+                display_v = v_folder
             
             # Find main media file
             media_file = self._find_media(folder)

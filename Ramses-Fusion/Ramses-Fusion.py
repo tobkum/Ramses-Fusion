@@ -230,13 +230,11 @@ class RamsesFusionApp:
 
             # Check Project Mismatch
             is_mismatch = False
+            meta_uuid = ""
             if item and is_online:
                 active_proj = self.ramses.project()
-                # Try to get item project (safe, cached inside item usually)
-                item_proj = item.project()
 
                 # Check 0: Metadata (The Golden Source)
-                meta_uuid = ""
                 try:
                     meta_uuid = self.ramses.host.comp.GetData("Ramses.ProjectUUID")
                 except Exception:
@@ -1758,25 +1756,32 @@ class RamsesFusionApp:
 
                 # 2. Parallel Fetch (ThreadPoolExecutor)
                 if missing_keys:
+                    _FETCH_FAILED = object()  # sentinel: distinguishes error from "no status"
 
                     def fetch_status_task(args):
                         s_obj, s_stp = args
                         try:
-                            # Return ((key), result)
                             return (
                                 str(s_obj.uuid()),
                                 str(s_stp.uuid()),
                             ), s_obj.currentStatus(s_stp)
-                        except Exception:
-                            return (str(s_obj.uuid()), str(s_stp.uuid())), None
+                        except Exception as e:
+                            self.log(
+                                f"Warning: Failed to fetch status for {s_obj.shortName()}: {e}",
+                                ram.LogLevel.Debug,
+                            )
+                            return (str(s_obj.uuid()), str(s_stp.uuid())), _FETCH_FAILED
 
                     # Use max_workers=20 to speed up I/O bound socket calls
                     with concurrent.futures.ThreadPoolExecutor(
                         max_workers=20
                     ) as executor:
-                        results = executor.map(fetch_status_task, missing_keys)
-                        for key, status in results:
-                            session_cache["status_cache"][key] = status
+                        fetch_results = executor.map(fetch_status_task, missing_keys)
+                        for key, status in fetch_results:
+                            if status is not _FETCH_FAILED:
+                                # Cache real results (including None = legitimately no status)
+                                session_cache["status_cache"][key] = status
+                            # Failed fetches are not cached so they retry on next refresh
 
                 # 3. Populate UI from cache
                 valid_options = []
@@ -2734,6 +2739,7 @@ class RamsesFusionApp:
         self._create_render_anchors()
         self.refresh_header()
 
+    @requires_connection
     def on_retrieve(self, ev: object) -> None:
         """Handler for 'Retrieve Version' button.
 

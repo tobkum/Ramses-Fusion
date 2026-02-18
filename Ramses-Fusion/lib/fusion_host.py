@@ -229,9 +229,10 @@ if not hasattr(RamFileManager, "_fusion_patched"):
 
         # Save with correct state to prevent reversion
         state_short = state.shortName() if state else None
-        self._RamHost__save(
+        if not self._RamHost__save(
             self.saveFilePath(), comment="Published", newStateShortName=state_short
-        )
+        ):
+            return False
 
         publishInfo = self.publishInfo()
         if not publishOptions:
@@ -260,6 +261,9 @@ if not hasattr(RamFileManager, "_fusion_patched"):
             return False
 
         published_files = self._publish(publishInfo, publishOptions)
+        # _publish returns None/False on hard failure, or [] when no files were
+        # produced — both are treated as failure here because a successful Fusion
+        # render always yields at least one output file.
         if not published_files:
             return False
         for file in published_files:
@@ -275,11 +279,12 @@ if not hasattr(RamFileManager, "_fusion_patched"):
         self.closeTempWorkingFile()
 
         if incrementVersion:
-            self._RamHost__save(
+            if not self._RamHost__save(
                 self.saveFilePath(),
                 incrementVersion=True,
                 newStateShortName=state_short,
-            )
+            ):
+                print("[Ramses] Warning: Post-publish incremental save failed.")
         return True
 
     RamHost.publish = _patched_publish
