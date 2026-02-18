@@ -154,10 +154,15 @@ class AssetBrowser:
                 if found:
                     return found
             else:
-                # Found a valid active step
-                # Optional: Check if it has any published files?
-                # For now, just return the step itself as it's the logical source.
-                return upstream
+                # Only return this step if it actually has published versions;
+                # a step can be "OK" or "WIP" without any files (e.g. a
+                # management step), which would leave the browser empty.
+                if shot.publishedVersionFolderPaths(upstream):
+                    return upstream
+                # No files — keep looking further upstream
+                found = self.resolve_upstream_source(shot, upstream)
+                if found:
+                    return found
                 
         return None
 
