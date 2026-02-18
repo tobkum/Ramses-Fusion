@@ -2259,7 +2259,7 @@ class FusionHost(RamHost):
                         # Check cache first
                         with self._cache_lock:
                             cached = self._node_version_cache.get(name)
-                        if cached and cached[0] == path:
+                        if cached and os.path.normcase(cached[0]) == os.path.normcase(path):
                             # Already processed this path, skip expensive check
                             continue
                         loaders_data.append((name, path, node))
