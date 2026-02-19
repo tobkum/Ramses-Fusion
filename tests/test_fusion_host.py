@@ -340,17 +340,11 @@ class TestFusionHost(unittest.TestCase):
             
             self.assertFalse(self.host._verify_render_output(path))
 
-    def test_dry_path_resolution(self):
-        """Verify that path resolution doesn't create directories (Dry Resolution)."""
-        from ramses import RamFileManager
-        path = "D:/NewProject/NewShot/COMP/file.comp"
-        
+    def test_path_resolution_does_not_create_directories(self):
+        """FusionHost.currentItem() resolves paths without creating any directories."""
         with patch("os.makedirs") as mock_makedirs:
-            # These should NOT call makedirs
-            RamFileManager.getVersionFolder(path)
-            RamFileManager.getPublishFolder(path)
-            
-            mock_makedirs.assert_not_called()
+            self.host.currentItem()
+        mock_makedirs.assert_not_called()
 
     def test_logging(self):
         """Verifies that the logger outputs to stdout for INFO and above."""
@@ -684,22 +678,19 @@ class TestFusionUndoAndLocking(unittest.TestCase):
         self.assertTrue(result)
         comp.EndUndo.assert_called_once_with(True)
 
-    def test_undo_failure_flag_pattern(self):
-        """Verify EndUndo(False) on exception."""
+    def test_undo_always_ended_after_import(self):
+        """EndUndo is always called with True after _import, even when AddTool returns None."""
         comp = self.mock_fusion.GetCurrentComp()
         comp.EndUndo = MagicMock()
 
-        # Force failure by making AddTool return None (simpler than exception)
+        # Force AddTool to return None (loader creation fails)
         comp.AddTool = MagicMock(return_value=None)
 
-        files = ["D:/Test/asset_v001.exr"]
-        result = self.host._import(files, None, None, [], False)
+        self.host._import(["D:/Test/asset_v001.exr"], None, None, [], False)
 
-        # Import returns True even if AddTool fails (it continues with other files)
-        # Let's check that EndUndo was called with True (success flag based on try/except)
-        comp.EndUndo.assert_called_once()
-        # The actual behavior is it returns True and EndUndo(True) even if one loader fails
-        # This test verifies the pattern exists, not the exact failure handling
+        # The implementation always reaches EndUndo(True) — loader failures are
+        # non-fatal and do not flip the undo flag to False.
+        comp.EndUndo.assert_called_once_with(True)
 
     def test_smart_update_creates_undo(self):
         """Verify undo group for smart update via _replace method."""
