@@ -24,7 +24,7 @@ import tempfile
 from .constants import FolderNames, LogLevel
 from .logger import log
 
-theVersion = "1.0.0-RC10"
+theVersion = "#version#"
 
 class RamSettings( object ):
     """Gets and saves settings used by Ramses.
