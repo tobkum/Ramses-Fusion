@@ -2007,7 +2007,12 @@ class RamsesFusionApp:
 
                     if use_template:
                         self.log(f"Creating shot from template: {use_template}")
-                        host.open(use_template)
+                        if not host.open(use_template):
+                            self.log(
+                                f"Failed to open template: {use_template}",
+                                ram.LogLevel.Critical,
+                            )
+                            return
                     elif not template_files:
                         init_res = host._request_input(
                             "Initialize Shot",
@@ -2030,7 +2035,12 @@ class RamsesFusionApp:
 
                     # Perform the initial save via host.comp.Save directly to establish file identity
                     # using our verified absolute path.
-                    host.comp.Save(selected_path)
+                    if not host.comp.Save(selected_path):
+                        self.log(
+                            f"Failed to save composition to: {selected_path}",
+                            ram.LogLevel.Critical,
+                        )
+                        return
 
                     # FORCE WIP STATE
                     target_state = None
