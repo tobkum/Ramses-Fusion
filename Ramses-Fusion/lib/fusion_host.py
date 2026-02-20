@@ -1520,20 +1520,39 @@ class FusionHost(RamHost):
     def _publishOptions(
         self, proposedOptions: dict, showPublishUI: bool = False
     ) -> dict:
-        """Returns the publish options, optionally showing a UI.
+        """Shows a UI to edit the publish options (YAML) if requested."""
+        if not showPublishUI:
+            return proposedOptions or {}
 
-        Currently just passes through default options.
+        # Convert dict to YAML for editing
+        try:
+            current_yaml = yaml.dump(proposedOptions, default_flow_style=False)
+        except Exception:
+            current_yaml = ""
 
-        Args:
-            proposedOptions (dict): Default options from the Step configuration.
-            showPublishUI (bool): Whether to force a UI dialog.
+        res = self._request_input(
+            "Edit Publish Settings",
+            [
+                {
+                    "id": "YAML",
+                    "label": "Settings (YAML):",
+                    "type": "text",
+                    "default": current_yaml,
+                    "lines": 20,
+                }
+            ],
+        )
 
-        Returns:
-            dict: The final publish options.
-        """
-        # If the UI is forced, we could show a dialog here.
-        # For now, we return the options to ensure the process continues.
-        return proposedOptions or {}
+        if res is not None:
+            try:
+                new_options = yaml.safe_load(res["YAML"])
+                return new_options if isinstance(new_options, dict) else {}
+            except Exception as e:
+                # On error, warn and show UI again (recursion)
+                self.log(f"Invalid YAML Settings: {e}", LogLevel.Warning)
+                return self._publishOptions(proposedOptions, True)
+
+        return None  # User cancelled
 
     def _prePublish(self, publishInfo: RamFileInfo, publishOptions: dict) -> dict:
         """Hook called before the publish process begins.
