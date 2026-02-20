@@ -173,7 +173,7 @@ class TestPipelineScenario(unittest.TestCase):
             self.host.resolveFinalPath = MagicMock(return_value="D:/Renders/SH010.mov")
 
             # Trigger setup scene
-            self.app.on_setup_scene(None)
+            self.app.on_sync(None)
 
             # VERIFY ACTUAL STATE CHANGES (not mock calls):
             # 1. Resolution was applied
@@ -235,20 +235,19 @@ class TestPipelineScenario(unittest.TestCase):
             mock_status.comment.return_value = "Old Note"
 
             # Simulate user input for note dialog
-            self.host._request_input = MagicMock(
-                return_value={"Comment": "Added motion blur", "Incremental": True}
-            )
+            mock_comment_dialog = MagicMock()
+            mock_comment_dialog.comment.return_value = "Added motion blur"
 
-            with patch.object(self.host, "save", return_value=True) as mock_save:
-                # Trigger via APP handler
-                self.app.on_comment(None)
+            with patch.object(self.app, "_run_pyside_dialog", return_value=mock_comment_dialog):
+                with patch.object(self.host, "save", return_value=True) as mock_save:
+                    # Trigger via APP handler
+                    self.app.on_comment(None)
 
-                # Verify comment was passed and incremental flag respected
-                mock_save.assert_called_once()
-                call_kwargs = mock_save.call_args[1]
-                self.assertEqual(call_kwargs.get("comment"), "Added motion blur")
-                self.assertTrue(call_kwargs.get("incremental"))
-                self.assertEqual(call_kwargs.get("state"), mock_wip_state)
+                    # Verify comment was passed
+                    mock_save.assert_called_once()
+                    call_kwargs = mock_save.call_args[1]
+                    self.assertEqual(call_kwargs.get("comment"), "Added motion blur")
+                    self.assertEqual(call_kwargs.get("state"), mock_wip_state)
 
             # --- PHASE 5: Preview Handler Test ---
             self.host.savePreview = MagicMock()
@@ -267,7 +266,7 @@ class TestPipelineScenario(unittest.TestCase):
             self.host._statusUI = MagicMock(
                 return_value={
                     "publish": True,
-                    "note": "Final version for review",
+                    "comment": "Final version for review",
                     "state": mock_done_state,
                     "completionRatio": 100,
                 }
@@ -333,7 +332,7 @@ class TestPipelineFailureModes(unittest.TestCase):
         mock_state = MagicMock()
         self.host._statusUI = MagicMock(return_value={
             "publish": True,
-            "note": "Test",
+            "comment": "Test",
             "state": mock_state,
             "completionRatio": 50
         })
@@ -359,7 +358,7 @@ class TestPipelineFailureModes(unittest.TestCase):
 
         self.host._statusUI = MagicMock(return_value={
             "publish": True,
-            "note": "Test",
+            "comment": "Test",
             "state": mock_state,
             "completionRatio": 50
         })
@@ -398,7 +397,7 @@ class TestPipelineFailureModes(unittest.TestCase):
 
         self.host._statusUI = MagicMock(return_value={
             "publish": False,  # User doesn't want to publish
-            "note": "Just updating status",
+            "comment": "Just updating status",
             "state": mock_state,
             "completionRatio": 75
         })
@@ -416,21 +415,21 @@ class TestPipelineFailureModes(unittest.TestCase):
         mock_status.setState.assert_called_with(mock_state)
 
     def test_comment_handler_skips_save_when_unchanged(self):
-        """Verify on_comment doesn't save when note is unchanged and not incremental."""
+        """Verify on_comment doesn't save when note is unchanged."""
         mock_status = MagicMock()
         mock_status.comment.return_value = "Existing note"
         mock_status.state.return_value = MagicMock()
         self.host.currentStatus = MagicMock(return_value=mock_status)
 
         # User doesn't change anything
-        self.host._request_input = MagicMock(
-            return_value={"Comment": "Existing note", "Incremental": False}
-        )
-
+        mock_dialog = MagicMock()
+        mock_dialog.comment.return_value = "Existing note"
+        
         self.host.save = MagicMock(return_value=True)
 
-        with patch.object(self.app, "refresh_header"):
-            self.app.on_comment(None)
+        with patch.object(self.app, "_run_pyside_dialog", return_value=mock_dialog):
+            with patch.object(self.app, "refresh_header"):
+                self.app.on_comment(None)
 
         # Save should NOT have been called
         self.host.save.assert_not_called()
@@ -443,11 +442,10 @@ class TestPipelineFailureModes(unittest.TestCase):
         self.host.currentStatus = MagicMock(return_value=mock_status)
 
         # User cancels the dialog
-        self.host._request_input = MagicMock(return_value=None)
-
         self.host.save = MagicMock(return_value=True)
 
-        self.app.on_comment(None)
+        with patch.object(self.app, "_run_pyside_dialog", return_value=None):
+            self.app.on_comment(None)
 
         # Save should NOT have been called
         self.host.save.assert_not_called()

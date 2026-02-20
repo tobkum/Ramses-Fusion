@@ -1677,7 +1677,7 @@ class FusionHost(RamHost):
 
             publish = newStatusDict.get("publish", False)
             savePreview = newStatusDict.get("savePreview", False)
-            comment = newStatusDict.get("note", "")
+            comment = newStatusDict.get("comment", "")
             completionRatio = newStatusDict.get("completionRatio", 50)
             state = newStatusDict.get("state", RAMSES.defaultState)
             showPublishUI = newStatusDict.get("showPublishUI", False)

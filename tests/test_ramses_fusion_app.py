@@ -68,6 +68,13 @@ class TestRamsesFusionApp(unittest.TestCase):
         fusion_host.bmd = sys.modules["bmd"]
 
         self.app = RamsesFusionApp()
+        
+        # Standard UI Mocks to prevent dialogs during tests
+        self.app.ramses.host._statusUI = MagicMock()
+        self.app.ramses.host._openUI = MagicMock()
+        self.app.ramses.host._saveAsUI = MagicMock()
+        self.app.ramses.host._importUI = MagicMock()
+        self.app.ramses.host._restoreVersionUI = MagicMock()
 
     def test_project_mismatch_detection(self):
         """Verify that the app detects when a file belongs to a different project."""
@@ -307,7 +314,7 @@ class TestRamsesFusionApp(unittest.TestCase):
         self.app.refresh_header.assert_called_once()
 
     def test_on_note_logic(self):
-        """Verify that 'Save with Note' handles comments and incremental saves correctly."""
+        """Verify that 'Save with Note' handles comments correctly."""
         host = self.app.ramses.host
         mock_status = MagicMock()
         mock_status.comment.return_value = "Old Note"
@@ -321,22 +328,16 @@ class TestRamsesFusionApp(unittest.TestCase):
         with patch.object(self.app, "refresh_header"):
             with patch.object(host, "currentStatus", return_value=mock_status):
                 # 1. Test Cancellation (no save)
-                with patch.object(host, "_request_input", return_value=None):
+                with patch.object(self.app, "_run_pyside_dialog", return_value=None):
                     self.app.on_comment(None)
                     host.save.assert_not_called()
 
-                # 2. Test No Change + No Increment (no save)
-                with patch.object(
-                    host, "_request_input", return_value={"Comment": "Old Note", "Incremental": False}
-                ):
+                # 2. Test Comment Change (Overwrite Save)
+                mock_dialog = MagicMock()
+                mock_dialog.comment.return_value = "New Note"
+                with patch.object(self.app, "_run_pyside_dialog", return_value=mock_dialog):
                     self.app.on_comment(None)
-                    host.save.assert_not_called()
-
-                # 3. Test Comment Change + No Increment (Overwrite Save)
-                with patch.object(
-                    host, "_request_input", return_value={"Comment": "New Note", "Incremental": False}
-                ):
-                    self.app.on_comment(None)
+                    # Note: Standard dialog has no increment toggle, so incremental=False
                     host.save.assert_called_with(
                         comment="New Note", setupFile=True, incremental=False, state=mock_state
                     )
@@ -346,16 +347,11 @@ class TestRamsesFusionApp(unittest.TestCase):
                 host.save.reset_mock()
                 self.app.refresh_header.reset_mock()
 
-                # 4. Test No Comment Change + Increment (Incremental Save)
-                # User wants a new version but keeps the old note
-                with patch.object(
-                    host, "_request_input", return_value={"Comment": "Old Note", "Incremental": True}
-                ):
+                # 3. Test No Change (no save)
+                mock_dialog.comment.return_value = "Old Note"
+                with patch.object(self.app, "_run_pyside_dialog", return_value=mock_dialog):
                     self.app.on_comment(None)
-                    host.save.assert_called_with(
-                        comment="Old Note", setupFile=True, incremental=True, state=mock_state
-                    )
-                    self.app.refresh_header.assert_called_once()
+                    host.save.assert_not_called()
 
     def test_role_based_ui_state(self):
         """Verify that Step Configuration is enabled/disabled based on role and users count."""
@@ -666,6 +662,13 @@ class TestValidationEdgeCases(unittest.TestCase):
         fusion_host.bmd = sys.modules["bmd"]
 
         self.app = RamsesFusionApp()
+        
+        # Standard UI Mocks to prevent dialogs during tests
+        self.app.ramses.host._statusUI = MagicMock()
+        self.app.ramses.host._openUI = MagicMock()
+        self.app.ramses.host._saveAsUI = MagicMock()
+        self.app.ramses.host._importUI = MagicMock()
+        self.app.ramses.host._restoreVersionUI = MagicMock()
         # Ensure host uses our mock fusion
         self.app.ramses.host.fusion = self.mock_fusion
 
