@@ -59,7 +59,6 @@ class RamVersionDialog( RamDialog ):
     def setVersionFiles(self, versionFiles:list):
         """Sets the list of versions to be displayed"""
 
-        print(versionFiles)
         for v in versionFiles:
             fileName = os.path.basename( v )
             nm = RamFileInfo()

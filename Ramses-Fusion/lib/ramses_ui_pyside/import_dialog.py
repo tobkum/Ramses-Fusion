@@ -243,9 +243,6 @@ class RamImportDialog(RamDialog):
         if not isinstance(item, RamItem):
             item = self.itemSelector.currentItem()
         
-        print("===========")
-        print(item)
-
         self.versionList.clear()
         self.versionBox.clear()
         if not item:
