@@ -2509,21 +2509,7 @@ class RamsesFusionApp:
     @requires_connection
     def on_sync(self, ev: object) -> None:
         """Handler for 'Sync Settings' button."""
-        item = self.current_item
-        step = self.current_step
-
-        # Use the optimized host implementation to collect settings
-        settings = self.ramses.host.collectItemSettings(item)
-        if not settings:
-            self.log(
-                "No active Ramses project found or context is invalid.",
-                ram.LogLevel.Warning,
-            )
-            return
-
-        # Apply directly and refresh UI
-        self.ramses.host._setupCurrentFile(item, step, settings)
-        self._create_render_anchors()
+        self.ramses.host.setupCurrentFile()
         self.refresh_header()
 
     @requires_connection

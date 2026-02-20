@@ -877,6 +877,21 @@ class FusionHost(RamHost):
             return False
         return self.comp.SetAttrs({"COMPS_FileName": self.normalizePath(fileName)})
 
+    def setupCurrentFile(self) -> None:
+        """Applies Ramses settings and creates render anchors.
+        
+        This is the standard entry point for syncing a scene with the database.
+        """
+        item = self.currentItem()
+        step = self.currentStep()
+        if item:
+            settings = self.collectItemSettings(item)
+            self._setupCurrentFile(item, step, settings)
+            
+            # Fusion specific: also ensure anchors exist and are synced
+            if hasattr(self, "app") and self.app:
+                self.app._create_render_anchors()
+
     def save(
         self,
         incremental: bool = False,
@@ -1600,7 +1615,7 @@ class FusionHost(RamHost):
         )
 
     def saveAs(self, setupFile: bool = True, state: RamState = None) -> bool:
-        """Saves the current file as a new Item-Step, propagating state to the first version.
+        """Saves the current file as a new Item-Step.
 
         Args:
             setupFile (bool): Whether to apply project settings.
@@ -1609,23 +1624,8 @@ class FusionHost(RamHost):
         Returns:
             bool: True on success.
         """
-        # We handle setupFile ourselves to use optimized Fusion logic
-        if setupFile:
-            res = self._saveAsUI()  # Base API shows UI
-            if not res:
-                return False
-
-            # Re-apply the logic from save() but for the new context
-            item, step = res.get("item"), res.get("step")
-            if item:
-                settings = self.collectItemSettings(item)
-                self._setupCurrentFile(item, step, settings)
-                self._store_ramses_metadata(item)
-
-        # Call base saveAs - it will eventually call our _saveAs and copyToVersion
-        # Note: RamHost.saveAs doesn't support state propagation, so we manually
-        # increment the version after save if a state is provided.
-        success = super().saveAs(setupFile=False)
+        # Call base saveAs - it handles the _saveAsUI call correctly.
+        success = super().saveAs(setupFile=setupFile)
 
         if success and state:
             # Force a correctly named version immediately
@@ -2332,6 +2332,49 @@ class FusionHost(RamHost):
         finally:
             comp.EndUndo(success)
             comp.Unlock()
+
+    def _saveAsUI(self) -> dict:
+        """Shows the Ramses Save As Dialog with intelligent pre-selection."""
+        if qw and hasattr(self, "app") and self.app:
+            try:
+                from ramses_ui_pyside.save_as_dialog import RamSaveAsDialog
+
+                file_types = [{"extension": "comp", "name": "Fusion Composition"}]
+                dialog = RamSaveAsDialog(file_types)
+                
+                # --- Pre-set Defaults ---
+                project = RAMSES.project()
+                if project:
+                    # Default to Shot mode
+                    dialog.setShot()
+                    # Pre-select Comp step
+                    comp_step = project.step("Comp") or project.step("Compositing")
+                    if comp_step:
+                        dialog.setStep(comp_step)
+
+                # Ensure foreground
+                dialog.setWindowFlags(dialog.windowFlags() | qc.Qt.WindowStaysOnTopHint)
+                dialog.raise_()
+                dialog.activateWindow()
+
+                if getattr(dialog, 'exec', None):
+                    res = dialog.exec()
+                else:
+                    res = dialog.exec_()
+
+                if res:
+                    return {
+                        "item": dialog.item(),
+                        "step": dialog.step(),
+                        "extension": dialog.extension(),
+                        "resource": dialog.resource(),
+                    }
+                return None
+            except ImportError:
+                pass
+
+        # Fallback to standard API behavior if PySide not available
+        return super()._saveAsUI()
 
     def _statusUI(self, currentStatus: RamStatus = None) -> dict:
         """Shows the dialog to update status, note, and publish settings."""
