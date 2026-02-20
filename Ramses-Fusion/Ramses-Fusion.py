@@ -1554,7 +1554,10 @@ class RamsesFusionApp:
         itm = dlg.GetItems()
 
         def save_settings(ev):
-            self.settings.ramsesClientPort = int(itm["RamsesPortTxt"].Text)
+            try:
+                self.settings.ramsesClientPort = int(itm["RamsesPortTxt"].Text)
+            except ValueError:
+                pass
             self.settings.ramsesClientPath = str(itm["RamsesPathTxt"].Text)
             try:
                 self.settings.userSettings["compStartFrame"] = int(

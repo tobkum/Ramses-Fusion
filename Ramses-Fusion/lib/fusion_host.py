@@ -841,6 +841,7 @@ class FusionHost(RamHost):
 
         try:
             self.comp.Save(filePath)
+            self._store_ramses_metadata(item, step)
             return True
         except Exception as e:
             self.log(f"Failed to save: {e}", LogLevel.Critical)
@@ -1276,7 +1277,7 @@ class FusionHost(RamHost):
                         # Prevent name collisions by checking if node exists and appending counter
                         final_name = name
                         counter = 1
-                        while self.comp.FindTool(final_name):
+                        while self.comp.FindTool(final_name) and counter < 100:
                             final_name = f"{name}_{counter}"
                             counter += 1
                         loader.SetAttrs({"TOOLS_Name": final_name})
@@ -2351,7 +2352,7 @@ class FusionHost(RamHost):
                 dialog = self.app._run_pyside_dialog(RamStatusDialog, currentStatus)
                 if dialog:
                     return {
-                        "note": dialog.comment(),
+                        "comment": dialog.comment(),
                         "completionRatio": dialog.completionRatio(),
                         "publish": dialog.publish(),
                         "state": dialog.state(),
@@ -2406,7 +2407,7 @@ class FusionHost(RamHost):
         selected_state = states[res["State"]]
 
         return {
-            "note": res["Comment"],
+            "comment": res["Comment"],
             "completionRatio": int(selected_state.completionRatio()),
             "publish": res["Publish"],
             "state": selected_state,
