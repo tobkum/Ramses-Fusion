@@ -922,13 +922,10 @@ class FusionHost(RamHost):
             bool: True on success, False on failure.
         """
         if setupFile:
-            item = self.currentItem()
-            if item:
-                settings = self.collectItemSettings(item)
-                self._setupCurrentFile(item, self.currentStep(), settings)
+            self.setupCurrentFile()
 
         # When setupFile=False, persist metadata here (setupFile=True handles it via _setupCurrentFile)
-        if not setupFile:
+        else:
             item = self.currentItem()
             if item:
                 self._store_ramses_metadata(item)
