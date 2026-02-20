@@ -51,11 +51,9 @@ class RamAboutDialog(qw.QDialog):
             host = RamHost()
 
         self.setWindowTitle("About " + host.name)
-        
+
         # Ensure foreground
-        self.setWindowFlags(self.windowFlags() | qc.Qt.WindowStaysOnTopHint)
-        self.raise_()
-        self.activateWindow()
+        self.setModal(True)
 
         l = qw.QVBoxLayout()
         l.setContentsMargins(6,6,6,6)

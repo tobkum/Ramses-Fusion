@@ -236,13 +236,12 @@ class RamImportDialog(RamDialog):
         )
 
     @qc.Slot()
-    def __changeItem(self, item=None):
+    def __changeItem(self, item:RamItem|None=None):
 
         # Ensure we have the actual item, not a step passed by a signal
-        from ramses import RamItem
         if not isinstance(item, RamItem):
             item = self.itemSelector.currentItem()
-        
+
         self.versionList.clear()
         self.versionBox.clear()
         if not item:
