@@ -130,6 +130,13 @@ class TestPipelineScenario(unittest.TestCase):
             self.host.currentItem = MagicMock(return_value=mock_shot)
             self.host.currentStep = MagicMock(return_value=MagicMock())
 
+            # Mock UI methods to return valid data without popping dialogs
+            self.host._statusUI = MagicMock()
+            self.host._openUI = MagicMock()
+            self.host._saveAsUI = MagicMock()
+            self.host._importUI = MagicMock()
+            self.host._restoreVersionUI = MagicMock()
+
             # --- PHASE 1: Initial State Verification ---
             comp = self.mock_fusion.GetCurrentComp()
 

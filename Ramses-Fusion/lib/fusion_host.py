@@ -877,19 +877,6 @@ class FusionHost(RamHost):
             return False
         return self.comp.SetAttrs({"COMPS_FileName": self.normalizePath(fileName)})
 
-    def _store_ramses_metadata(self, item: RamItem, step: RamStep = None) -> None:
-        """Stores Ramses identity within the Fusion composition metadata."""
-        if not self.comp:
-            return
-
-        self.comp.SetData("Ramses.ItemUUID", str(item.uuid()))
-        if item.project():
-            self.comp.SetData("Ramses.ProjectUUID", str(item.project().uuid()))
-        if step:
-            self.comp.SetData("Ramses.StepUUID", str(step.uuid()))
-        
-        self._log(f"Stored Ramses Identity: {item.shortName()}", LogLevel.Debug)
-
     def save(
         self,
         incremental: bool = False,
@@ -2189,7 +2176,7 @@ class FusionHost(RamHost):
             if node.GetInput(compression_key) != CODEC_PRORES_422_HQ:
                 node.SetInput(compression_key, CODEC_PRORES_422_HQ, 0)
 
-    def _store_ramses_metadata(self, item: RamItem) -> None:
+    def _store_ramses_metadata(self, item: RamItem, step: RamStep = None) -> None:
         """Embeds Ramses identity (Project/Item/Step UUIDs) into Fusion composition metadata.
 
         Optimized to only write data if it differs from current metadata.
@@ -2197,6 +2184,7 @@ class FusionHost(RamHost):
 
         Args:
             item (RamItem): The item whose identity to store.
+            step (RamStep, optional): The step context. If None, resolves from current context.
         """
         comp = self.comp
         if not comp or not item:
@@ -2218,7 +2206,9 @@ class FusionHost(RamHost):
                     comp.SetData("Ramses.ProjectUUID", proj_uuid)
 
             # Store Step UUID (Enables step recovery when file is moved)
-            step = self.currentStep()
+            if not step:
+                step = self.currentStep()
+            
             if step:
                 step_uuid = str(step.uuid())
                 if comp.GetData("Ramses.StepUUID") != step_uuid:

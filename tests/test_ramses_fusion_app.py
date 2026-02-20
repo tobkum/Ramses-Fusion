@@ -283,6 +283,29 @@ class TestRamsesFusionApp(unittest.TestCase):
             )
             self.app.refresh_header.assert_called_once()
 
+    def test_on_sync_handler(self):
+        """Verify that on_sync correctly triggers host setup and refresh."""
+        self.app.ramses.host._setupCurrentFile = MagicMock(return_value=True)
+        self.app._create_render_anchors = MagicMock()
+        self.app.refresh_header = MagicMock()
+        
+        # Trigger renamed handler
+        self.app.on_sync(None)
+        
+        self.app.ramses.host._setupCurrentFile.assert_called_once()
+        self.app._create_render_anchors.assert_called_once()
+        self.app.refresh_header.assert_called_once()
+
+    def test_on_import_handler_standard(self):
+        """Verify on_import delegates to host.importItem()."""
+        self.app.ramses.host.importItem = MagicMock(return_value=True)
+        self.app.refresh_header = MagicMock()
+        
+        self.app.on_import(None)
+        
+        self.app.ramses.host.importItem.assert_called_once()
+        self.app.refresh_header.assert_called_once()
+
     def test_on_note_logic(self):
         """Verify that 'Save with Note' handles comments and incremental saves correctly."""
         host = self.app.ramses.host

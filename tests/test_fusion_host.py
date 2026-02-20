@@ -501,12 +501,12 @@ class TestFusionHost(unittest.TestCase):
         self.host.testDaemonConnection = MagicMock(return_value=True)
         self.host.currentItem = MagicMock(return_value=MagicMock())
         
-        # Mock Status UI result (using new 'note' key)
+        # Mock Status UI result (using correct 'comment' key)
         mock_state = MagicMock()
         mock_state.completionRatio.return_value = 100
         self.host._statusUI = MagicMock(return_value={
             "publish": True,
-            "note": "Final Render",
+            "comment": "Final Render",
             "state": mock_state,
             "completionRatio": 100
         })
