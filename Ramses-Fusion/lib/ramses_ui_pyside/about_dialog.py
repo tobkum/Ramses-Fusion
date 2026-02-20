@@ -23,8 +23,10 @@
 
 try:
     from PySide2 import QtWidgets as qw
+    from PySide2 import QtCore as qc
 except:  # pylint: disable=bare-except
     from PySide6 import QtWidgets as qw
+    from PySide6 import QtCore as qc
 
 from ramses_ui_pyside.utils import (
     donate
@@ -49,6 +51,11 @@ class RamAboutDialog(qw.QDialog):
             host = RamHost()
 
         self.setWindowTitle("About " + host.name)
+        
+        # Ensure foreground
+        self.setWindowFlags(self.windowFlags() | qc.Qt.WindowStaysOnTopHint)
+        self.raise_()
+        self.activateWindow()
 
         l = qw.QVBoxLayout()
         l.setContentsMargins(6,6,6,6)

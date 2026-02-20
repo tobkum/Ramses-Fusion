@@ -306,6 +306,12 @@ class FusionHost(RamHost):
     Ramses Host implementation for Blackmagic Fusion.
     """
 
+    # Identity Properties
+    name = "Ramses-Fusion"
+    vendorName = "Overmind Studios"
+    version = "1.0.0"
+    helpURL = "https://www.overmind-studios.de"
+
     LOG_PREFIXES = {
         LogLevel.Info: "INFO",
         LogLevel.Warning: "WARNING",
