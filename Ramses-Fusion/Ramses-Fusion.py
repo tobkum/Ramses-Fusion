@@ -18,7 +18,26 @@ lib_path = os.path.join(script_dir, "lib")
 if lib_path not in sys.path:
     sys.path.append(lib_path)
 
+# UI Lib
+ui_lib_path = os.path.join(lib_path, "ramses_ui_pyside")
+if ui_lib_path not in sys.path:
+    sys.path.append(ui_lib_path)
+
 import ramses as ram
+
+# PySide Setup
+try:
+    from PySide2 import QtWidgets as qw
+    from PySide2 import QtCore as qc
+    from PySide2 import QtGui as qg
+except ImportError:
+    try:
+        from PySide6 import QtWidgets as qw
+        from PySide6 import QtCore as qc
+        from PySide6 import QtGui as qg
+    except ImportError:
+        # Fallback to no PySide - main app will still run with UIManager
+        qw = None
 
 try:
     import ramses.yaml as yaml
@@ -27,6 +46,16 @@ except ImportError:
 
 import fusion_host
 from fusion_config import FusionConfig
+
+if qw:
+    from ramses_ui_pyside.open_dialog import RamOpenDialog
+    from ramses_ui_pyside.save_as_dialog import RamSaveAsDialog
+    from ramses_ui_pyside.status_dialog import RamStatusDialog
+    from ramses_ui_pyside.about_dialog import RamAboutDialog
+    from ramses_ui_pyside.comment_dialog import RamCommentDialog
+    from ramses_ui_pyside.versions_dialog import RamVersionDialog
+    from ramses_ui_pyside.import_dialog import RamImportDialog
+    from ramses_ui_pyside.update_dialog import RamUpdateDialog
 
 
 def requires_connection(func: callable) -> callable:
@@ -58,7 +87,6 @@ class RamsesFusionApp:
 
     # Button Groups for UI State Management
     PIPELINE_BUTTONS = [
-        "SetupSceneButton",
         "ImportButton",
         "ReplaceButton",
         "TemplateButton",
@@ -98,6 +126,36 @@ class RamsesFusionApp:
         # UI State
         self._section_states = {}  # {content_id: is_collapsed}
         self._outdated_count = 0
+
+        # PySide Initialization
+        self.qt_app = None
+        if qw:
+            self.qt_app = qw.QApplication.instance()
+            if not self.qt_app:
+                self.qt_app = qw.QApplication(sys.argv)
+
+    def _run_pyside_dialog(self, dialog_class, *args, **kwargs):
+        """Helper to run a PySide dialog within the Fusion environment."""
+        if not qw:
+            self.log("PySide not available. Cannot show dialog.", ram.LogLevel.Critical)
+            return None
+        
+        dialog = dialog_class(*args, **kwargs)
+        
+        # --- Force Foreground ---
+        dialog.setWindowFlags(dialog.windowFlags() | qc.Qt.WindowStaysOnTopHint)
+        dialog.raise_()
+        dialog.activateWindow()
+        
+        # Use exec instead of exec_ for future compatibility
+        if getattr(dialog, 'exec', None):
+            res = dialog.exec()
+        else:
+            res = dialog.exec_()
+            
+        if res:
+            return dialog
+        return None
 
     def _get_icon(self, icon_name: str) -> object:
         """Retrieves an icon from the cache, loading it if necessary.
@@ -313,6 +371,10 @@ class RamsesFusionApp:
             # Group 2: DB Buttons (Require Connection only)
             if "SwitchShotButton" in items:
                 items["SwitchShotButton"].Enabled = is_online
+            if "SaveAsButton" in items:
+                items["SaveAsButton"].Enabled = is_online
+            if "SetupSceneButton" in items:
+                items["SetupSceneButton"].Enabled = is_online
 
             self.resize_to_fit()
         except (AttributeError, KeyError) as e:
@@ -1022,14 +1084,16 @@ class RamsesFusionApp:
         self.dlg.On.ImportButton.Clicked = self.on_import
         self.dlg.On.ReplaceButton.Clicked = self.on_replace
         self.dlg.On.SaveButton.Clicked = self.on_save
+        self.dlg.On.SaveAsButton.Clicked = self.on_save_as
         self.dlg.On.CommentButton.Clicked = self.on_comment
         self.dlg.On.IncrementalSaveButton.Clicked = self.on_incremental_save
         self.dlg.On.UpdateStatusButton.Clicked = self.on_update_status
         self.dlg.On.PreviewButton.Clicked = self.on_preview
         self.dlg.On.TemplateButton.Clicked = self.on_save_template
-        self.dlg.On.SetupSceneButton.Clicked = self.on_setup_scene
+        self.dlg.On.SetupSceneButton.Clicked = self.on_sync
         self.dlg.On.RetrieveButton.Clicked = self.on_retrieve
         self.dlg.On.PubSettingsButton.Clicked = self.on_step_configuration
+        self.dlg.On.CheckUpdateButton.Clicked = self.on_check_update
         self.dlg.On.SettingsButton.Clicked = self.show_settings_window
         self.dlg.On.AboutButton.Clicked = self.show_about_window
         self.dlg.On.RamsesFusionMainWin.Close = self.on_close
@@ -1040,12 +1104,13 @@ class RamsesFusionApp:
             "PipelineContent": ["ImportButton", "ReplaceButton", "TemplateButton"],
             "WorkingContent": [
                 "SaveButton",
+                "SaveAsButton",
                 "IncrementalSaveButton",
                 "CommentButton",
                 "RetrieveButton",
             ],
             "PublishContent": ["PreviewButton", "UpdateStatusButton"],
-            "SettingsContent": ["PubSettingsButton", "SettingsButton", "AboutButton"],
+            "SettingsContent": ["PubSettingsButton", "CheckUpdateButton", "SettingsButton", "AboutButton"],
         }
 
         # Bind Section Toggles
@@ -1216,6 +1281,14 @@ class RamsesFusionApp:
                     tooltip="Overwrite the current working file version.",
                 ),
                 self.create_button(
+                    "SaveAsButton",
+                    "Save As / Create...",
+                    "ramsave.png",
+                    accent_color=bg_color,
+                    weight=0,
+                    tooltip="Save as a new item or step in the pipeline.",
+                ),
+                self.create_button(
                     "IncrementalSaveButton",
                     "Save Incremental",
                     "ramsaveincremental.png",
@@ -1286,6 +1359,14 @@ class RamsesFusionApp:
                     accent_color=bg_color,
                     weight=0,
                     tooltip="Configure global YAML automation rules for this pipeline step.",
+                ),
+                self.create_button(
+                    "CheckUpdateButton",
+                    "Check for Update...",
+                    "ramupdate.png",
+                    accent_color=bg_color,
+                    weight=0,
+                    tooltip="Check if a new version of the Ramses plugin is available.",
                 ),
                 self.create_button(
                     "SettingsButton",
@@ -1597,24 +1678,28 @@ class RamsesFusionApp:
     # --- Handlers ---
 
     def on_run_ramses(self, ev: object) -> None:
-        """Launches the external Ramses Client application.
-
-        Args:
-            ev: The event object (unused).
-        """
+        """Launches the external Ramses Client application."""
         self.ramses.showClient()
 
     @requires_connection
+    def on_save_as(self, ev: object) -> None:
+        """Handler for 'Save As / Create' button."""
+        if self.ramses.host.saveAs():
+            self.refresh_header(force_full=True)
+
+    @requires_connection
     def on_switch_shot(self, ev: object) -> None:
-        """Handler for the 'Switch Shot' wizard.
+        """Handler for the 'Switch Shot' wizard."""
+        if not qw:
+            return self._on_switch_shot_uimanager()
 
-        Displays a cascading dialog (Project -> Step -> Shot) to select a working context.
-        Handles creating new shots (from templates or empty) and opening existing ones.
-        Auto-updates status from TODO to WIP on creation.
+        # host.open() now handles the dialog AND the new shot prompt/creation
+        # inside its _openUI implementation.
+        if self.ramses.host.open():
+            self.refresh_header(force_full=True)
 
-        Args:
-            ev: The event object (unused).
-        """
+    def _on_switch_shot_uimanager(self):
+        """Original UIManager-based Switch Shot wizard logic."""
         ui = self.ui
         disp = self.disp
         host = self.ramses.host
@@ -1623,44 +1708,26 @@ class RamsesFusionApp:
         # 1. Initial Data Fetch (Strict Mode: Only Active Project)
         active_project = self.ramses.project()
         if not active_project:
-            self.ramses.host._request_input(
-                "Ramses Offline",
-                [
-                    {
-                        "id": "Msg",
-                        "label": "Error:",
-                        "type": "text",
-                        "default": "No active project found.\nPlease log in to a project in the Ramses Client.",
-                        "lines": 3,
-                    }
-                ],
-            )
             return
 
-        all_projects = [active_project]
-
-        # Pre-cache states once for global state names (small payload)
         all_states = self.ramses.states()
         state_map = {str(s.uuid()): str(s.shortName()).upper() for s in all_states}
 
         # Session Cache for this wizard instance
         session_cache = {
-            "projects": all_projects,
-            "project_data": {},  # {proj_uuid: {"shots": [], "seq_map": {}, "steps": []}}
-            "status_cache": {},  # {(shot_uuid, step_uuid): status}
+            "projects": [active_project],
+            "project_data": {},
+            "status_cache": {},
             "current_shots": [],
             "current_seq_map": {},
             "current_steps": [],
             "shot_options": [],
             "initial_step_idx": -1,
-            "last_proj_idx": -1,
         }
 
-        cur_project = self._get_project()
         cur_step = self.current_step
         cur_item = self.current_item
 
-        # 2. Build UI
         win_id = f"ShotWizard_{int(os.getpid())}"
         dlg = disp.AddWindow(
             {
@@ -1668,274 +1735,121 @@ class RamsesFusionApp:
                 "ID": win_id,
                 "Geometry": [400, 400, 500, 180],
             },
-            ui.VGroup(
-                [
-                    ui.VGap(10),
-                    ui.VGroup(
-                        {"Spacing": 5},
-                        [
-                            ui.HGroup(
-                                [
-                                    ui.Label({"Text": "Project:", "Weight": 0.25}),
-                                    ui.Label(
-                                        {
-                                            "ID": "ProjLabel",
-                                            "Text": active_project.name(),
-                                            "Weight": 0.75,
-                                            "StyleSheet": "font-weight: bold; font-size: 14px;",
-                                        }
-                                    ),
-                                ]
-                            ),
-                            ui.HGroup(
-                                [
-                                    ui.Label({"Text": "Step:", "Weight": 0.25}),
-                                    ui.ComboBox({"ID": "StepCombo", "Weight": 0.75}),
-                                ]
-                            ),
-                            ui.HGroup(
-                                [
-                                    ui.Label({"Text": "Shot:", "Weight": 0.25}),
-                                    ui.ComboBox({"ID": "ShotCombo", "Weight": 0.75}),
-                                ]
-                            ),
-                        ],
-                    ),
-                    ui.VGap(10),
-                    ui.HGroup(
-                        {"Weight": 0},
-                        [
-                            ui.HGap(0, 1),
-                            ui.Button(
-                                {
-                                    "ID": "OkBtn",
-                                    "Text": "OK",
-                                    "Weight": 0,
-                                    "MinimumSize": [120, 30],
-                                }
-                            ),
-                            ui.Button(
-                                {
-                                    "ID": "CancelBtn",
-                                    "Text": "Cancel",
-                                    "Weight": 0,
-                                    "MinimumSize": [120, 30],
-                                }
-                            ),
-                        ],
-                    ),
-                    ui.VGap(5),
-                ]
-            ),
+            ui.VGroup([
+                ui.VGap(10),
+                ui.VGroup({"Spacing": 5}, [
+                    ui.HGroup([
+                        ui.Label({"Text": "Project:", "Weight": 0.25}),
+                        ui.Label({
+                            "ID": "ProjLabel",
+                            "Text": active_project.name(),
+                            "Weight": 0.75,
+                            "StyleSheet": "font-weight: bold; font-size: 14px;"
+                        })
+                    ]),
+                    ui.HGroup([
+                        ui.Label({"Text": "Step:", "Weight": 0.25}),
+                        ui.ComboBox({"ID": "StepCombo", "Weight": 0.75})
+                    ]),
+                    ui.HGroup([
+                        ui.Label({"Text": "Shot:", "Weight": 0.25}),
+                        ui.ComboBox({"ID": "ShotCombo", "Weight": 0.75})
+                    ]),
+                ]),
+                ui.VGap(10),
+                ui.HGroup({"Weight": 0}, [
+                    ui.HGap(0, 1),
+                    ui.Button({"ID": "OkBtn", "Text": "OK", "Weight": 0, "MinimumSize": [120, 30]}),
+                    ui.Button({"ID": "CancelBtn", "Text": "Cancel", "Weight": 0, "MinimumSize": [120, 30]}),
+                ]),
+                ui.VGap(5),
+            ]),
         )
 
         itm = dlg.GetItems()
 
-        # 3. Logic: Update Helpers
         def update_shots(ev=None):
-            try:
-                itm["ShotCombo"].Clear()
-                session_cache["shot_options"] = []
+            itm["ShotCombo"].Clear()
+            step_idx = int(itm["StepCombo"].CurrentIndex)
+            if step_idx < 0: return
+            selected_step = session_cache["current_steps"][step_idx]
+            shots = session_cache["current_shots"]
+            seq_map = session_cache["current_seq_map"]
 
-                step_idx = int(itm["StepCombo"].CurrentIndex)
-                if step_idx < 0 or not session_cache["current_steps"]:
-                    return
+            valid_options = []
+            for shot in shots:
+                status = shot.currentStatus(selected_step)
+                if status:
+                    st_uuid = str(ram.RamObject.getUuid(status.get("state")))
+                    if state_map.get(st_uuid) in ["NO", "STB"]: continue
 
-                selected_step = session_cache["current_steps"][step_idx]
-                step_uuid = str(selected_step.uuid())
+                expected_path, exists = self._resolve_shot_path(shot, selected_step)
+                seq_name = seq_map.get(str(ram.RamObject.getUuid(shot.get("sequence"))), "None")
+                
+                state_name = status.state().name() if status and status.state() else "WIP"
+                label = f"{seq_name} / {shot.shortName()} [{state_name}]" if exists else f"{seq_name} / {shot.shortName()} [EMPTY]"
+                
+                valid_options.append({
+                    "label": label,
+                    "shot": shot,
+                    "path": expected_path,
+                    "exists": exists
+                })
 
-                shots = session_cache["current_shots"]
-                seq_map = session_cache["current_seq_map"]
-
-                # 1. Identify missing statuses in cache
-                missing_keys = []
-                for shot in shots:
-                    cache_key = (str(shot.uuid()), step_uuid)
-                    if cache_key not in session_cache["status_cache"]:
-                        missing_keys.append((shot, selected_step))
-
-                # 2. Parallel Fetch (ThreadPoolExecutor)
-                if missing_keys:
-                    _FETCH_FAILED = object()  # sentinel: distinguishes error from "no status"
-
-                    def fetch_status_task(args):
-                        s_obj, s_stp = args
-                        try:
-                            return (
-                                str(s_obj.uuid()),
-                                str(s_stp.uuid()),
-                            ), s_obj.currentStatus(s_stp)
-                        except Exception as e:
-                            self.log(
-                                f"Warning: Failed to fetch status for {s_obj.shortName()}: {e}",
-                                ram.LogLevel.Debug,
-                            )
-                            return (str(s_obj.uuid()), str(s_stp.uuid())), _FETCH_FAILED
-
-                    # Use max_workers=20 to speed up I/O bound socket calls
-                    with concurrent.futures.ThreadPoolExecutor(
-                        max_workers=20
-                    ) as executor:
-                        fetch_results = executor.map(fetch_status_task, missing_keys)
-                        for key, status in fetch_results:
-                            if status is not _FETCH_FAILED:
-                                # Cache real results (including None = legitimately no status)
-                                session_cache["status_cache"][key] = status
-                            # Failed fetches are not cached so they retry on next refresh
-
-                # 3. Populate UI from cache
-                valid_options = []
-                for shot in shots:
-                    shot_uuid = str(shot.uuid())
-
-                    cache_key = (shot_uuid, step_uuid)
-                    status = session_cache["status_cache"].get(cache_key)
-
-                    if status:
-                        st_uuid = str(ram.RamObject.getUuid(status.get("state")))
-                        if state_map.get(st_uuid) in ["NO", "STB"]:
-                            continue
-
-                    # Resolve expected path using helper
-                    try:
-                        expected_path, exists = self._resolve_shot_path(
-                            shot, selected_step
-                        )
-                    except Exception as e:
-                        self.log(
-                            f"Error resolving path for shot {shot.name()}: {e}",
-                            ram.LogLevel.Warning,
-                        )
-                        continue
-
-                    seq_name = seq_map.get(
-                        str(ram.RamObject.getUuid(shot.get("sequence"))), "None"
-                    )
-
-                    if exists:
-                        state_name = (
-                            status.state().name()
-                            if status and status.state()
-                            else "WIP"
-                        )
-                        label = f"{seq_name} / {shot.shortName()} [{state_name}]"
-                    else:
-                        label = f"{seq_name} / {shot.shortName()} [EMPTY - Create New]"
-
-                    valid_options.append(
-                        {
-                            "label": label,
-                            "shot": shot,
-                            "path": expected_path,
-                            "exists": exists,
-                        }
-                    )
-
-                session_cache["shot_options"] = valid_options
-                for opt in valid_options:
-                    itm["ShotCombo"].AddItem(opt["label"])
-
-                # Pre-selection logic (Only on initial load or if project/step matches current)
-                if cur_item and step_idx == session_cache["initial_step_idx"]:
-                    cur_uuid = str(cur_item.uuid())
-                    for i, opt in enumerate(valid_options):
-                        if str(opt["shot"].uuid()) == cur_uuid:
-                            itm["ShotCombo"].CurrentIndex = i
-                            break
-                else:
-                    itm["ShotCombo"].CurrentIndex = 0
-            except Exception as e:
-                self.log(f"Error updating shots: {e}", ram.LogLevel.Critical)
+            session_cache["shot_options"] = valid_options
+            for opt in valid_options:
+                itm["ShotCombo"].AddItem(opt["label"])
+            
+            if cur_item:
+                for i, opt in enumerate(valid_options):
+                    if str(opt["shot"].uuid()) == str(cur_item.uuid()):
+                        itm["ShotCombo"].CurrentIndex = i
+                        break
 
         def update_steps(ev=None):
-            try:
-                itm["StepCombo"].Clear()
+            itm["StepCombo"].Clear()
+            fusion_steps = [s for s in session_cache["current_steps"] if host.isFusionStep(s)]
+            if not fusion_steps: fusion_steps = session_cache["current_steps"]
+            session_cache["current_steps"] = fusion_steps
+            for s in fusion_steps: itm["StepCombo"].AddItem(s.name())
+            itm["StepCombo"].CurrentIndex = 0
+            if cur_step:
+                for i, s in enumerate(fusion_steps):
+                    if str(s.uuid()) == str(cur_step.uuid()):
+                        itm["StepCombo"].CurrentIndex = i
+                        break
+            update_shots()
 
-                all_steps = session_cache["current_steps"]
-                fusion_steps = [s for s in all_steps if host.isFusionStep(s)]
-
-                if not fusion_steps:
-                    fusion_steps = all_steps
-
-                session_cache["current_steps"] = fusion_steps
-                for s in fusion_steps:
-                    itm["StepCombo"].AddItem(s.name())
-
-                # Pre-selection logic
-                itm["StepCombo"].CurrentIndex = 0
-                if cur_step:
-                    cur_uuid = str(cur_step.uuid())
-                    for i, s in enumerate(fusion_steps):
-                        if str(s.uuid()) == cur_uuid:
-                            itm["StepCombo"].CurrentIndex = i
-                            session_cache["initial_step_idx"] = i
-                            break
-
-                update_shots()
-            except Exception as e:
-                self.log(f"Error updating steps: {e}", ram.LogLevel.Critical)
-
-        # 4. Event Binding
-        dlg.On.StepCombo.CurrentIndexChanged = (
-            update_shots  # Changing step refreshes shots
-        )
-        # Unbound to prevent loop during population
-
+        dlg.On.StepCombo.CurrentIndexChanged = update_shots
         results = {"confirmed": False}
-
         def on_ok(ev):
             results["confirmed"] = True
             disp.ExitLoop()
-
-        def on_cancel(ev):
-            disp.ExitLoop()
-
+        
         dlg.On.OkBtn.Clicked = on_ok
-        dlg.On.CancelBtn.Clicked = on_cancel
-        dlg.On[win_id].Close = on_cancel
+        dlg.On.CancelBtn.Clicked = lambda ev: disp.ExitLoop()
+        dlg.On[win_id].Close = lambda ev: disp.ExitLoop()
 
-        # 5. Initialization
-        # Load the single active project immediately
-        try:
-            proj = active_project
-            proj_uuid = str(proj.uuid())
-            self.log(f"Loading {proj.name()}...", ram.LogLevel.Info)
+        # Init project data
+        proj = active_project
+        sequences = proj.sequences()
+        seq_map = {str(s.uuid()): s.shortName() for s in sequences}
+        shots = []
+        for seq in sequences: shots.extend(proj.shots(sequence=seq, lazyLoading=False))
+        shots.extend(proj.shots(sequence="", lazyLoading=False))
+        
+        unique_shots = []
+        seen = set()
+        for s in shots:
+            if str(s.uuid()) not in seen:
+                unique_shots.append(s)
+                seen.add(str(s.uuid()))
+        
+        session_cache["current_shots"] = unique_shots
+        session_cache["current_seq_map"] = seq_map
+        session_cache["current_steps"] = proj.steps(ram.StepType.SHOT_PRODUCTION)
+        update_steps()
 
-            # 1. Chunked Shot Fetching (lazyLoading=False fetches full data in bulk)
-            sequences = proj.sequences()
-            seq_map = {str(s.uuid()): s.shortName() for s in sequences}
-            shots = []
-            for seq in sequences:
-                shots.extend(proj.shots(sequence=seq, lazyLoading=False))
-            shots.extend(proj.shots(sequence="", lazyLoading=False))
-
-            unique_shots = []
-            seen_uuids = set()
-            for s in shots:
-                u = str(s.uuid())
-                if u not in seen_uuids:
-                    unique_shots.append(s)
-                    seen_uuids.add(u)
-
-            # 2. Steps
-            steps = proj.steps(ram.StepType.SHOT_PRODUCTION)
-
-            session_cache["project_data"][proj_uuid] = {
-                "shots": unique_shots,
-                "seq_map": seq_map,
-                "steps": steps,
-            }
-
-            p_data = session_cache["project_data"][proj_uuid]
-            session_cache["current_shots"] = p_data["shots"]
-            session_cache["current_seq_map"] = p_data["seq_map"]
-            session_cache["current_steps"] = p_data["steps"]
-
-            update_steps()
-        except Exception as e:
-            self.log(f"Error loading project: {e}", ram.LogLevel.Critical)
-
-        # 6. Show Dialog
         self.dlg.Enabled = False
         try:
             dlg.Show()
@@ -1944,172 +1858,39 @@ class RamsesFusionApp:
             dlg.Hide()
             self.dlg.Enabled = True
 
-        # 7. Execution
         if results["confirmed"] and session_cache["shot_options"]:
             shot_idx = int(itm["ShotCombo"].CurrentIndex)
             step_idx = int(itm["StepCombo"].CurrentIndex)
-
             if shot_idx >= 0 and step_idx >= 0:
                 shot_data = session_cache["shot_options"][shot_idx]
                 selected_step = session_cache["current_steps"][step_idx]
-
+                
                 if not shot_data["exists"]:
-                    # FORCE ABSOLUTE PATH
+                    # Create new logic
+                    host.fusion.NewComp()
                     selected_path = host.normalizePath(shot_data["path"])
-
-                    # Ensure the target directory exists before any save
-                    target_dir = os.path.dirname(selected_path)
-                    if target_dir:
-                        # Create main step folder
-                        os.makedirs(target_dir, exist_ok=True)
-                        # PRE-EMPTIVE API FOLDERS: Prevent WinError 3 during API's internal backup/versioning
-                        os.makedirs(
-                            os.path.join(target_dir, "_versions"), exist_ok=True
-                        )
-                        os.makedirs(
-                            os.path.join(target_dir, "_published"), exist_ok=True
-                        )
-
-                    use_template = None
-                    tpl_folder = selected_step.templatesFolderPath()
-                    template_files = []
-                    if tpl_folder and os.path.isdir(tpl_folder):
-                        template_files = [
-                            f for f in os.listdir(tpl_folder) if f.endswith(".comp")
-                        ]
-
-                    if template_files:
-                        # ... (template selection logic) ...
-                        tpl_opts = {"0": "None - Empty Composition"}
-                        for i, f in enumerate(template_files):
-                            tpl_opts[str(i + 1)] = f
-                        tpl_res = host._request_input(
-                            "Select Template",
-                            [
-                                {
-                                    "id": "Tpl",
-                                    "label": "Template:",
-                                    "type": "combo",
-                                    "options": tpl_opts,
-                                }
-                            ],
-                        )
-                        if tpl_res:
-                            idx = int(tpl_res["Tpl"])
-                            if idx > 0:
-                                use_template = os.path.join(
-                                    tpl_folder, template_files[idx - 1]
-                                )
-                            else:
-                                host.fusion.NewComp()
-                        else:
-                            return
-
-                    if use_template:
-                        self.log(f"Creating shot from template: {use_template}")
-                        if not host.open(use_template):
-                            self.log(
-                                f"Failed to open template: {use_template}",
-                                ram.LogLevel.Critical,
-                            )
-                            return
-                    elif not template_files:
-                        init_res = host._request_input(
-                            "Initialize Shot",
-                            [
-                                {
-                                    "id": "Mode",
-                                    "label": "No template found. Use:",
-                                    "type": "combo",
-                                    "options": {
-                                        "0": "Empty Composition",
-                                        "1": "Current Composition as base",
-                                    },
-                                }
-                            ],
-                        )
-                        if not init_res:
-                            return
-                        if init_res["Mode"] == 0:
-                            host.fusion.NewComp()
-
-                    # Perform the initial save via host.comp.Save directly to establish file identity
-                    # using our verified absolute path.
-                    if not host.comp.Save(selected_path):
-                        self.log(
-                            f"Failed to save composition to: {selected_path}",
-                            ram.LogLevel.Critical,
-                        )
-                        return
-
-                    # FORCE WIP STATE
-                    target_state = None
-                    all_states = self.ramses.states()
-                    # Try to find 'WIP' specifically
-                    for s in all_states:
-                        if s.shortName().upper() == "WIP":
-                            target_state = s
-                            break
-                    # Fallback to first 'Work' state if WIP not found
-                    if not target_state:
-                        for s in all_states:
-                            if s.stateType() == ram.StateType.WORK:
-                                target_state = s
-                                break
-                    # Final fallback to default
-                    if not target_state:
-                        target_state = self.ramses.defaultState()
-
-                    if host.save(
-                        comment="Initial creation", setupFile=True, state=target_state
-                    ):
-                        # FORCE STATUS UPDATE: Explicitly commit to DB
-                        try:
-                            status = host.currentStatus()
-                            if status and target_state:
-                                status.setState(target_state)
-                                status.setComment("Initial creation")
-                                # Push to daemon
-                                status.setVersion(host.currentVersion())
-                                self.log(
-                                    f"Auto-updated status to {target_state.shortName()}",
-                                    ram.LogLevel.Info,
-                                )
-                        except Exception as e:
-                            self.log(
-                                f"Could not force status update: {e}",
-                                ram.LogLevel.Warning,
-                            )
-
+                    os.makedirs(os.path.dirname(selected_path), exist_ok=True)
+                    os.makedirs(os.path.join(os.path.dirname(selected_path), "_versions"), exist_ok=True)
+                    os.makedirs(os.path.join(os.path.dirname(selected_path), "_published"), exist_ok=True)
+                    
+                    if host.comp.Save(selected_path):
+                        host._store_ramses_metadata(shot_data["shot"], selected_step)
+                        host.save(comment="Initial creation", setupFile=True, state=self.ramses.state("WIP"))
                         self.refresh_header(force_full=True)
-                        self.log(f"New shot initialized: {selected_path}", ram.LogLevel.Info)
                 else:
-                    # Let RamHost handle the open/prompt logic (handles dirty checks internally)
                     if host.open(shot_data["path"]):
                         self.refresh_header(force_full=True)
-                        self.log(f"Opened existing shot: {shot_data['path']}")
 
     @requires_connection
     def on_import(self, ev: object) -> None:
-        """Handler for 'Import' button.
-
-        Opens the host's import dialog to bring external files into the composition.
-
-        Args:
-            ev: The event object (unused).
-        """
+        """Handler for 'Import' button."""
         if self.ramses.host.importItem():
             self.refresh_header()
 
     @requires_connection
     def on_replace(self, ev: object) -> None:
-        """Handler for 'Replace' button.
-
-        Replaces the source file of the currently selected Loader node.
-
-        Args:
-            ev: The event object (unused).
-        """
+        """Handler for 'Replace' button."""
+        # Smart Update logic is handled inside host.replaceItem()
         if self.ramses.host.replaceItem():
             self.refresh_header()
 
@@ -2155,71 +1936,64 @@ class RamsesFusionApp:
 
     @requires_connection
     def on_comment(self, ev: object) -> None:
-        """Handler for 'Add Note && Save' button.
-
-        Shows a dialog to add a descriptive note to the current version in the Ramses DB.
-        Includes an option to perform an incremental save.
-
-        Args:
-            ev: The event object (unused).
-        """
+        """Handler for 'Add Note && Save' button."""
         host = self.ramses.host
         status = host.currentStatus()
         current_note = status.comment() if status else ""
         state = status.state() if status else None
+        current_version = host.currentVersion()
 
-        res = host._request_input(
-            "Add Note && Save",
-            [
-                {
-                    "id": "Comment",
-                    "label": "Note:",
-                    "type": "text",
-                    "default": current_note,
-                    "lines": 5,
-                },
-                {
-                    "id": "Incremental",
-                    "label": "Save as New Version:",
-                    "type": "checkbox",
-                    "default": False,
-                },
-            ],
-        )
+        if not qw:
+            # Fallback to UIManager remains the same as it handles both
+            res = host._request_input(
+                "Add Note && Save",
+                [
+                    {
+                        "id": "Comment",
+                        "label": "Note:",
+                        "type": "text",
+                        "default": current_note,
+                        "lines": 5,
+                    },
+                    {
+                        "id": "Incremental",
+                        "label": "Save as New Version:",
+                        "type": "checkbox",
+                        "default": False,
+                    },
+                ],
+            )
 
-        if res is not None:
-            comment_changed = res["Comment"] != current_note
-            is_incremental = res["Incremental"]
+            if res is not None:
+                comment_changed = res["Comment"] != current_note
+                is_incremental = res["Incremental"]
 
-            # Proceed if note changed OR if user explicitly asked for a new version
-            if comment_changed or is_incremental:
+                if comment_changed or is_incremental:
+                    has_project = self.ramses.project() is not None
+                    if host.save(comment=res["Comment"], setupFile=has_project, incremental=is_incremental, state=state):
+                        if status:
+                            status.setComment(res["Comment"])
+                            status.setVersion(host.currentVersion())
+                        self.refresh_header()
+            return
+
+        # Correct API usage: (version:int, comment:str)
+        dialog = self._run_pyside_dialog(RamCommentDialog, current_version, current_note)
+        if dialog:
+            res_comment = dialog.comment()
+            
+            if res_comment != current_note:
                 has_project = self.ramses.project() is not None
-
-                if host.save(
-                    comment=res["Comment"],
-                    setupFile=has_project,
-                    incremental=is_incremental,
-                    state=state,
-                ):
-                    # 1. Update Database Status
+                # Use standard save (non-incremental) as the standard dialog doesn't have an increment toggle
+                if host.save(comment=res_comment, setupFile=has_project, incremental=False, state=state):
                     if status:
-                        status.setComment(res["Comment"])
-                        # If incremental, the host has updated the version number on disk
-                        status.setVersion(host.currentVersion())
-
+                        status.setComment(res_comment)
+                        # We don't update version here because it was a simple save-over
                     self.refresh_header()
 
     @requires_connection
     def on_update_status(self, ev: object) -> None:
-        """Handler for 'Update / Publish' button.
-
-        Validates the scene, then opens the Status Update dialog.
-        Handles the atomic publish + synchronized status/note update logic,
-        ensuring disk filenames match the database state.
-
-        Args:
-            ev: The event object (unused).
-        """
+        """Handler for 'Update / Publish' button."""
         if not self._handle_validation(check_preview=False, check_final=True):
             return
 
@@ -2678,6 +2452,12 @@ class RamsesFusionApp:
 
         return result[0]
 
+    def on_check_update(self, ev: object) -> None:
+        """Handler for 'Check for Update' button."""
+        update_info = self.ramses.host.checkAddOnUpdate()
+        if update_info:
+            self._run_pyside_dialog(RamUpdateDialog, update_info, self.ramses.host.name, self.ramses.host.version)
+
     @requires_connection
     def on_save_template(self, ev: object) -> None:
         """Handler for 'Save as Template' button.
@@ -2724,14 +2504,8 @@ class RamsesFusionApp:
             self.log(f"Template '{name}' saved to {path}", ram.LogLevel.Info)
 
     @requires_connection
-    def on_setup_scene(self, ev: object) -> None:
-        """Handler for 'Setup Scene' button.
-
-        Re-applies project settings (resolution, framerate) to the current composition.
-
-        Args:
-            ev: The event object (unused).
-        """
+    def on_sync(self, ev: object) -> None:
+        """Handler for 'Sync Settings' button."""
         item = self.current_item
         step = self.current_step
 
@@ -2751,13 +2525,7 @@ class RamsesFusionApp:
 
     @requires_connection
     def on_retrieve(self, ev: object) -> None:
-        """Handler for 'Retrieve Version' button.
-
-        Allows the user to rollback to a previous version of the composition.
-
-        Args:
-            ev: The event object (unused).
-        """
+        """Handler for 'Version History / Restore'."""
         if self.ramses.host.restoreVersion():
             self.refresh_header()
 

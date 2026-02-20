@@ -236,10 +236,13 @@ class RamImportDialog(RamDialog):
         )
 
     @qc.Slot()
-    def __changeItem(self, item:RamItem=None):
+    def __changeItem(self, item=None):
 
-        if not item:
+        # Ensure we have the actual item, not a step passed by a signal
+        from ramses import RamItem
+        if not isinstance(item, RamItem):
             item = self.itemSelector.currentItem()
+        
         print("===========")
         print(item)
 
@@ -306,13 +309,17 @@ class RamImportDialog(RamDialog):
             if not nm.setFileName(fileName):
                 continue
             resource = nm.resource
-            if resource == "" or nm.isBackup:
+            if nm.isBackup:
                 continue
             if len(self.__openExtensions) > 0 and not nm.extension in self.__openExtensions:
                 continue
             if len(self.__hideExtensions) > 0 and nm.extension in self.__hideExtensions:
                 continue
-            title = resource + " (" + nm.extension + ")"
+            
+            # Main files have empty resource strings. 
+            # We display them as "Main" to be consistent with the Ramses UI.
+            title = resource if resource != "" else "Main"
+            title = title + " (" + nm.extension + ")"
             item = qw.QListWidgetItem( title )
             item.setData(qc.Qt.UserRole, f)
             item.setToolTip(fileName)

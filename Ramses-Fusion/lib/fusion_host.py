@@ -30,8 +30,17 @@ from asset_browser import AssetBrowser
 # APPLY RUNTIME PATCHES
 # =============================================================================
 try:
-    import ramses_patches
+    from PySide2 import QtWidgets as qw
+    from PySide2 import QtCore as qc
+except ImportError:
+    try:
+        from PySide6 import QtWidgets as qw
+        from PySide6 import QtCore as qc
+    except ImportError:
+        qw = None
 
+try:
+    import ramses_patches
     ramses_patches.apply()
 except ImportError:
     print(
@@ -867,6 +876,19 @@ class FusionHost(RamHost):
             return False
         return self.comp.SetAttrs({"COMPS_FileName": self.normalizePath(fileName)})
 
+    def _store_ramses_metadata(self, item: RamItem, step: RamStep = None) -> None:
+        """Stores Ramses identity within the Fusion composition metadata."""
+        if not self.comp:
+            return
+
+        self.comp.SetData("Ramses.ItemUUID", str(item.uuid()))
+        if item.project():
+            self.comp.SetData("Ramses.ProjectUUID", str(item.project().uuid()))
+        if step:
+            self.comp.SetData("Ramses.StepUUID", str(step.uuid()))
+        
+        self._log(f"Stored Ramses Identity: {item.shortName()}", LogLevel.Debug)
+
     def save(
         self,
         incremental: bool = False,
@@ -1272,37 +1294,128 @@ class FusionHost(RamHost):
             self.comp.EndUndo(success)  # Commit if successful, discard if failed
 
     def _importUI(self, item: RamItem, step: RamStep) -> dict:
-        """Shows the Ramses Asset Browser for importing.
+        """Shows the Ramses Asset Browser for importing."""
+        if hasattr(self, 'app') and self.app and hasattr(self.app, 'qt_app') and self.app.qt_app:
+            try:
+                from ramses_ui_pyside.import_dialog import RamImportDialog
+                dialog = self.app._run_pyside_dialog(RamImportDialog, 
+                    openExtensions=["exr", "jpg", "png", "dpx", "mov", "mp4", "mxf", "tif", "tiff"]
+                )
+                if dialog:
+                    return {"filePaths": dialog.filePaths(), "item": dialog.currentItem(), "step": dialog.currentStep()}
+                return None
+            except ImportError:
+                pass
 
-        Args:
-            item (RamItem): Context item.
-            step (RamStep): Context step.
-
-        Returns:
-            dict: {'filePaths': [path]} or empty dict if cancelled.
-        """
-        # Use the smart browser if we have the App reference (for UI)
-        if hasattr(self, "app") and self.app:
+        # Fallback to UIManager browser or native file picker
+        if hasattr(self, 'app') and self.app:
+            from asset_browser import AssetBrowser
             browser = AssetBrowser(self, self.app.ui, self.app.disp)
             path = browser.show()
             if path:
                 return {"filePaths": [path]}
             return {}
 
-        # Fallback to native file picker
         path = self.fusion.RequestFile()
         return {"filePaths": [path]} if path else {}
 
     def _openUI(self, item: RamItem = None, step: RamStep = None) -> dict:
-        """Shows the native Fusion file request dialog for opening a composition.
+        """Shows the Ramses Open Dialog for opening or creating a composition."""
+        # Use our app's run method if PySide is available
+        if qw and hasattr(self, "app") and self.app:
+            try:
+                from ramses_ui_pyside.open_dialog import RamOpenDialog
 
-        Args:
-            item (RamItem, optional): Context item.
-            step (RamStep, optional): Context step.
+                dialog = RamOpenDialog(["comp"])
+                
+                # --- Pre-set Defaults ---
+                project = RAMSES.project()
+                if project:
+                    # If we are in Fusion, default to Comp, 
+                    # but if we came from an empty scene, try Matchmove if that's the context
+                    comp_step = project.step("Comp") or project.step("Compositing")
+                    if comp_step:
+                        dialog.setCurrentStep(comp_step)
 
-        Returns:
-            dict: {'filePath': path} or empty dict if cancelled.
-        """
+                # Ensure foreground
+                dialog.setWindowFlags(dialog.windowFlags() | qc.Qt.WindowStaysOnTopHint)
+                dialog.raise_()
+                dialog.activateWindow()
+
+                if getattr(dialog, 'exec', None):
+                    res = dialog.exec()
+                else:
+                    res = dialog.exec_()
+
+                if not res:
+                    return None
+
+                path = dialog.filePath()
+                item = dialog.currentItem()
+                step = dialog.currentStep()
+
+                # If path exists, return it for standard opening
+                if path and os.path.exists(path):
+                    return {
+                        "filePath": path,
+                        "item": item,
+                        "step": step,
+                    }
+                
+                # If path DOES NOT exist, but Item and Step are valid, offer to create
+                if item and step:
+                    res = qw.QMessageBox.question(None, "New Fusion Composition", 
+                        f"No composition found for {item.shortName()}.\nDo you want to create a new one?",
+                        qw.QMessageBox.Yes | qw.QMessageBox.No)
+                    
+                    if res == qw.QMessageBox.Yes:
+                        # Establish directories
+                        expected_path, _ = self.app._resolve_shot_path(item, step)
+                        selected_path = self.normalizePath(expected_path)
+
+                        os.makedirs(os.path.dirname(selected_path), exist_ok=True)
+                        os.makedirs(os.path.join(os.path.dirname(selected_path), "_versions"), exist_ok=True)
+                        os.makedirs(os.path.join(os.path.dirname(selected_path), "_published"), exist_ok=True)
+
+                        # Template logic
+                        use_template = None
+                        tpl_folder = step.templatesFolderPath()
+                        if tpl_folder and os.path.isdir(tpl_folder):
+                            template_files = [f for f in os.listdir(tpl_folder) if f.endswith(".comp")]
+                            if template_files:
+                                opts = {str(i): f for i, f in enumerate(template_files)}
+                                opts[str(len(template_files))] = "None - Empty Composition"
+                                tpl_res = self._request_input("Select Template", [
+                                    {"id": "Tpl", "label": "Template:", "type": "combo", "options": opts, "default": 0}
+                                ])
+                                if tpl_res:
+                                    idx = int(tpl_res["Tpl"])
+                                    if idx < len(template_files):
+                                        use_template = os.path.join(tpl_folder, template_files[idx])
+                                    else:
+                                        self.fusion.NewComp()
+                                else: return None
+                            else: self.fusion.NewComp()
+                        else: self.fusion.NewComp()
+
+                        if use_template:
+                            if not self._open(use_template, None, None): 
+                                return None
+
+                        # Save and return new path
+                        if self.comp.Save(selected_path):
+                            self._store_ramses_metadata(item, step)
+                            return {
+                                "filePath": selected_path,
+                                "item": item,
+                                "step": step,
+                            }
+                
+                return None
+            except ImportError:
+                pass
+
+        # Fallback to native file picker
         path = self.fusion.RequestFile()
         return {"filePath": path} if path else {}
 
@@ -1847,29 +1960,48 @@ class FusionHost(RamHost):
             self.comp.EndUndo(success)  # Commit if successful, discard if failed
 
     def _replaceUI(self, item: RamItem, step: RamStep) -> dict:
-        """Shows the native Fusion file request dialog for replacing.
+        """Shows the Ramses Asset Browser for replacing."""
+        if hasattr(self, 'app') and self.app and hasattr(self.app, 'qt_app') and self.app.qt_app:
+            try:
+                from ramses_ui_pyside.import_dialog import RamImportDialog
+                dialog = RamImportDialog(openExtensions=["exr", "jpg", "png", "dpx", "mov", "mp4", "mxf", "tif", "tiff"])
+                dialog.setSingleSelection(True)
 
-        Args:
-            item (RamItem): Context item.
-            step (RamStep): Context step.
+                dialog.setWindowFlags(dialog.windowFlags() | qc.Qt.WindowStaysOnTopHint)
+                dialog.raise_()
+                dialog.activateWindow()
 
-        Returns:
-            dict: {'filePaths': [path]} or empty dict if cancelled.
-        """
+                if getattr(dialog, 'exec', None):
+                    res = dialog.exec()
+                else:
+                    res = dialog.exec_()
+
+                if res:
+                    return {"filePaths": dialog.filePaths(), "item": dialog.currentItem(), "step": dialog.currentStep()}
+                return None
+            except ImportError:
+                pass
+
+        # Fallback
         res = self._openUI(item, step)
         if res:
             return {"filePaths": [res["filePath"]]}
         return {}
 
     def _restoreVersionUI(self, versionFiles: list) -> str:
-        """Shows a UI to select a version to restore.
+        """Shows a UI to select a version to restore."""
+        if hasattr(self, "app") and self.app and hasattr(self.app, "qt_app") and self.app.qt_app:
+            try:
+                from ramses_ui_pyside.versions_dialog import RamVersionDialog
 
-        Args:
-            versionFiles (list): List of file paths to previous versions.
+                dialog = self.app._run_pyside_dialog(RamVersionDialog, versionFiles)
+                if dialog:
+                    return dialog.currentFilePath()
+                return ""
+            except ImportError:
+                pass
 
-        Returns:
-            str: The selected file path, or empty string if cancelled.
-        """
+        # Fallback to UIManager request_input
         if not versionFiles:
             return ""
 
@@ -1895,13 +2027,42 @@ class FusionHost(RamHost):
         return versionFiles[res["Idx"]] if res else ""
 
     def _saveAsUI(self) -> dict:
-        """Shows the native Fusion file request dialog for 'Save As'.
+        """Shows the native Fusion file request dialog for 'Save As'."""
+        if hasattr(self, 'app') and self.app and hasattr(self.app, 'qt_app') and self.app.qt_app:
+            try:
+                from ramses_ui_pyside.save_as_dialog import RamSaveAsDialog
+                file_types = [{"extension": "comp", "name": "Fusion Composition"}]
+                dialog = RamSaveAsDialog(file_types)
 
-        Parsing the selected path to reconstruct Ramses Item/Step context.
+                # Pre-set Defaults before showing
+                project = RAMSES.project()
+                if project:
+                    dialog.setShot()
+                    comp_step = project.step("Comp") or project.step("Compositing") or self.currentStep()
+                    if comp_step:
+                        dialog.setStep(comp_step)
 
-        Returns:
-            dict: Dictionary with 'item', 'step', 'extension', 'resource', or None if cancelled.
-        """
+                dialog.setWindowFlags(dialog.windowFlags() | qc.Qt.WindowStaysOnTopHint)
+                dialog.raise_()
+                dialog.activateWindow()
+
+                if getattr(dialog, 'exec', None):
+                    res = dialog.exec()
+                else:
+                    res = dialog.exec_()
+
+                if res:
+                    return {
+                        "item": dialog.item(),
+                        "step": dialog.step(),
+                        "extension": dialog.extension(),
+                        "resource": dialog.resource()
+                    }
+                return None
+            except ImportError:
+                pass
+
+        # Fallback
         path = self.fusion.RequestFile()
         if not path:
             return None
@@ -2162,15 +2323,26 @@ class FusionHost(RamHost):
             comp.Unlock()
 
     def _statusUI(self, currentStatus: RamStatus = None) -> dict:
-        """Shows the dialog to update status, note, and publish settings.
+        """Shows the dialog to update status, note, and publish settings."""
+        if hasattr(self, "app") and self.app and hasattr(self.app, "qt_app") and self.app.qt_app:
+            try:
+                from ramses_ui_pyside.status_dialog import RamStatusDialog
 
-        Args:
-            currentStatus (RamStatus, optional): The current status object.
+                dialog = self.app._run_pyside_dialog(RamStatusDialog, currentStatus)
+                if dialog:
+                    return {
+                        "note": dialog.comment(),
+                        "completionRatio": dialog.completionRatio(),
+                        "publish": dialog.publish(),
+                        "state": dialog.state(),
+                        "showPublishUI": dialog.showPublishSettings(),
+                        "savePreview": dialog.savePreview(),
+                    }
+                return None
+            except ImportError:
+                pass
 
-        Returns:
-            dict: Dictionary with keys 'note', 'completionRatio', 'publish', 'state', 'showPublishUI', 'savePreview'.
-                  Returns None if cancelled.
-        """
+        # Fallback to UIManager request_input
         states = RAMSES.states()
         if not states:
             return None
