@@ -1327,15 +1327,19 @@ class FusionHost(RamHost):
                 from ramses_ui_pyside.open_dialog import RamOpenDialog
 
                 dialog = RamOpenDialog(["comp"])
-                
+
                 # --- Pre-set Defaults ---
-                project = RAMSES.project()
-                if project:
-                    # If we are in Fusion, default to Comp, 
-                    # but if we came from an empty scene, try Matchmove if that's the context
-                    comp_step = project.step("Comp") or project.step("Compositing")
-                    if comp_step:
-                        dialog.setCurrentStep(comp_step)
+                # Prefer the passed context; fall back to Comp/Compositing for empty scenes
+                if step:
+                    dialog.setCurrentStep(step)
+                else:
+                    project = RAMSES.project()
+                    if project:
+                        comp_step = project.step("Comp") or project.step("Compositing")
+                        if comp_step:
+                            dialog.setCurrentStep(comp_step)
+                if item:
+                    dialog.setCurrentItem(item)
 
                 # Ensure foreground
                 dialog.setWindowFlags(dialog.windowFlags() | qc.Qt.WindowStaysOnTopHint)
@@ -2035,12 +2039,28 @@ class FusionHost(RamHost):
                 dialog = RamSaveAsDialog(file_types)
 
                 # Pre-set Defaults before showing
-                project = RAMSES.project()
-                if project:
+                from ramses import ItemType
+                current_item = self.currentItem()
+                current_step = self.currentStep()
+                if current_item:
+                    item_type = current_item.itemType()
+                    if item_type == ItemType.ASSET:
+                        dialog.setAsset()
+                    elif item_type == ItemType.GENERAL:
+                        dialog.setGeneral()
+                    else:
+                        dialog.setShot()
+                    dialog.setItem(current_item)
+                else:
                     dialog.setShot()
-                    comp_step = project.step("Comp") or project.step("Compositing") or self.currentStep()
-                    if comp_step:
-                        dialog.setStep(comp_step)
+                if current_step:
+                    dialog.setStep(current_step)
+                else:
+                    project = RAMSES.project()
+                    if project:
+                        comp_step = project.step("Comp") or project.step("Compositing")
+                        if comp_step:
+                            dialog.setStep(comp_step)
 
                 dialog.setWindowFlags(dialog.windowFlags() | qc.Qt.WindowStaysOnTopHint)
                 dialog.raise_()
