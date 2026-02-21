@@ -128,6 +128,7 @@ class MockComp:
         self.CurrentFrame = MockFrame()
         self.locked = False
         self._modified = False
+        self.Paste = MagicMock()
 
     @property
     def Modified(self):
@@ -220,6 +221,10 @@ class MockComp:
     def Unlock(self):
         self.locked = False
 
+    def Paste(self, content):
+        """Mock pasting nodes."""
+        pass
+
     def StartUndo(self, name):
         """Mock undo group start."""
         pass
@@ -260,6 +265,7 @@ class MockFusion:
     def __init__(self):
         self._comp = MockComp()
         self.UIManager = MockUIManager()
+        self.ReadFile = MagicMock(return_value="FAKE_NODES_CONTENT")
 
     def GetCurrentComp(self):
         return self._comp
@@ -271,6 +277,10 @@ class MockFusion:
         # Simulate opening
         self._comp.attrs["COMPS_FileName"] = path.replace("\\", "/")
         return self._comp
+        
+    def Merge(self, path):
+        """Mock merging a file."""
+        pass
         
     def RequestFile(self):
         return "D:/Requested/File.comp"

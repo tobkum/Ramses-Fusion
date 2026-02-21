@@ -1233,6 +1233,25 @@ class FusionHost(RamHost):
                 target_x = start_x + i
                 target_y = start_y
 
+                normalized_path = self.normalizePath(path)
+
+                # Special Case: .comp files (e.g. tracking data from SynthEyes)
+                # We merge these into the current composition instead of creating a Loader.
+                if normalized_path.lower().endswith(".comp"):
+                    try:
+                        # Use the "Read & Paste" strategy to bypass Fusion's Merge node conflict.
+                        # bmd.readfile() reads the .comp as a clip string; comp.Paste() inserts it.
+                        content = bmd.readfile(normalized_path)
+                        if content:
+                            self.comp.Paste(content)
+                            self.log(f"Merged nodes from composition: {normalized_path}", LogLevel.Info)
+                            continue # Proceed to next file, skip Loader logic
+                        else:
+                            self.log(f"Could not read content from: {normalized_path}", LogLevel.Error)
+                    except Exception as e:
+                        self.log(f"Failed to merge comp {normalized_path}: {e}", LogLevel.Error)
+                        # Fallback: continue to try creating a loader
+
                 loader = self.comp.AddTool("Loader", target_x, target_y)
                 if not loader:
                     self.log(
@@ -1242,7 +1261,6 @@ class FusionHost(RamHost):
                     continue
                 if loader:
                     # Explicitly set the clip path with forward slashes for cross-platform safety
-                    normalized_path = self.normalizePath(path)
                     loader.Clip[1] = normalized_path
 
                     # Store Ramses metadata on Loader node
@@ -1305,7 +1323,7 @@ class FusionHost(RamHost):
             try:
                 from ramses_ui_pyside.import_dialog import RamImportDialog
                 dialog = self.app._run_pyside_dialog(RamImportDialog, 
-                    openExtensions=["exr", "jpg", "png", "dpx", "mov", "mp4", "mxf", "tif", "tiff"]
+                    openExtensions=["exr", "jpg", "png", "dpx", "mov", "mp4", "mxf", "tif", "tiff", "comp"]
                 )
                 if dialog:
                     return {"filePaths": dialog.filePaths(), "item": dialog.currentItem(), "step": dialog.currentStep()}
@@ -1332,10 +1350,10 @@ class FusionHost(RamHost):
             try:
                 from ramses_ui_pyside.open_dialog import RamOpenDialog
 
+                # We allow browsing any .comp file in the pipeline
                 dialog = RamOpenDialog(["comp"])
 
                 # --- Pre-set Defaults ---
-                # Prefer the passed context; fall back to Comp/Compositing for empty scenes
                 if step:
                     dialog.setCurrentStep(step)
                 else:
@@ -1364,8 +1382,39 @@ class FusionHost(RamHost):
                 item = dialog.currentItem()
                 step = dialog.currentStep()
 
-                # If path exists, return it for standard opening
+                # If path exists, determine if we OPEN or MERGE
                 if path and os.path.exists(path):
+                    # If the selected step is NOT a Fusion step (e.g. MaMo), 
+                    # or if the user is already in a valid composition, 
+                    # we should offer to MERGE instead of OPEN.
+                    is_fusion = self.isFusionStep(step)
+                    current_path = self.currentFilePath()
+                    
+                    if current_path and not is_fusion:
+                        # User selected a non-Fusion step comp (like Tracking) while having a comp open
+                        step_label = step.name() if step else os.path.basename(path)
+                        reply = qw.QMessageBox.question(None, "Merge Composition?",
+                            f"The selected file from '{step_label}' is not a standard Fusion step.\n\n"
+                            "Do you want to MERGE its nodes into your current composition instead of opening it?",
+                            qw.QMessageBox.Yes | qw.QMessageBox.No | qw.QMessageBox.Cancel)
+
+                        if reply == qw.QMessageBox.Cancel:
+                            return None
+
+                        if reply == qw.QMessageBox.Yes:
+                            # bmd.readfile() reads the .comp as a clip string; comp.Paste() inserts it.
+                            content = bmd.readfile(self.normalizePath(path))
+                            if content:
+                                self.comp.Paste(content)
+                                self.log(f"Merged nodes from: {path}", LogLevel.Info)
+                            # Return current context so host.open() logic continues smoothly 
+                            # without trying to LoadComp over our work.
+                            return {
+                                "filePath": current_path,
+                                "item": self.currentItem(),
+                                "step": self.currentStep(),
+                            }
+
                     return {
                         "filePath": path,
                         "item": item,

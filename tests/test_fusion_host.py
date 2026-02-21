@@ -1,7 +1,7 @@
 import sys
 import os
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, patch, ANY
 
 # --- 1. Setup Environment Mocks ---
 # We must mock modules that don't exist in standard Python but are expected by the plugin
@@ -965,6 +965,56 @@ class TestFusionUndoAndLocking(unittest.TestCase):
         self.assertIn("002", loader1.Clip[1])
         # Loader2 should remain unchanged
         self.assertIn("001", loader2.Clip[1])
+
+
+class TestFusionCompImport(unittest.TestCase):
+    """Tests for importing/merging .comp files into Fusion."""
+
+    def setUp(self):
+        self.mock_fusion = MockFusion()
+        import fusion_host
+        fusion_host.bmd = sys.modules["bmd"]
+        fusion_host.fusionscript = sys.modules["fusionscript"]
+        self.host = FusionHost(self.mock_fusion)
+
+    def test_import_comp_merges_instead_of_loading(self):
+        """Verify that .comp files trigger Read & Paste instead of AddTool(Loader)."""
+        comp = self.mock_fusion.GetCurrentComp()
+        self.mock_fusion.ReadFile = MagicMock(return_value="FAKE_CONTENT")
+        comp.Paste = MagicMock()
+        comp.AddTool = MagicMock(return_value=MagicMock())
+
+        files = ["D:/MaMo/tracking_v001.comp"]
+        
+        with patch("os.path.exists", return_value=True), \
+             patch("os.path.getmtime", return_value=123456789.0):
+            self.host._import(files, MagicMock(), MagicMock(), [], False)
+
+        # Should read the file and paste its content
+        self.mock_fusion.ReadFile.assert_called_once_with("D:/MaMo/tracking_v001.comp")
+        comp.Paste.assert_called_once_with("FAKE_CONTENT")
+
+        # AddTool should NOT be called
+        comp.AddTool.assert_not_called()
+
+    def test_import_mixed_media_and_comp(self):
+        """Verify handling of both media files and composition files in a single import."""
+        comp = self.mock_fusion.GetCurrentComp()
+        self.mock_fusion.ReadFile = MagicMock(return_value="FAKE_CONTENT")
+        comp.Paste = MagicMock()
+        comp.AddTool = MagicMock(return_value=MagicMock())
+
+        files = ["D:/Plate/shot_v001.exr", "D:/MaMo/tracking_v001.comp"]
+        
+        with patch("os.path.exists", return_value=True), \
+             patch("os.path.getmtime", return_value=123456789.0):
+            self.host._import(files, MagicMock(), MagicMock(), [], False)
+
+        # Paste should be called once for the .comp
+        comp.Paste.assert_called_once_with("FAKE_CONTENT")
+        
+        # AddTool should be called once for the .exr
+        comp.AddTool.assert_called_once_with("Loader", ANY, ANY)
 
 
 if __name__ == "__main__":

@@ -230,7 +230,17 @@ class RamOpenDialog(RamDialog):
         if not item:
             self.__check()
             return
-        files = item.stepFilePaths(step)
+        files = list(item.stepFilePaths(step))
+        
+        # Also include latest published files (e.g. tracking comps from SynthEyes)
+        try:
+            pub_files = item.latestPublishedVersionFilePaths(step=step)
+            for pf in pub_files:
+                if pf not in files:
+                    files.append(pf)
+        except Exception:
+            pass
+
         for file in files:
             nm = self.__validateFile(file)
             if not nm:
