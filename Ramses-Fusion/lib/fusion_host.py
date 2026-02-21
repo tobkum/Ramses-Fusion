@@ -1724,6 +1724,10 @@ class FusionHost(RamHost):
     def saveAs(self, setupFile: bool = True, state: RamState = None) -> bool:
         """Saves the current file as a new Item-Step.
 
+        If the current composition has no existing file (new/empty comp), redirects
+        through _createNewComp() so the user can choose a template before saving.
+        If the comp already has content, saves it as-is to the new pipeline path.
+
         Args:
             setupFile (bool): Whether to apply project settings.
             state (RamState, optional): Target state for the initial version.
@@ -1731,13 +1735,26 @@ class FusionHost(RamHost):
         Returns:
             bool: True on success.
         """
-        # Call base saveAs - it handles the _saveAsUI call correctly.
+        # New/unsaved comp — offer template selection before establishing identity.
+        if not self.currentFilePath():
+            save_item = self._saveAsUI()
+            if not save_item:
+                return False
+            item = save_item.get("item")
+            step = save_item.get("step")
+            if not item or not step:
+                return False
+            new_path = self._createNewComp(item, step)
+            if not new_path:
+                return False
+            if state:
+                self.save(incremental=False, state=state, setupFile=False)
+            return True
+
+        # Existing comp — save current content to a new pipeline path.
         success = super().saveAs(setupFile=setupFile)
-
         if success and state:
-            # Force a correctly named version immediately
             self.save(incremental=False, state=state, setupFile=False)
-
         return success
 
     def updateStatus(
