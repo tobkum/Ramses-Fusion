@@ -512,7 +512,7 @@ class RamsesFusionApp:
         Returns:
             str: HTML formatted string.
         """
-        return f"<font color='#555'>User: {self._get_user_name()} | Ramses API {self.settings.version}</font>"
+        return f"<font color='#555'>User: {self._get_user_name()} | Ramses v{self.ramses.host.version}</font>"
 
     def _build_file_info(
         self, item_type: int, step: ram.RamStep, short_name: str, extension: str
