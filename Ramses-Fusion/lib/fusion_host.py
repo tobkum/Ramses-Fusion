@@ -1382,94 +1382,77 @@ class FusionHost(RamHost):
                 item = dialog.currentItem()
                 step = dialog.currentStep()
 
-                # If path exists, determine if we OPEN or MERGE
+                # If path exists: check whether it belongs to a Fusion step
                 if path and os.path.exists(path):
-                    # If the selected step is NOT a Fusion step (e.g. MaMo), 
-                    # or if the user is already in a valid composition, 
-                    # we should offer to MERGE instead of OPEN.
                     is_fusion = self.isFusionStep(step)
-                    current_path = self.currentFilePath()
-                    
-                    if current_path and not is_fusion:
-                        # User selected a non-Fusion step comp (like Tracking) while having a comp open
-                        step_label = step.name() if step else os.path.basename(path)
-                        reply = qw.QMessageBox.question(None, "Merge Composition?",
-                            f"The selected file from '{step_label}' is not a standard Fusion step.\n\n"
-                            "Do you want to MERGE its nodes into your current composition instead of opening it?",
-                            qw.QMessageBox.Yes | qw.QMessageBox.No | qw.QMessageBox.Cancel)
 
-                        if reply == qw.QMessageBox.Cancel:
+                    if not is_fusion:
+                        # File is from a foreign/previous pipeline step — never open
+                        # it for direct editing. Create a new Comp-step composition
+                        # and merge the foreign content into it.
+                        step_label = step.name() if step else os.path.basename(path)
+                        item_label = item.shortName() if item else ""
+
+                        project = item.project() if item else RAMSES.project()
+                        comp_step = None
+                        if project:
+                            comp_step = (
+                                project.step("Comp") or project.step("Compositing")
+                            )
+                        comp_step_label = comp_step.name() if comp_step else "a Fusion step"
+
+                        reply = qw.QMessageBox.question(
+                            None,
+                            "Create New Composition",
+                            f"The selected file is from <b>{step_label}</b>, "
+                            f"which is not a Fusion composition step.<br><br>"
+                            f"A new Fusion composition will be created for "
+                            f"<b>{item_label}</b> at <b>{comp_step_label}</b> "
+                            f"and the content will be merged into it.",
+                            qw.QMessageBox.Ok | qw.QMessageBox.Cancel,
+                        )
+                        if reply != qw.QMessageBox.Ok:
                             return None
 
-                        if reply == qw.QMessageBox.Yes:
-                            # bmd.readfile() reads the .comp as a clip string; comp.Paste() inserts it.
-                            content = bmd.readfile(self.normalizePath(path))
-                            if content:
-                                self.comp.Paste(content)
-                                self.log(f"Merged nodes from: {path}", LogLevel.Info)
-                            # Return current context so host.open() logic continues smoothly 
-                            # without trying to LoadComp over our work.
-                            return {
-                                "filePath": current_path,
-                                "item": self.currentItem(),
-                                "step": self.currentStep(),
-                            }
-
-                    return {
-                        "filePath": path,
-                        "item": item,
-                        "step": step,
-                    }
-                
-                # If path DOES NOT exist, but Item and Step are valid, offer to create
-                if item and step:
-                    res = qw.QMessageBox.question(None, "New Fusion Composition", 
-                        f"No composition found for {item.shortName()}.\nDo you want to create a new one?",
-                        qw.QMessageBox.Yes | qw.QMessageBox.No)
-                    
-                    if res == qw.QMessageBox.Yes:
-                        # Establish directories
-                        expected_path, _ = self.app._resolve_shot_path(item, step)
-                        selected_path = self.normalizePath(expected_path)
-
-                        os.makedirs(os.path.dirname(selected_path), exist_ok=True)
-                        os.makedirs(os.path.join(os.path.dirname(selected_path), "_versions"), exist_ok=True)
-                        os.makedirs(os.path.join(os.path.dirname(selected_path), "_published"), exist_ok=True)
-
-                        # Template logic
-                        use_template = None
-                        tpl_folder = step.templatesFolderPath()
-                        if tpl_folder and os.path.isdir(tpl_folder):
-                            template_files = [f for f in os.listdir(tpl_folder) if f.endswith(".comp")]
-                            if template_files:
-                                opts = {str(i): f for i, f in enumerate(template_files)}
-                                opts[str(len(template_files))] = "None - Empty Composition"
-                                tpl_res = self._request_input("Select Template", [
-                                    {"id": "Tpl", "label": "Template:", "type": "combo", "options": opts, "default": 0}
-                                ])
-                                if tpl_res:
-                                    idx = int(tpl_res["Tpl"])
-                                    if idx < len(template_files):
-                                        use_template = os.path.join(tpl_folder, template_files[idx])
-                                    else:
-                                        self.fusion.NewComp()
-                                else: return None
-                            else: self.fusion.NewComp()
-                        else: self.fusion.NewComp()
-
-                        if use_template:
-                            if not self._open(use_template, None, None): 
+                        # If no Comp step found, let the user pick via Save As dialog
+                        if not comp_step:
+                            save_item = self._saveAsUI()
+                            if not save_item:
+                                return None
+                            comp_step = save_item.get("step")
+                            item = save_item.get("item", item)
+                            if not comp_step:
                                 return None
 
-                        # Save and return new path
-                        if self.comp.Save(selected_path):
-                            self._store_ramses_metadata(item, step)
-                            return {
-                                "filePath": selected_path,
-                                "item": item,
-                                "step": step,
-                            }
-                
+                        new_path = self._createNewComp(item, comp_step)
+                        if not new_path:
+                            return None
+
+                        # bmd.readfile() reads the .comp as a clip string; comp.Paste() inserts it.
+                        content = bmd.readfile(self.normalizePath(path))
+                        if content:
+                            self.comp.Paste(content)
+                            self.log(f"Merged nodes from: {path}", LogLevel.Info)
+
+                        return {"filePath": new_path, "item": item, "step": comp_step}
+
+                    # Normal Fusion-step file — open directly
+                    return {"filePath": path, "item": item, "step": step}
+
+                # No file on disk yet — offer to create a new composition
+                if item and step:
+                    res = qw.QMessageBox.question(
+                        None,
+                        "New Fusion Composition",
+                        f"No composition found for {item.shortName()}.\n"
+                        "Do you want to create a new one?",
+                        qw.QMessageBox.Yes | qw.QMessageBox.No,
+                    )
+                    if res == qw.QMessageBox.Yes:
+                        new_path = self._createNewComp(item, step)
+                        if new_path:
+                            return {"filePath": new_path, "item": item, "step": step}
+
                 return None
             except ImportError:
                 pass
@@ -1477,6 +1460,59 @@ class FusionHost(RamHost):
         # Fallback to native file picker
         path = self.fusion.RequestFile()
         return {"filePath": path} if path else {}
+
+    def _createNewComp(self, item: RamItem, step: RamStep) -> str:
+        """Creates a new Fusion composition for item/step and saves it to the pipeline path.
+
+        Handles directory creation and optional template selection.
+
+        Returns:
+            str: The saved file path on success, or empty string on cancel/failure.
+        """
+        if not item or not step:
+            return ""
+
+        expected_path, _ = self.app._resolve_shot_path(item, step)
+        if not expected_path:
+            return ""
+        selected_path = self.normalizePath(expected_path)
+
+        os.makedirs(os.path.dirname(selected_path), exist_ok=True)
+        os.makedirs(os.path.join(os.path.dirname(selected_path), "_versions"), exist_ok=True)
+        os.makedirs(os.path.join(os.path.dirname(selected_path), "_published"), exist_ok=True)
+
+        use_template = None
+        tpl_folder = step.templatesFolderPath()
+        if tpl_folder and os.path.isdir(tpl_folder):
+            template_files = [f for f in os.listdir(tpl_folder) if f.endswith(".comp")]
+            if template_files:
+                opts = {str(i): f for i, f in enumerate(template_files)}
+                opts[str(len(template_files))] = "None - Empty Composition"
+                tpl_res = self._request_input("Select Template", [
+                    {"id": "Tpl", "label": "Template:", "type": "combo",
+                     "options": opts, "default": 0}
+                ])
+                if not tpl_res:
+                    return ""  # User cancelled template picker
+                idx = int(tpl_res["Tpl"])
+                if idx < len(template_files):
+                    use_template = os.path.join(tpl_folder, template_files[idx])
+                else:
+                    self.fusion.NewComp()
+            else:
+                self.fusion.NewComp()
+        else:
+            self.fusion.NewComp()
+
+        if use_template:
+            if not self._open(use_template, None, None):
+                return ""
+
+        if self.comp and self.comp.Save(selected_path):
+            self._store_ramses_metadata(item, step)
+            return selected_path
+
+        return ""
 
     def _preview(
         self,
