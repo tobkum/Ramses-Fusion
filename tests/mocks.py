@@ -265,7 +265,7 @@ class MockFusion:
     def __init__(self):
         self._comp = MockComp()
         self.UIManager = MockUIManager()
-        self.ReadFile = MagicMock(return_value="FAKE_NODES_CONTENT")
+        self.readfile = MagicMock(return_value="FAKE_NODES_CONTENT")
 
     def GetCurrentComp(self):
         return self._comp
