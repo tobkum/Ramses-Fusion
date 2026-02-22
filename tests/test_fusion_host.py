@@ -980,7 +980,8 @@ class TestFusionCompImport(unittest.TestCase):
     def test_import_comp_merges_instead_of_loading(self):
         """Verify that .comp files trigger Read & Paste instead of AddTool(Loader)."""
         comp = self.mock_fusion.GetCurrentComp()
-        self.mock_fusion.ReadFile = MagicMock(return_value="FAKE_CONTENT")
+        import fusion_host
+        fusion_host.bmd.readfile = MagicMock(return_value="FAKE_CONTENT")
         comp.Paste = MagicMock()
         comp.AddTool = MagicMock(return_value=MagicMock())
 
@@ -991,7 +992,7 @@ class TestFusionCompImport(unittest.TestCase):
             self.host._import(files, MagicMock(), MagicMock(), [], False)
 
         # Should read the file and paste its content
-        self.mock_fusion.ReadFile.assert_called_once_with("D:/MaMo/tracking_v001.comp")
+        fusion_host.bmd.readfile.assert_called_once_with("D:/MaMo/tracking_v001.comp")
         comp.Paste.assert_called_once_with("FAKE_CONTENT")
 
         # AddTool should NOT be called
@@ -1000,7 +1001,8 @@ class TestFusionCompImport(unittest.TestCase):
     def test_import_mixed_media_and_comp(self):
         """Verify handling of both media files and composition files in a single import."""
         comp = self.mock_fusion.GetCurrentComp()
-        self.mock_fusion.ReadFile = MagicMock(return_value="FAKE_CONTENT")
+        import fusion_host
+        fusion_host.bmd.readfile = MagicMock(return_value="FAKE_CONTENT")
         comp.Paste = MagicMock()
         comp.AddTool = MagicMock(return_value=MagicMock())
 
