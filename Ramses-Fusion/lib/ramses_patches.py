@@ -40,10 +40,13 @@ def apply():
 def _patch_fusion_config():
     """
     Fixes MEDIUM fragility in Fusion Lua parsing.
-    Hot-patches fusion_config._lua_to_dict if the module is loaded.
+    Hot-patches FusionConfig._lua_to_dict with the robust index-based parser.
     """
     if "fusion_config" in sys.modules:
-        sys.modules["fusion_config"]._lua_to_dict = _robust_lua_to_dict
+        fc_module = sys.modules["fusion_config"]
+        fc_class = getattr(fc_module, "FusionConfig", None)
+        if fc_class is not None:
+            fc_class._lua_to_dict = staticmethod(_robust_lua_to_dict)
 
 
 def _robust_lua_to_dict(lua_str):

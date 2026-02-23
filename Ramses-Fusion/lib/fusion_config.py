@@ -57,7 +57,10 @@ class FusionConfig:
             return None
 
         # 2. Parse the Lua Table into a Python Dictionary
-        inputs_data = FusionConfig._lua_to_dict(inputs_text)
+        try:
+            inputs_data = FusionConfig._lua_to_dict(inputs_text)
+        except ValueError:
+            return None
         
         config = {
             "format": "",
@@ -107,29 +110,42 @@ class FusionConfig:
     @staticmethod
     def _extract_block(text: str, start_index: int) -> str:
         """Extracts a balanced brace block starting at `start_index`.
-        
-        Iterates through the string to find the matching closing brace `}` 
+
+        Iterates through the string to find the matching closing brace `}`
         for the opening brace `{` found at or after `start_index`.
-        
+        Ignores braces that appear inside double-quoted string literals.
+
         Args:
             text (str): The source text.
             start_index (int): Index to start searching for the opening brace.
-            
+
         Returns:
             str: The content of the block including outer braces, or None if not found/balanced.
         """
         count = 0
         found_start = False
-        
-        for i in range(start_index, len(text)):
+        in_string = False
+        i = start_index
+        n = len(text)
+        while i < n:
             char = text[i]
-            if char == '{':
-                count += 1
-                found_start = True
-            elif char == '}':
-                count -= 1
-                if found_start and count == 0:
-                    return text[start_index:i+1]
+            if in_string:
+                if char == '\\' and i + 1 < n:
+                    i += 2  # skip escaped character
+                    continue
+                if char == '"':
+                    in_string = False
+            else:
+                if char == '"':
+                    in_string = True
+                elif char == '{':
+                    count += 1
+                    found_start = True
+                elif char == '}':
+                    count -= 1
+                    if found_start and count == 0:
+                        return text[start_index:i + 1]
+            i += 1
         return None
 
     @staticmethod
@@ -232,6 +248,8 @@ class FusionConfig:
         tokens = tokenize(lua_str)
         token_iter = iter(tokens)
         current_token = [next(token_iter, None)]
+        _depth = [0]
+        _MAX_DEPTH = 64  # Reject pathologically nested .comp files
 
         def next_tok():
             t = current_token[0]
@@ -240,7 +258,7 @@ class FusionConfig:
             except StopIteration:
                 current_token[0] = None
             return t
-            
+
         def peek():
             return current_token[0]
 
@@ -263,15 +281,11 @@ class FusionConfig:
 
                 # Unwrap specific Fusion types immediately for cleaner data
                 if val == 'FuID':
-                    # FuID { "Value" } -> returns "Value"
-                    # Usually FuID table is implicit array [1] = "Value" or just string inside?
-                    # The tokenizer sees: FuID, {, STR("Val"), }
-                    # parse_table returns {0: "Val"} or similar?
-                    # Fusion table: { "Val" } -> Python list/dict.
-                    # My parse_table returns list if indices are implicit.
+                    # FuID { "Value" } -> returns the string "Value"
                     if isinstance(struct_data, list) and len(struct_data) > 0:
-                        return struct_data[0]
-                    return struct_data # Fallback
+                        item = struct_data[0]
+                        return item if isinstance(item, str) else struct_data
+                    return struct_data  # Fallback
                     
                 if val == 'Number':
                     # Number { Value = 4 } -> returns 4
@@ -288,6 +302,11 @@ class FusionConfig:
             return val
 
         def parse_table():
+            _depth[0] += 1
+            if _depth[0] > _MAX_DEPTH:
+                raise ValueError(
+                    f"Lua table nesting exceeds {_MAX_DEPTH} levels — aborting parse."
+                )
             # Consume '{'
             next_tok()
             
@@ -298,6 +317,7 @@ class FusionConfig:
                 tok = peek()
                 if tok[0] == 'OP' and tok[1] == '}':
                     next_tok() # Consume '}'
+                    _depth[0] -= 1
                     # Return list if only implicit keys, else dict
                     if data_list and not data_dict:
                         return data_list
@@ -340,8 +360,11 @@ class FusionConfig:
                          
                          # Same unwrapping logic as parse_value
                          if struct_name == 'FuID':
-                             if isinstance(struct_data, list) and len(struct_data) > 0: val = struct_data[0]
-                             else: val = struct_data
+                             if isinstance(struct_data, list) and len(struct_data) > 0:
+                                 item = struct_data[0]
+                                 val = item if isinstance(item, str) else struct_data
+                             else:
+                                 val = struct_data
                          elif struct_name == 'Number':
                              if isinstance(struct_data, dict) and 'Value' in struct_data: val = struct_data['Value']
                              else: val = struct_data

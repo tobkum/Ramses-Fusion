@@ -129,28 +129,39 @@ class AssetBrowser:
         
         return results[0]
 
-    def resolve_upstream_source(self, shot, current_step):
-        """Recursively finds the first active upstream step."""
+    def resolve_upstream_source(self, shot, current_step, _visited=None):
+        """Recursively finds the first active upstream step.
+
+        _visited is a set of step UUIDs already on the current search path,
+        used to break cycles in pipeline graphs.
+        """
         if not current_step:
             return None
 
+        if _visited is None:
+            _visited = set()
+        step_uuid = current_step.uuid()
+        if step_uuid in _visited:
+            return None  # cycle detected — stop recursion
+        _visited.add(step_uuid)
+
         pipes = current_step.inputPipes()
         if not pipes:
-            return None # No upstream inputs
+            return None  # No upstream inputs
 
         for pipe in pipes:
             upstream = pipe.outputStep()
             status = shot.currentStatus(upstream)
-            
+
             is_skipped = False
             if status:
                 state_short = status.state().shortName().upper()
                 if state_short in self.SKIP_STATES:
                     is_skipped = True
-            
+
             if is_skipped:
                 # Recurse up
-                found = self.resolve_upstream_source(shot, upstream)
+                found = self.resolve_upstream_source(shot, upstream, _visited)
                 if found:
                     return found
             else:
@@ -160,10 +171,10 @@ class AssetBrowser:
                 if shot.publishedVersionFolderPaths(upstream):
                     return upstream
                 # No files — keep looking further upstream
-                found = self.resolve_upstream_source(shot, upstream)
+                found = self.resolve_upstream_source(shot, upstream, _visited)
                 if found:
                     return found
-                
+
         return None
 
     def populate_versions(self, step):
