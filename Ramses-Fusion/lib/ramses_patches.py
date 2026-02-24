@@ -51,96 +51,97 @@ def _patch_fusion_config():
 
 def _robust_lua_to_dict(lua_str):
     """
-    Robust parser for Fusion clipboard data (Lua tables).
-    Replaces fragile regex/tokenizer logic.
+    Robust mini-parser for Lua tables found in Fusion nodes.
+    Supports constructors, scientific notation, and Lua comments.
     """
-    lua_str = lua_str.strip()
-    if not (lua_str.startswith("{") and lua_str.endswith("}")):
-        return {}
+    def tokenize(s):
+        tokens = []
+        i, n = 0, len(s)
+        while i < n:
+            char = s[i]
+            if char.isspace(): i += 1; continue
+            if char == '-' and i + 1 < n and s[i+1] == '-':
+                j = s.find('\n', i + 2)
+                if j == -1: break
+                i = j + 1; continue
+            if char in '{}=,': tokens.append(('OP', char)); i += 1; continue
+            if char == '"':
+                j = i + 1
+                while j < n and s[j] != '"':
+                    if s[j] == '\\' and j + 1 < n: j += 2
+                    else: j += 1
+                tokens.append(('STR', s[i+1:j])); i = j + 1; continue
+            if char == '[':
+                j = s.find(']', i)
+                if j != -1:
+                    inner = s[i+1:j].strip()
+                    if inner.startswith('"') and inner.endswith('"'): inner = inner[1:-1]
+                    tokens.append(('KEY', inner)); i = j + 1; continue
+            j = i
+            while j < n and (s[j].isalnum() or s[j] in '._-'): j += 1
+            val = s[i:j]
+            if val == 'true': tokens.append(('BOOL', True))
+            elif val == 'false': tokens.append(('BOOL', False))
+            elif val == 'nil': tokens.append(('NIL', None))
+            else:
+                try:
+                    num = float(val)
+                    tokens.append(('NUM', int(num) if num.is_integer() and '.' not in val and 'e' not in val.lower() else num))
+                except ValueError: tokens.append(('ID', val))
+            i = j
+        return tokens
 
-    def parse_value(s, idx):
-        while idx < len(s) and s[idx].isspace():
-            idx += 1
-        if idx >= len(s):
-            return None, idx
+    tokens = tokenize(lua_str)
+    n_tokens = len(tokens)
+    _idx, _depth, _MAX_DEPTH = [0], [0], 64
 
-        char = s[idx]
-        if char in ('"', "'"):  # String
-            end = idx + 1
-            while end < len(s):
-                end = s.find(char, end)
-                if end == -1:
-                    return None, idx
-                if s[end - 1] != "\\":
-                    break
-                end += 1
-            return s[idx + 1 : end], end + 1
-        elif char == "{":  # Nested Table
-            return parse_table(s, idx)
-        else:  # Number/Bool/Identifier
-            end = idx
-            while end < len(s) and s[end] not in ",}=":
-                end += 1
-            val = s[idx:end].strip()
-            if val == "true":
-                return True, end
-            if val == "false":
-                return False, end
-            if val == "nil":
-                return None, end
+    def peek(offset=0):
+        pos = _idx[0] + offset
+        return tokens[pos] if pos < n_tokens else None
+
+    def next_tok():
+        t = peek()
+        if t: _idx[0] += 1
+        return t
+
+    def parse_value():
+        tok = peek()
+        if not tok: return None
+        type_, val = tok
+        if type_ == 'OP' and val == '{': return parse_table()
+        nxt = peek(1)
+        if type_ == 'ID' and nxt and nxt[0] == 'OP' and nxt[1] == '{':
+            func_name = val
+            next_tok()
+            struct_data = parse_table()
+            if func_name == 'FuID': return struct_data[0] if isinstance(struct_data, list) and struct_data else struct_data
+            if func_name == 'Number': return struct_data.get('Value', struct_data) if isinstance(struct_data, dict) else struct_data
+            return struct_data
+        next_tok()
+        return val
+
+    def parse_table():
+        _depth[0] += 1
+        if _depth[0] > _MAX_DEPTH: raise ValueError("Nesting too deep")
+        next_tok() # {
+        res_dict, res_list, implicit_idx = {}, [], 1
+        while peek():
+            if peek()[0] == 'OP' and peek()[1] == '}':
+                next_tok(); _depth[0] -= 1
+                return res_list if res_list and not res_dict else res_dict
+            is_assign = False
             try:
-                return (float(val) if "." in val else int(val)), end
-            except ValueError:
-                return val, end
+                nxt = peek(1)
+                if nxt and nxt[0] == 'OP' and nxt[1] == '=': is_assign = True
+            except (ValueError, IndexError): pass
+            if is_assign:
+                key_tok = next_tok()
+                next_tok() # =
+                res_dict[key_tok[1]] = parse_value()
+            else:
+                res_list.append(parse_value())
+            if peek() and peek()[0] == 'OP' and peek()[1] == ',': next_tok()
+        _depth[0] -= 1
+        return res_dict
 
-    def parse_table(s, idx):
-        idx += 1  # Skip {
-        result = {}
-        implicit_idx = 1
-        while idx < len(s):
-            while idx < len(s) and s[idx].isspace():
-                idx += 1
-            if idx >= len(s) or s[idx] == "}":
-                return result, idx + 1
-
-            # Detect key vs value
-            key = None
-            is_explicit = False
-
-            if s[idx] == "[":  # Bracketed key: [1] or ["Key"]
-                end_bracket = s.find("]", idx)
-                if end_bracket != -1:
-                    key_str = s[idx + 1 : end_bracket]
-                    key, _ = parse_value(key_str, 0)
-                    assign = end_bracket + 1
-                    while assign < len(s) and s[assign].isspace():
-                        assign += 1
-                    if assign < len(s) and s[assign] == "=":
-                        idx = assign + 1
-                        is_explicit = True
-
-            if not is_explicit:  # Identifier or Value
-                val, end_val = parse_value(s, idx)
-                check = end_val
-                while check < len(s) and s[check].isspace():
-                    check += 1
-                if check < len(s) and s[check] == "=":  # It was a key
-                    key = val
-                    idx = check + 1
-                    is_explicit = True
-                else:  # It was a value
-                    result[implicit_idx] = val
-                    implicit_idx += 1
-                    idx = end_val
-
-            if is_explicit:
-                val, idx = parse_value(s, idx)
-                result[key] = val
-
-            while idx < len(s) and (s[idx].isspace() or s[idx] == ","):
-                idx += 1
-
-        return result, idx
-
-    res, _ = parse_table(lua_str, 0)
-    return res
+    return parse_value()
