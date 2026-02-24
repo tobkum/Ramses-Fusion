@@ -57,7 +57,10 @@ class FusionConfig:
             return None
 
         # 2. Parse the Lua Table into a Python Dictionary
-        inputs_data = FusionConfig._lua_to_dict(inputs_text)
+        try:
+            inputs_data = FusionConfig._lua_to_dict(inputs_text)
+        except ValueError:
+            return None
         
         config = {
             "format": "",
@@ -107,29 +110,42 @@ class FusionConfig:
     @staticmethod
     def _extract_block(text: str, start_index: int) -> str:
         """Extracts a balanced brace block starting at `start_index`.
-        
-        Iterates through the string to find the matching closing brace `}` 
+
+        Iterates through the string to find the matching closing brace `}`
         for the opening brace `{` found at or after `start_index`.
-        
+        Ignores braces that appear inside double-quoted string literals.
+
         Args:
             text (str): The source text.
             start_index (int): Index to start searching for the opening brace.
-            
+
         Returns:
             str: The content of the block including outer braces, or None if not found/balanced.
         """
         count = 0
         found_start = False
-        
-        for i in range(start_index, len(text)):
+        in_string = False
+        i = start_index
+        n = len(text)
+        while i < n:
             char = text[i]
-            if char == '{':
-                count += 1
-                found_start = True
-            elif char == '}':
-                count -= 1
-                if found_start and count == 0:
-                    return text[start_index:i+1]
+            if in_string:
+                if char == '\\' and i + 1 < n:
+                    i += 2  # skip escaped character
+                    continue
+                if char == '"':
+                    in_string = False
+            else:
+                if char == '"':
+                    in_string = True
+                elif char == '{':
+                    count += 1
+                    found_start = True
+                elif char == '}':
+                    count -= 1
+                    if found_start and count == 0:
+                        return text[start_index:i + 1]
+            i += 1
         return None
 
     @staticmethod
@@ -137,230 +153,104 @@ class FusionConfig:
         """Robust mini-parser for Lua tables found in Fusion nodes.
         
         Parses a subset of Lua syntax commonly used in Fusion clipboard data.
-        Handles:
-        - Nested tables `{ ... }`
-        - Key-Value assignment `Key = Value`
-        - Implicit array indices `{ Val1, Val2 }`
-        - Primitive types (String, Number, Bool)
-        - Fusion-specific structures (`FuID { "Val" }`, `Number { Value = X }`) 
-          by unwrapping them into native Python types where appropriate.
-          
-        Args:
-            lua_str (str): The string content of a Lua table (e.g. `{ Key = ... }`).
-            
-        Returns:
-            dict: The parsed data structure.
+        Handles nested tables, constructors (FuID, Number, Input), primitives,
+        and scientific notation.
         """
-        
-        # Tokenizer
         def tokenize(s):
             tokens = []
-            i = 0
-            n = len(s)
+            i, n = 0, len(s)
             while i < n:
                 char = s[i]
-                
-                if char.isspace():
-                    i += 1
-                    continue
-                
+                if char.isspace(): i += 1; continue
                 # Comment skipping
-                if char == '-' and i+1 < n and s[i+1] == '-':
-                    # Skip until newline
-                    j = s.find('\n', i+2)
-                    if j == -1:
-                        break # End of string
-                    i = j + 1
-                    continue
-
-                if char in '{}=,':
-                    tokens.append(('OP', char))
-                    i += 1
-                    continue
-                
+                if char == '-' and i + 1 < n and s[i+1] == '-':
+                    j = s.find('\n', i + 2)
+                    if j == -1: break
+                    i = j + 1; continue
+                if char in '{}=,': tokens.append(('OP', char)); i += 1; continue
                 if char == '"':
-                    # String literal
                     j = i + 1
                     while j < n and s[j] != '"':
-                        # Handle escaped quotes if necessary (Fusion is simple usually)
-                        if s[j] == '\\' and j+1 < n:
-                            j += 2
-                        else:
-                            j += 1
-                    val = s[i+1:j] # Strip quotes
-                    tokens.append(('STR', val))
-                    i = j + 1
-                    continue
-                    
+                        if s[j] == '\\' and j + 1 < n: j += 2
+                        else: j += 1
+                    tokens.append(('STR', s[i+1:j])); i = j + 1; continue
                 if char == '[':
-                    # Key bracket ["Key"]
                     j = s.find(']', i)
                     if j != -1:
-                        # Extract content inside brackets
                         inner = s[i+1:j].strip()
-                        # If quoted, strip quotes
-                        if inner.startswith('"') and inner.endswith('"'):
-                            inner = inner[1:-1]
-                        tokens.append(('KEY', inner))
-                        i = j + 1
-                        continue
-                        
-                # Identifier or Number
+                        if inner.startswith('"') and inner.endswith('"'): inner = inner[1:-1]
+                        tokens.append(('KEY', inner)); i = j + 1; continue
                 j = i
-                while j < n and (s[j].isalnum() or s[j] in '._-'):
-                    j += 1
-                
+                while j < n and (s[j].isalnum() or s[j] in '._-'): j += 1
                 val = s[i:j]
-                
-                # Check for booleans/numbers
                 if val == 'true': tokens.append(('BOOL', True))
                 elif val == 'false': tokens.append(('BOOL', False))
+                elif val == 'nil': tokens.append(('NIL', None))
                 else:
-                    # Robust number check (supports scientific notation 1.0e-5)
                     try:
                         num = float(val)
-                        # Check if it's an integer
-                        if num.is_integer() and 'e' not in val.lower() and '.' not in val:
-                            tokens.append(('NUM', int(num)))
-                        else:
-                            tokens.append(('NUM', num))
-                    except ValueError:
-                        tokens.append(('ID', val))
+                        tokens.append(('NUM', int(num) if num.is_integer() and '.' not in val and 'e' not in val.lower() else num))
+                    except ValueError: tokens.append(('ID', val))
                 i = j
             return tokens
 
         tokens = tokenize(lua_str)
-        token_iter = iter(tokens)
-        current_token = [next(token_iter, None)]
+        n_tokens = len(tokens)
+        _idx, _depth, _MAX_DEPTH = [0], [0], 64
+
+        def peek(offset=0):
+            pos = _idx[0] + offset
+            return tokens[pos] if pos < n_tokens else None
 
         def next_tok():
-            t = current_token[0]
-            try:
-                current_token[0] = next(token_iter)
-            except StopIteration:
-                current_token[0] = None
+            t = peek()
+            if t: _idx[0] += 1
             return t
-            
-        def peek():
-            return current_token[0]
 
         def parse_value():
             tok = peek()
             if not tok: return None
-            
             type_, val = tok
-            
-            if type_ == 'OP' and val == '{':
-                return parse_table()
-            
-            # Consume the value token
+            if type_ == 'OP' and val == '{': return parse_table()
+            # Constructor pattern: ID { ... }
+            nxt = peek(1)
+            if type_ == 'ID' and nxt and nxt[0] == 'OP' and nxt[1] == '{':
+                func_name = val
+                next_tok() # ID
+                struct_data = parse_table()
+                if func_name == 'FuID':
+                    return struct_data[0] if isinstance(struct_data, list) and struct_data else struct_data
+                if func_name == 'Number':
+                    return struct_data.get('Value', struct_data) if isinstance(struct_data, dict) else struct_data
+                return struct_data # Input/Clip remain as dicts for get_val()
             next_tok()
-            
-            # Handle Function Calls like FuID { "X" } or Input { ... }
-            # If we see an Identifier followed immediately by '{', it's a struct
-            if type_ == 'ID' and peek() and peek()[0] == 'OP' and peek()[1] == '{':
-                struct_data = parse_table() # Consumes the { ... }
-
-                # Unwrap specific Fusion types immediately for cleaner data
-                if val == 'FuID':
-                    # FuID { "Value" } -> returns "Value"
-                    # Usually FuID table is implicit array [1] = "Value" or just string inside?
-                    # The tokenizer sees: FuID, {, STR("Val"), }
-                    # parse_table returns {0: "Val"} or similar?
-                    # Fusion table: { "Val" } -> Python list/dict.
-                    # My parse_table returns list if indices are implicit.
-                    if isinstance(struct_data, list) and len(struct_data) > 0:
-                        return struct_data[0]
-                    return struct_data # Fallback
-                    
-                if val == 'Number':
-                    # Number { Value = 4 } -> returns 4
-                    if isinstance(struct_data, dict) and 'Value' in struct_data:
-                        return struct_data['Value']
-                    return struct_data
-                    
-                if val == 'Input':
-                    # Keep Input structure intact: { 'Value': ... }
-                    return struct_data
-                    
-                return struct_data
-                
             return val
 
         def parse_table():
-            # Consume '{'
-            next_tok()
-            
-            data_dict = {}
-            data_list = []
-            
+            _depth[0] += 1
+            if _depth[0] > _MAX_DEPTH: raise ValueError("Nesting too deep")
+            next_tok() # {
+            res_dict, res_list = {}, []
             while peek():
-                tok = peek()
-                if tok[0] == 'OP' and tok[1] == '}':
-                    next_tok() # Consume '}'
-                    # Return list if only implicit keys, else dict
-                    if data_list and not data_dict:
-                        return data_list
-                    return data_dict
-                
-                # Check for explicit Key assignment: Key = Val
-                # Key can be ID or KEY token.
-                key = None
-                is_assignment = False
-                
-                # Look ahead for '=' (limited lookahead hack: consume, check, backtrack if needed? 
-                # Or just assume structure). 
-                # Fusion structure is predictable: Key = Val, or Val (implicit index)
-                
-                # We consume first token
-                first = next_tok()
-                
-                if peek() and peek()[0] == 'OP' and peek()[1] == '=':
-                    # It is a key assignment
-                    next_tok() # Consume '='
-                    key = first[1]
-                    val = parse_value()
-                    data_dict[key] = val
+                if peek()[0] == 'OP' and peek()[1] == '}':
+                    next_tok(); _depth[0] -= 1
+                    return res_list if res_list and not res_dict else res_dict
+                # Lookahead for Key = Value
+                is_assign = False
+                try:
+                    nxt = peek(1)
+                    if nxt and nxt[0] == 'OP' and nxt[1] == '=': is_assign = True
+                except (ValueError, IndexError): pass
+                if is_assign:
+                    key_tok = next_tok()
+                    next_tok() # =
+                    res_dict[key_tok[1]] = parse_value()
                 else:
-                    # It is an implicit value (array item)
-                    # We consumed 'first' thinking it was a key, but it's actually the value (or start of it)
-                    # This is tricky because parse_value expects to START at the value.
-                    # We need to "put back" the token or handle it.
-                    # Since we are recursive descent, explicit lookahead is cleaner.
-                    # But here, let's just handle primitive value directly if we consumed it.
-                    
-                    # Logic fix:
-                    # parse_value handles nested structs (ID + {).
-                    # If 'first' was ID and next is '{', it was start of struct.
-                    val = None
-                    if first[0] == 'ID' and peek() and peek()[0] == 'OP' and peek()[1] == '{':
-                         # Reconstruct the "ID {" sequence logic
-                         struct_name = first[1]
-                         struct_data = parse_table()
-                         
-                         # Same unwrapping logic as parse_value
-                         if struct_name == 'FuID':
-                             if isinstance(struct_data, list) and len(struct_data) > 0: val = struct_data[0]
-                             else: val = struct_data
-                         elif struct_name == 'Number':
-                             if isinstance(struct_data, dict) and 'Value' in struct_data: val = struct_data['Value']
-                             else: val = struct_data
-                         else:
-                             val = struct_data # e.g. Input { ... } or Clip { ... }
-                    else:
-                        # Simple primitive
-                        val = first[1]
-                    
-                    data_list.append(val)
-                
-                # Consume comma if present
-                if peek() and peek()[0] == 'OP' and peek()[1] == ',':
-                    next_tok()
-                    
-            return data_dict
+                    res_list.append(parse_value())
+                if peek() and peek()[0] == 'OP' and peek()[1] == ',': next_tok()
+            _depth[0] -= 1
+            return res_dict
 
-        # Start parsing (Lua top level is implicit table usually, or we start inside one)
-        # inputs_text starts with '{'.
         return parse_value()
 
     @staticmethod

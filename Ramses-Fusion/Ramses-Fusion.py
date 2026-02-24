@@ -2,6 +2,7 @@ import sys
 import os
 import re
 import time
+import threading
 import concurrent.futures
 from typing import Optional, List, Any
 
@@ -103,12 +104,22 @@ class RamsesFusionApp:
         self.ramses = ram.Ramses.instance()
         self.settings = ram.RamSettings.instance()
 
-        # Initialize Host with global fusion object
-        self.ramses.host = fusion_host.FusionHost(fusion)
+        # Initialize Host with global fusion object — guard against missing Fusion globals
+        try:
+            _fusion_obj = fusion  # noqa: F821
+            _fu_obj = fu          # noqa: F821
+            _bmd_obj = bmd        # noqa: F821
+        except NameError as exc:
+            raise RuntimeError(
+                "Ramses-Fusion requires the Blackmagic Fusion scripting environment. "
+                "Ensure the script is launched from within Fusion."
+            ) from exc
+
+        self.ramses.host = fusion_host.FusionHost(_fusion_obj)
         self.ramses.host.app = self
 
-        self.ui = fu.UIManager
-        self.disp = bmd.UIDispatcher(self.ui)
+        self.ui = _fu_obj.UIManager
+        self.disp = _bmd_obj.UIDispatcher(self.ui)
         self.script_dir = script_dir
         self.icon_dir = os.path.join(self.script_dir, "icons")
         self._icon_cache = {}
@@ -117,6 +128,7 @@ class RamsesFusionApp:
         self._user_name_cache = None
 
         # Context Caching
+        self._context_lock = threading.Lock()
         self._item_cache = None
         self._step_cache = None
         self._context_path = ""
@@ -202,10 +214,21 @@ class RamsesFusionApp:
             str: The current file path.
         """
         path = self.ramses.host.currentFilePath()
-        if path != self._context_path or not self._item_cache or not self._step_cache:
-            self._context_path = path
-            self._item_cache = self.ramses.host.currentItem()
-            self._step_cache = self.ramses.host.currentStep()
+        with self._context_lock:
+            needs_update = (
+                path != self._context_path
+                or not self._item_cache
+                or not self._step_cache
+            )
+        if needs_update:
+            # Perform the slow API calls outside the lock to avoid blocking other
+            # threads, then re-acquire to commit the results atomically.
+            item = self.ramses.host.currentItem()
+            step = self.ramses.host.currentStep()
+            with self._context_lock:
+                self._context_path = path
+                self._item_cache = item
+                self._step_cache = step
         return path
 
     def _get_project(self) -> Optional[ram.RamProject]:
@@ -1134,8 +1157,12 @@ class RamsesFusionApp:
                             items[btn_id].Hidden = is_collapsed
 
                     self.resize_to_fit()
-                except Exception:
-                    pass  # Dialog may have been closed during event
+                except Exception as _toggle_exc:
+                    # Dialog may have been closed during the event; log unexpected errors.
+                    self.log(
+                        f"[Ramses] Section toggle error ({header_id}): {_toggle_exc}",
+                        ram.LogLevel.Debug,
+                    )
 
             self.dlg.On[header_id].Clicked = toggle
 

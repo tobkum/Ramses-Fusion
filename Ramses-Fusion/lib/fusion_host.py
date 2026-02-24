@@ -56,6 +56,8 @@ FORMAT_QUICKTIME = "QuickTimeMovies"
 CODEC_PRORES_422 = "Apple ProRes 422_apcn"
 CODEC_PRORES_422_HQ = "Apple ProRes 422 HQ_apch"
 
+_DEFAULT_SHOT_DURATION_SECS = 5.0  # Fallback duration when Ramses item has no duration set
+
 # =============================================================================
 # MONKEY-PATCHING RAMSES API (Fixes critical environment bugs only)
 # =============================================================================
@@ -65,8 +67,10 @@ from ramses import RamFileManager
 # Module-level lock for thread-safe daemon initialization
 _DAEMON_INIT_LOCK = threading.Lock()
 
-# Use a flag to ensure patches are only applied once
-if not hasattr(RamFileManager, "_fusion_patched"):
+# Use a flag to ensure patches are only applied once; guard inside the lock so
+# concurrent imports cannot both pass the hasattr check.
+with _DAEMON_INIT_LOCK:
+  if not hasattr(RamFileManager, "_fusion_patched"):
     RamFileManager._fusion_patched = True
 
     # 1. Fix Race Condition: Disable background threads for copies.
@@ -91,8 +95,13 @@ if not hasattr(RamFileManager, "_fusion_patched"):
         if not os.path.isdir(versionsFolder):
             return ""
 
+        _MAX_VERSION_ENTRIES = 2000  # Guard against runaway version folders
         candidates = []
-        for f in os.listdir(versionsFolder):
+        try:
+            entries = os.listdir(versionsFolder)
+        except OSError:
+            return ""
+        for f in entries[:_MAX_VERSION_ENTRIES]:
             path = os.path.join(versionsFolder, f)
 
             # Case A: File-based versioning (standard behavior of patch)
@@ -150,7 +159,11 @@ if not hasattr(RamFileManager, "_fusion_patched"):
             return []
 
         candidates = []
-        for f in os.listdir(versionsFolder):
+        try:
+            entries = os.listdir(versionsFolder)
+        except OSError:
+            return []
+        for f in entries[:_MAX_VERSION_ENTRIES]:
             path = os.path.join(versionsFolder, f)
 
             # Case A: File-based
@@ -202,9 +215,16 @@ if not hasattr(RamFileManager, "_fusion_patched"):
         if not os.path.exists(meta_file):
             return {}
         try:
-            with open(meta_file, "r") as f:
+            with open(meta_file, "r", encoding="utf-8") as f:
                 return json.load(f)
-        except Exception:
+        except json.JSONDecodeError as exc:
+            print(
+                f"[Ramses] ERROR: Metadata file is corrupted and cannot be read "
+                f"({meta_file}): {exc}"
+            )
+            return {}
+        except OSError as exc:
+            print(f"[Ramses] ERROR: Could not read metadata file ({meta_file}): {exc}")
             return {}
 
     def _patched_getFileMetaData(filePath):
@@ -500,6 +520,10 @@ class FusionHost(RamHost):
                 except Exception as e:
                     self._log(f"Step UUID recovery failed: {e}", LogLevel.Debug)
 
+            # All recovery paths exhausted — avoid returning an "Unknown" step object
+            # that callers cannot distinguish from a real step.
+            return None
+
         return step
 
     def isFusionStep(self, step: RamStep) -> bool:
@@ -711,7 +735,7 @@ class FusionHost(RamHost):
 
             return self.normalizePath(os.path.join(preview_folder, filename))
         except Exception as e:
-            self._log(f"Failed to resolve preview path: {e}", LogLevel.Debug)
+            self._log(f"Failed to resolve preview path: {e}", LogLevel.Warning)
             return ""
 
     def resolveFinalPath(self) -> str:
@@ -805,7 +829,7 @@ class FusionHost(RamHost):
             return self.normalizePath(os.path.join(target_dir, filename))
 
         except Exception as e:
-            self._log(f"Failed to resolve final path: {e}", LogLevel.Debug)
+            self._log(f"Failed to resolve final path: {e}", LogLevel.Warning)
             return ""
 
     def _saveAs(
@@ -1911,7 +1935,14 @@ class FusionHost(RamHost):
             render_path = self.normalizePath(final_node.Clip[1])
             render_dir = os.path.dirname(render_path)
             if render_dir:
-                os.makedirs(render_dir, exist_ok=True)
+                try:
+                    os.makedirs(render_dir, exist_ok=True)
+                except OSError as e:
+                    self.log(
+                        f"Publish ABORTED: Cannot create render directory {render_dir}: {e}",
+                        LogLevel.Critical,
+                    )
+                    return []
 
             render_success = False
 
@@ -2377,11 +2408,11 @@ class FusionHost(RamHost):
                 duration = float(item.duration())
             except (ValueError, TypeError, AttributeError):
                 # Duration may be None or invalid, use default
-                duration = 5.0
+                duration = _DEFAULT_SHOT_DURATION_SECS
 
         # Fallback to a default if still 0
         if duration <= 0:
-            duration = 5.0
+            duration = _DEFAULT_SHOT_DURATION_SECS
 
         # If we have an explicit frame count from Ramses, use it.
         # Otherwise calculate from duration and (potentially overridden) FPS.
