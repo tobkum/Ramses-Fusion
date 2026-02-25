@@ -51,10 +51,11 @@ class RamAboutDialog(qw.QDialog):
             host = RamHost()
 
         self.setWindowTitle("About " + host.name)
-
-        # DCC host panels use WindowStaysOnTopHint; match it so this dialog
-        # appears above them. Set before exec() so Qt applies it at first show.
+        
+        # Ensure foreground
         self.setWindowFlags(self.windowFlags() | qc.Qt.WindowStaysOnTopHint)
+        self.raise_()
+        self.activateWindow()
 
         l = qw.QVBoxLayout()
         l.setContentsMargins(6,6,6,6)
