@@ -1293,50 +1293,50 @@ class FusionHost(RamHost):
                 # Explicitly set the clip path with forward slashes for cross-platform safety
                 loader.Clip[1] = normalized_path
 
-                    # Store Ramses metadata on Loader node
-                    if item:
-                        loader.SetData("Ramses.AssetUUID", str(item.uuid()))
-                        project = item.project()
-                        if project:
-                            loader.SetData("Ramses.ProjectUUID", str(project.uuid()))
+                # Store Ramses metadata on Loader node
+                if item:
+                    loader.SetData("Ramses.AssetUUID", str(item.uuid()))
+                    project = item.project()
+                    if project:
+                        loader.SetData("Ramses.ProjectUUID", str(project.uuid()))
 
-                    if step:
-                        loader.SetData("Ramses.StepUUID", str(step.uuid()))
+                if step:
+                    loader.SetData("Ramses.StepUUID", str(step.uuid()))
 
-                    # Store version and resource information
-                    from ramses import RamFileInfo
+                # Store version and resource information
+                from ramses import RamFileInfo
 
-                    info = RamFileInfo()
-                    info.setFilePath(normalized_path)
-                    if info.version > 0:
-                        loader.SetData("Ramses.Version", info.version)
-                    if info.resource:
-                        loader.SetData("Ramses.Resource", info.resource)
+                info = RamFileInfo()
+                info.setFilePath(normalized_path)
+                if info.version > 0:
+                    loader.SetData("Ramses.Version", info.version)
+                if info.resource:
+                    loader.SetData("Ramses.Resource", info.resource)
 
-                    # Smart Naming with safety fallback
-                    if item:
-                        raw_name = (
-                            f"{item.shortName()}_{step.shortName()}"
-                            if step
-                            else item.shortName()
-                        )
-                    else:
-                        # Fallback to sanitized base filename
-                        raw_name = os.path.splitext(os.path.basename(path))[0]
+                # Smart Naming with safety fallback
+                if item:
+                    raw_name = (
+                        f"{item.shortName()}_{step.shortName()}"
+                        if step
+                        else item.shortName()
+                    )
+                else:
+                    # Fallback to sanitized base filename
+                    raw_name = os.path.splitext(os.path.basename(path))[0]
 
-                    name = self._sanitizeNodeName(raw_name)
+                name = self._sanitizeNodeName(raw_name)
 
-                    if name:
-                        # Prevent name collisions by checking if node exists and appending counter
-                        final_name = name
-                        counter = 1
-                        while self.comp.FindTool(final_name) and counter < 100:
-                            final_name = f"{name}_{counter}"
-                            counter += 1
-                        loader.SetAttrs({"TOOLS_Name": final_name})
+                if name:
+                    # Prevent name collisions by checking if node exists and appending counter
+                    final_name = name
+                    counter = 1
+                    while self.comp.FindTool(final_name) and counter < 100:
+                        final_name = f"{name}_{counter}"
+                        counter += 1
+                    loader.SetAttrs({"TOOLS_Name": final_name})
 
-                    # Automatic Alignment
-                    loader.GlobalIn[1] = float(start_frame)
+                # Automatic Alignment
+                loader.GlobalIn[1] = float(start_frame)
 
             success = True
             return True
