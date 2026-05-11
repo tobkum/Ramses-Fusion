@@ -259,6 +259,9 @@ with _DAEMON_INIT_LOCK:
 
         # Save with correct state to prevent reversion
         state_short = state.shortName() if state else None
+        if not hasattr(self, "_RamHost__save"):
+            self.log("RamHost.__save not found — API version mismatch; publish aborted.", LogLevel.Critical)
+            return False
         if not self._RamHost__save(
             self.saveFilePath(), comment="Published", newStateShortName=state_short
         ):
@@ -308,7 +311,7 @@ with _DAEMON_INIT_LOCK:
             status.setPublished(True)
         self.closeTempWorkingFile()
 
-        if incrementVersion:
+        if incrementVersion and hasattr(self, "_RamHost__save"):
             if not self._RamHost__save(
                 self.saveFilePath(),
                 incrementVersion=True,
@@ -967,6 +970,9 @@ class FusionHost(RamHost):
 
             # Name mangling for private method in parent class
             state_short = state.shortName() if state else None
+            if not hasattr(self, "_RamHost__save"):
+                self.log("RamHost.__save not found — API version mismatch; falling back to super().save()", LogLevel.Critical)
+                return super(FusionHost, self).save(incremental=incremental, comment=comment, setupFile=False)
             return self._RamHost__save(saveFilePath, incremental, comment, state_short)
 
         return super(FusionHost, self).save(
