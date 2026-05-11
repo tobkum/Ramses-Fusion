@@ -83,6 +83,8 @@ with _DAEMON_INIT_LOCK:
     RamFileManager.copy = staticmethod(_patched_copy)
 
     # 2. Fix Case Sensitivity and robust matching for version files on Windows.
+    _MAX_VERSION_ENTRIES = 2000  # Guard against runaway version folders; shared by both patch functions
+
     def _patched_getLatestVersionFilePath(filePath, previous=False):
         """Resolves the latest version file path using robust matching (Files AND Folders)."""
         fileName = os.path.basename(filePath)
@@ -95,7 +97,6 @@ with _DAEMON_INIT_LOCK:
         if not os.path.isdir(versionsFolder):
             return ""
 
-        _MAX_VERSION_ENTRIES = 2000  # Guard against runaway version folders
         candidates = []
         try:
             entries = os.listdir(versionsFolder)
@@ -1283,9 +1284,8 @@ class FusionHost(RamHost):
                         LogLevel.Error,
                     )
                     continue
-                if loader:
-                    # Explicitly set the clip path with forward slashes for cross-platform safety
-                    loader.Clip[1] = normalized_path
+                # Explicitly set the clip path with forward slashes for cross-platform safety
+                loader.Clip[1] = normalized_path
 
                     # Store Ramses metadata on Loader node
                     if item:

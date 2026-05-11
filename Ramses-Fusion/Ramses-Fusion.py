@@ -226,9 +226,13 @@ class RamsesFusionApp:
             item = self.ramses.host.currentItem()
             step = self.ramses.host.currentStep()
             with self._context_lock:
-                self._context_path = path
-                self._item_cache = item
-                self._step_cache = step
+                # Re-check: another thread may have already committed a newer path
+                # while we were making the slow API calls. Only overwrite if our
+                # path is still the current one (or no path is cached yet).
+                if path == self.ramses.host.currentFilePath() or not self._context_path:
+                    self._context_path = path
+                    self._item_cache = item
+                    self._step_cache = step
         return path
 
     def _get_project(self) -> Optional[ram.RamProject]:
