@@ -226,9 +226,13 @@ class RamsesFusionApp:
             item = self.ramses.host.currentItem()
             step = self.ramses.host.currentStep()
             with self._context_lock:
-                self._context_path = path
-                self._item_cache = item
-                self._step_cache = step
+                # Re-check: another thread may have already committed a newer path
+                # while we were making the slow API calls. Only overwrite if our
+                # path is still the current one (or no path is cached yet).
+                if path == self.ramses.host.currentFilePath() or not self._context_path:
+                    self._context_path = path
+                    self._item_cache = item
+                    self._step_cache = step
         return path
 
     def _get_project(self) -> Optional[ram.RamProject]:
@@ -237,9 +241,10 @@ class RamsesFusionApp:
         Returns:
             Optional[RamProject]: The active project.
         """
-        if not self._project_cache:
-            self._project_cache = self.ramses.project()
-        return self._project_cache
+        with self._context_lock:
+            if not self._project_cache:
+                self._project_cache = self.ramses.project()
+            return self._project_cache
 
     def _get_user_name(self) -> str:
         """Gets the current User Name from the Ramses Daemon (Cached).
@@ -247,10 +252,11 @@ class RamsesFusionApp:
         Returns:
             str: The user name or "Not Logged In".
         """
-        if not self._user_name_cache:
-            user = self.ramses.user()
-            self._user_name_cache = user.name() if user else "Not Logged In"
-        return self._user_name_cache
+        with self._context_lock:
+            if not self._user_name_cache:
+                user = self.ramses.user()
+                self._user_name_cache = user.name() if user else "Not Logged In"
+            return self._user_name_cache
 
     def _require_step(self) -> Optional[ram.RamStep]:
         """Validates that a valid Step context exists.
