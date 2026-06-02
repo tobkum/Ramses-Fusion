@@ -252,6 +252,24 @@ class TestRamsesFusionApp(unittest.TestCase):
         path3 = self.app._update_context()
         self.assertEqual(self.app.ramses.host.currentItem.call_count, 2)
 
+    def test_update_context_toctou_race(self):
+        """Verify _update_context snapshots the actual path after slow API calls."""
+        # Simulate a race where the path changes while slow API calls are running
+        self.app.ramses.host.currentFilePath = MagicMock(side_effect=["D:/Path/A.comp", "D:/Path/B.comp"])
+        self.app.ramses.host.currentItem = MagicMock(return_value=MagicMock(name="ItemB"))
+        self.app.ramses.host.currentStep = MagicMock(return_value=MagicMock(name="StepB"))
+        
+        # Clear cache to trigger update
+        self.app._context_path = None
+        self.app._item_cache = None
+        
+        path = self.app._update_context()
+        
+        # Even though the path at the start of the function was A.comp,
+        # it should snapshot and return B.comp (the actual path at commit time).
+        self.assertEqual(path, "D:/Path/B.comp")
+        self.assertEqual(self.app._context_path, "D:/Path/B.comp")
+
     def test_requires_connection_decorator(self):
         """Verify that the @requires_connection decorator blocks handlers when the Ramses Daemon is offline."""
         # 1. Force offline

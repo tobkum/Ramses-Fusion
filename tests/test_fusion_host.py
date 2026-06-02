@@ -36,10 +36,6 @@ from fusion_host import FusionHost, FORMAT_QUICKTIME, CODEC_PRORES_422, CODEC_PR
 from mocks import MockFusion
 from ramses import LogLevel
 
-# PATCH: fusion_host.py has bugs using LogLevel.Error which doesn't exist
-# Add Error as alias for Critical to prevent test failures from production bugs
-if not hasattr(LogLevel, 'Error'):
-    LogLevel.Error = LogLevel.Critical
 
 class TestFusionHost(unittest.TestCase):
 
@@ -1018,6 +1014,79 @@ class TestFusionCompImport(unittest.TestCase):
         # AddTool should be called once for the .exr
         comp.AddTool.assert_called_once_with("Loader", ANY, ANY)
 
+    def test_check_outdated_loaders(self):
+        """Verify check_outdated_loaders detects and handles outdated loaders."""
+        comp = self.mock_fusion.GetCurrentComp()
+        
+        # Add a loader with version 1
+        loader = comp.AddTool("Loader", 0, 0)
+        loader.Clip[1] = "D:/Project/05-SHOTS/SH010/COMP/_published/v001/SH010_v001.001.exr"
+        
+        import fusion_host
+        
+        mock_item = MagicMock()
+        mock_item.shortName.return_value = "SH010"
+        mock_item.latestPublishedVersionFolderPath.return_value = "D:/Project/05-SHOTS/SH010/COMP/_published/v002"
+        
+        mock_step = MagicMock()
+        
+        with patch.object(fusion_host.RamItem, "fromPath", return_value=mock_item), \
+             patch.object(fusion_host.RamStep, "fromPath", return_value=mock_step):
+            count = self.host.check_outdated_loaders()
+        
+        self.assertEqual(count, 1)
+
+    def test_import_comp_failure_no_fallthrough(self):
+        """Verify a failing .comp import does not create a Loader."""
+        comp = self.mock_fusion.GetCurrentComp()
+        import fusion_host
+        fusion_host.bmd.readfile = MagicMock(return_value=None)  # Simulate failure
+        comp.AddTool = MagicMock()
+
+        files = ["D:/MaMo/tracking_v001.comp"]
+        
+        with patch("os.path.exists", return_value=True), \
+             patch("os.path.getmtime", return_value=123456789.0):
+            self.host._import(files, MagicMock(), MagicMock(), [], False)
+
+        comp.AddTool.assert_not_called()
+
+    @patch("fusion_host.yaml.safe_load")
+    def test_publishOptions_retry_loop(self, mock_safe_load):
+        """Verify _publishOptions doesn't recurse infinitely on bad YAML."""
+        # Force safe_load to raise an exception to trigger the retry loop
+        mock_safe_load.side_effect = ValueError("Invalid YAML")
+        
+        # Provide bad YAML strings 3 times, simulating user repeatedly submitting invalid YAML
+        self.host._request_input = MagicMock(side_effect=[
+            {"YAML": "{ invalid: yaml: "},
+            {"YAML": "{ invalid: yaml: "},
+            {"YAML": "{ invalid: yaml: "}
+        ])
+        
+        original_opts = {"foo": "bar"}
+        # Should return the original options after max retries (3)
+        res = self.host._publishOptions(original_opts, showPublishUI=True)
+        self.assertEqual(res, original_opts)
+        self.assertEqual(self.host._request_input.call_count, 3)
+
+    def test_createNewComp_save_failure(self):
+        """Verify _createNewComp returns empty string and logs critical error when Save fails."""
+        comp = self.mock_fusion.GetCurrentComp()
+        comp.Save = MagicMock(return_value=False)
+        self.mock_fusion.NewComp = MagicMock()
+        
+        import fusion_host
+        fusion_host.RamItem = MagicMock()
+        fusion_host.RamItem.fromPath.return_value = MagicMock()
+        self.host._open = MagicMock(return_value=True)
+        self.host.log = MagicMock()
+        self.host.app = MagicMock()
+        self.host.app._resolve_shot_path.return_value = ("D:/test.comp", False)
+        
+        res = self.host._createNewComp(MagicMock(), MagicMock())
+        self.assertEqual(res, "")
+        self.host.log.assert_called_with(ANY, LogLevel.Critical)
 
 if __name__ == "__main__":
     unittest.main()

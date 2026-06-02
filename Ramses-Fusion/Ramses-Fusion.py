@@ -4,6 +4,7 @@ import re
 import time
 import threading
 import concurrent.futures
+import functools
 from typing import Optional, List, Any
 
 # Add the 'lib' directory to Python's search path
@@ -71,6 +72,7 @@ def requires_connection(func: callable) -> callable:
         callable: The wrapped function.
     """
 
+    @functools.wraps(func)
     def wrapper(self, ev):
         if not self._check_connection():
             return
@@ -226,14 +228,13 @@ class RamsesFusionApp:
             item = self.ramses.host.currentItem()
             step = self.ramses.host.currentStep()
             with self._context_lock:
-                # Re-check: another thread may have already committed a newer path
-                # while we were making the slow API calls. Only overwrite if our
-                # path is still the current one (or no path is cached yet).
-                if path == self.ramses.host.currentFilePath() or not self._context_path:
-                    self._context_path = path
+                # Get the path that actually corresponds to the item we just fetched
+                actual_path = self.ramses.host.currentFilePath()
+                if not self._context_path or actual_path != self._context_path:
+                    self._context_path = actual_path
                     self._item_cache = item
                     self._step_cache = step
-        return path
+        return self._context_path
 
     def _get_project(self) -> Optional[ram.RamProject]:
         """Gets the active Project from the Ramses Daemon (Cached).
@@ -622,6 +623,7 @@ class RamsesFusionApp:
             return
 
         comp.Lock()
+        comp.StartUndo("Create Render Anchors")
         try:
             # 1. Determine Reference Position (Grid Units)
             flow = comp.CurrentFrame.FlowView
@@ -661,7 +663,7 @@ class RamsesFusionApp:
                 if not node:
                     node = comp.AddTool("Saver", cfg["target_x"], cfg["target_y"])
                     if not node:
-                        self.ramses.host.log(f"Failed to create {name} Saver node", ram.LogLevel.Error)
+                        self.ramses.host.log(f"Failed to create {name} Saver node", ram.LogLevel.Critical)
                         continue
                     node.SetAttrs({"TOOLS_Name": name})
 
@@ -686,6 +688,7 @@ class RamsesFusionApp:
                             "Final renders will be saved here. Connect your output."
                         )
         finally:
+            comp.EndUndo(True)
             comp.Unlock()
 
     def _validate_publish(
@@ -872,6 +875,11 @@ class RamsesFusionApp:
             if not preview_path and not final_path:
                 return
 
+            preview_node = None
+            final_node = None
+            preview_needs_update = False
+            final_needs_update = False
+
             comp.Lock()
             try:
                 preview_node = comp.FindTool("_PREVIEW")
@@ -880,16 +888,22 @@ class RamsesFusionApp:
                     curr_p = self.ramses.host.normalizePath(preview_node.Clip[1])
                     if curr_p != preview_path:
                         preview_node.Clip[1] = preview_path
-                        self.ramses.host.apply_render_preset(preview_node, "preview")
+                        preview_needs_update = True
 
                 final_node = comp.FindTool("_FINAL")
                 if final_node:
                     curr_f = self.ramses.host.normalizePath(final_node.Clip[1])
                     if curr_f != final_path:
                         final_node.Clip[1] = final_path
-                        self.ramses.host.apply_render_preset(final_node, "final")
+                        final_needs_update = True
             finally:
                 comp.Unlock()
+                
+            # Apply presets outside the lock to prevent daemon calls from blocking Fusion UI
+            if preview_needs_update and preview_node:
+                self.ramses.host.apply_render_preset(preview_node, "preview")
+            if final_needs_update and final_node:
+                self.ramses.host.apply_render_preset(final_node, "final")
         except (AttributeError, RuntimeError) as e:
             self.log(f"Render anchor sync failed: {e}", ram.LogLevel.Debug)
 
@@ -1846,7 +1860,6 @@ class RamsesFusionApp:
             itm["StepCombo"].Clear()
             fusion_steps = [s for s in session_cache["current_steps"] if host.isFusionStep(s)]
             if not fusion_steps: fusion_steps = session_cache["current_steps"]
-            session_cache["current_steps"] = fusion_steps
             for s in fusion_steps: itm["StepCombo"].AddItem(s.name())
             itm["StepCombo"].CurrentIndex = 0
             if cur_step:
@@ -2521,7 +2534,7 @@ class RamsesFusionApp:
         if not res or not res["Name"]:
             return
 
-        name = re.sub(r"[^a-zA-Z0-9\- ]", "", res["Name"])
+        name = re.sub(r"[^a-zA-Z0-9_]", "", res["Name"].replace(" ", "_").replace("-", "_"))
 
         tpl_folder = step.templatesFolderPath()
         if not tpl_folder:

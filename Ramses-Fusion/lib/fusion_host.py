@@ -1276,18 +1276,19 @@ class FusionHost(RamHost):
                         if content:
                             self.comp.Paste(content)
                             self.log(f"Merged nodes from composition: {normalized_path}", LogLevel.Info)
-                            continue # Proceed to next file, skip Loader logic
                         else:
-                            self.log(f"Could not read content from: {normalized_path}", LogLevel.Error)
+                            self.log(f"Could not read content from: {normalized_path}", LogLevel.Critical)
                     except Exception as e:
-                        self.log(f"Failed to merge comp {normalized_path}: {e}", LogLevel.Error)
-                        # Fallback: continue to try creating a loader
+                        self.log(f"Failed to merge comp {normalized_path}: {e}", LogLevel.Critical)
+                    # Always skip Loader creation for .comp files — a Loader cannot
+                    # load a .comp file and creating one would produce an invalid node.
+                    continue
 
                 loader = self.comp.AddTool("Loader", target_x, target_y)
                 if not loader:
                     self.log(
                         f"Failed to create Loader at ({target_x}, {target_y})",
-                        LogLevel.Error,
+                        LogLevel.Critical,
                     )
                     continue
                 # Explicitly set the clip path with forward slashes for cross-platform safety
@@ -1341,7 +1342,7 @@ class FusionHost(RamHost):
             success = True
             return True
         except Exception as e:
-            self.log(f"Import failed: {e}", LogLevel.Error)
+            self.log(f"Import failed: {e}", LogLevel.Critical)
             return False
         finally:
             self.comp.Unlock()
@@ -1542,6 +1543,11 @@ class FusionHost(RamHost):
             self._store_ramses_metadata(item, step)
             return selected_path
 
+        self.log(
+            f"Failed to save new composition to: {selected_path}. "
+            "Check write permissions and Fusion state.",
+            LogLevel.Critical,
+        )
         return ""
 
     def _preview(
@@ -1632,39 +1638,58 @@ class FusionHost(RamHost):
     def _publishOptions(
         self, proposedOptions: dict, showPublishUI: bool = False
     ) -> dict:
-        """Shows a UI to edit the publish options (YAML) if requested."""
+        """Shows a UI to edit the publish options (YAML) if requested.
+
+        Uses a capped retry loop (max 3 attempts) instead of recursion so that
+        repeated invalid YAML input cannot overflow the call stack.
+        """
         if not showPublishUI:
             return proposedOptions or {}
 
-        # Convert dict to YAML for editing
-        try:
-            current_yaml = yaml.dump(proposedOptions, default_flow_style=False)
-        except Exception:
-            current_yaml = ""
+        _MAX_RETRIES = 3
+        for _attempt in range(_MAX_RETRIES):
+            # Convert dict to YAML for editing
+            try:
+                current_yaml = yaml.dump(proposedOptions, default_flow_style=False)
+            except Exception:
+                current_yaml = ""
 
-        res = self._request_input(
-            "Edit Publish Settings",
-            [
-                {
-                    "id": "YAML",
-                    "label": "Settings (YAML):",
-                    "type": "text",
-                    "default": current_yaml,
-                    "lines": 20,
-                }
-            ],
-        )
+            res = self._request_input(
+                "Edit Publish Settings",
+                [
+                    {
+                        "id": "YAML",
+                        "label": "Settings (YAML):",
+                        "type": "text",
+                        "default": current_yaml,
+                        "lines": 20,
+                    }
+                ],
+            )
 
-        if res is not None:
+            if res is None:
+                return None  # User cancelled
+
             try:
                 new_options = yaml.safe_load(res["YAML"])
                 return new_options if isinstance(new_options, dict) else {}
             except Exception as e:
-                # On error, warn and show UI again (recursion)
-                self.log(f"Invalid YAML Settings: {e}", LogLevel.Warning)
-                return self._publishOptions(proposedOptions, True)
+                self.log(
+                    f"Invalid YAML Settings ({_attempt + 1}/{_MAX_RETRIES}): {e}",
+                    LogLevel.Warning,
+                )
+                # Loop back to show dialog again with current (invalid) text preserved
+                try:
+                    proposedOptions = yaml.safe_load(res["YAML"]) or proposedOptions
+                except Exception:
+                    pass  # Keep proposedOptions unchanged for next round
 
-        return None  # User cancelled
+        # Max retries reached — give up and return original options unchanged.
+        self.log(
+            "Publish settings editor: max retries reached. Using existing settings.",
+            LogLevel.Warning,
+        )
+        return proposedOptions or {}
 
     def _prePublish(self, publishInfo: RamFileInfo, publishOptions: dict) -> dict:
         """Hook called before the publish process begins.
@@ -1937,24 +1962,26 @@ class FusionHost(RamHost):
 
             self.log("Starting final master render...", LogLevel.Info)
 
-            # Resolve and create directory before render
-            render_path = self.normalizePath(final_node.Clip[1])
-            render_dir = os.path.dirname(render_path)
-            if render_dir:
-                try:
-                    os.makedirs(render_dir, exist_ok=True)
-                except OSError as e:
-                    self.log(
-                        f"Publish ABORTED: Cannot create render directory {render_dir}: {e}",
-                        LogLevel.Critical,
-                    )
-                    return []
-
             render_success = False
 
             # Lock comp during state modification and render
             comp.Lock()
             try:
+                # Resolve render path and create directory while holding the lock
+                # so the path cannot be changed by the user between directory
+                # creation and the actual render.
+                render_path = self.normalizePath(final_node.Clip[1])
+                render_dir = os.path.dirname(render_path)
+                if render_dir:
+                    try:
+                        os.makedirs(render_dir, exist_ok=True)
+                    except OSError as e:
+                        self.log(
+                            f"Publish ABORTED: Cannot create render directory {render_dir}: {e}",
+                            LogLevel.Critical,
+                        )
+                        return []
+
                 # Enable the node
                 final_node.SetAttrs({"TOOLB_PassThrough": False})
 
@@ -2106,7 +2133,7 @@ class FusionHost(RamHost):
             success = True
             return True
         except Exception as e:
-            self.log(f"Replace failed: {e}", LogLevel.Error)
+            self.log(f"Replace failed: {e}", LogLevel.Critical)
             return False
         finally:
             self.comp.Unlock()
@@ -2179,103 +2206,21 @@ class FusionHost(RamHost):
         )
         return versionFiles[res["Idx"]] if res else ""
 
-    def _saveAsUI(self) -> dict:
-        """Shows the native Fusion file request dialog for 'Save As'."""
-        if hasattr(self, 'app') and self.app and hasattr(self.app, 'qt_app') and self.app.qt_app:
-            try:
-                from ramses_ui_pyside.save_as_dialog import RamSaveAsDialog
-                file_types = [{"extension": "comp", "name": "Fusion Composition"}]
-                dialog = RamSaveAsDialog(file_types)
-
-                # Pre-set Defaults before showing
-                from ramses import ItemType
-                current_item = self.currentItem()
-                current_step = self.currentStep()
-                if current_item:
-                    item_type = current_item.itemType()
-                    if item_type == ItemType.ASSET:
-                        dialog.setAsset()
-                    elif item_type == ItemType.GENERAL:
-                        dialog.setGeneral()
-                    else:
-                        dialog.setShot()
-                    dialog.setItem(current_item)
-                else:
-                    dialog.setShot()
-                if current_step:
-                    dialog.setStep(current_step)
-                else:
-                    project = RAMSES.project()
-                    if project:
-                        comp_step = project.step("Comp") or project.step("Compositing")
-                        if comp_step:
-                            dialog.setStep(comp_step)
-
-                dialog.setWindowFlags(dialog.windowFlags() | qc.Qt.WindowStaysOnTopHint)
-                dialog.raise_()
-                dialog.activateWindow()
-
-                if getattr(dialog, 'exec', None):
-                    res = dialog.exec()
-                else:
-                    res = dialog.exec_()
-
-                if res:
-                    return {
-                        "item": dialog.item(),
-                        "step": dialog.step(),
-                        "extension": dialog.extension(),
-                        "resource": dialog.resource()
-                    }
-                return None
-            except ImportError:
-                pass
-
-        # Fallback
-        path = self.fusion.RequestFile()
-        if not path:
-            return None
-
-        # Use API to parse the selected path and instantiate the correctly typed object
-        item = RamItem.fromPath(path, virtualIfNotFound=True)
-        nm = RamFileInfo()
-        nm.setFilePath(path)
-
-        if not nm.project:
-            self.log(
-                "The selected path does not seem to belong to a Ramses project. This may cause pipeline issues.",
-                LogLevel.Warning,
-            )
-
-        if not item:
-            item = RamItem(
-                data={
-                    "name": nm.shortName or "New",
-                    "shortName": nm.shortName or "New",
-                },
-                create=False,
-            )
-
-        step = RamStep.fromPath(path)
-        # Ensure we have a valid Ramses step
-        if not step:
-            step = RamStep(
-                data={"name": nm.step or "New", "shortName": nm.step or "New"},
-                create=False,
-            )
-
-        return {
-            "item": item,
-            "step": step,
-            "extension": os.path.splitext(path)[1].lstrip("."),
-            "resource": nm.resource,
-        }
 
     def _saveChangesUI(self) -> str:
         """Shows a dialog asking to save changes before closing/opening.
 
         Returns:
             str: 'save', 'discard', or 'cancel'.
+
+        Note on type contract:
+            The base class RamHost declares _saveChangesUI() -> bool, but the
+            base class open() implementation already handles string returns
+            (checks 'if doSave == "cancel"' etc.). FusionHost intentionally
+            returns a three-way string so that the 'discard' path can bypass
+            saving without being mistaken for a failure. This is a known,
+            deliberate divergence — do not change the return type here without
+            also auditing RamHost.open().
         """
         res = self._request_input(
             "Save Changes?",
@@ -2488,7 +2433,7 @@ class FusionHost(RamHost):
             success = True
             return True
         except Exception as e:
-            self.log(f"Setup failed: {e}", LogLevel.Error)
+            self.log(f"Setup failed: {e}", LogLevel.Critical)
             return False
         finally:
             comp.EndUndo(success)

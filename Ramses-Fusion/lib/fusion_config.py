@@ -173,6 +173,9 @@ class FusionConfig:
                     while j < n and s[j] != '"':
                         if s[j] == '\\' and j + 1 < n: j += 2
                         else: j += 1
+                    if j >= n:
+                        # Unterminated string literal — malformed Fusion node.
+                        raise ValueError("Unterminated string literal in Lua table")
                     tokens.append(('STR', s[i+1:j])); i = j + 1; continue
                 if char == '[':
                     j = s.find(']', i)
@@ -235,12 +238,10 @@ class FusionConfig:
                 if peek()[0] == 'OP' and peek()[1] == '}':
                     next_tok(); _depth[0] -= 1
                     return res_list if res_list and not res_dict else res_dict
-                # Lookahead for Key = Value
+                # Lookahead for Key = Value (peek() is bounds-checked, never raises)
                 is_assign = False
-                try:
-                    nxt = peek(1)
-                    if nxt and nxt[0] == 'OP' and nxt[1] == '=': is_assign = True
-                except (ValueError, IndexError): pass
+                nxt = peek(1)
+                if nxt and nxt[0] == 'OP' and nxt[1] == '=': is_assign = True
                 if is_assign:
                     key_tok = next_tok()
                     next_tok() # =
