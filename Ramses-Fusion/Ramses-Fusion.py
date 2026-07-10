@@ -117,6 +117,11 @@ class RamsesFusionApp:
                 "Ensure the script is launched from within Fusion."
             ) from exc
 
+        # Fusion only injects `bmd` into this entry script's globals, not into
+        # imported modules — hand it to fusion_host so its UIManager dialogs
+        # and .comp merging (bmd.UIDispatcher / bmd.readfile) work.
+        fusion_host.bmd = _bmd_obj
+
         self.ramses.host = fusion_host.FusionHost(_fusion_obj)
         self.ramses.host.app = self
 
@@ -128,6 +133,7 @@ class RamsesFusionApp:
         self.dlg = None
         self._project_cache = None
         self._user_name_cache = None
+        self._single_user_cache = None  # None = unknown; bool once probed
 
         # Context Caching
         self._context_lock = threading.Lock()
@@ -369,15 +375,18 @@ class RamsesFusionApp:
                         if user.role() >= ram.UserRole.LEAD:
                             has_permission = True
                         else:
-                            # Check if local/single-user
-                            try:
-                                all_users = self.ramses.daemonInterface().getObjects(
-                                    "RamUser"
-                                )
-                                if len(all_users) <= 1:
-                                    has_permission = True
-                            except Exception:
-                                pass
+                            # Check if local/single-user (cached — fetching all
+                            # users on every UI refresh is a daemon roundtrip)
+                            if self._single_user_cache is None:
+                                try:
+                                    all_users = self.ramses.daemonInterface().getObjects(
+                                        "RamUser"
+                                    )
+                                    self._single_user_cache = len(all_users) <= 1
+                                except Exception:
+                                    pass  # Leave unknown; retry on next refresh
+                            if self._single_user_cache:
+                                has_permission = True
 
                 items["PubSettingsButton"].Enabled = (
                     is_online and is_pipeline and has_permission
@@ -948,6 +957,7 @@ class RamsesFusionApp:
                 if force_full:
                     self._project_cache = None
                     self._user_name_cache = None
+                    self._single_user_cache = None
 
                 # Clear item/step caches and path tracker to force re-fetch from host
                 self._item_cache = None
@@ -2545,12 +2555,34 @@ class RamsesFusionApp:
 
         # Use build helper for naming consistency
         nm = self._build_file_info(ram.ItemType.GENERAL, step, name, "comp")
-        path = os.path.join(tpl_folder, nm.fileName())
+        path = self.ramses.host.normalizePath(os.path.join(tpl_folder, nm.fileName()))
 
         comp = self.ramses.host.comp
-        if comp:
-            comp.Save(self.ramses.host.normalizePath(path))
-            self.log(f"Template '{name}' saved to {path}", ram.LogLevel.Info)
+        if not comp:
+            return
+
+        # comp.Save(path) is a save-as: it would repoint COMPS_FileName at the
+        # templates folder and hijack the working file's identity. For an
+        # already-saved comp, save in place and copy the file instead.
+        src = self.ramses.host.currentFilePath()
+        if src:
+            if not comp.Save(src):
+                self.log("Could not save current comp before templating.", ram.LogLevel.Critical)
+                return
+            try:
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                fusion_host.RamFileManager.copy(src, path, separateThread=False)
+            except Exception as e:
+                self.log(f"Failed to copy template to {path}: {e}", ram.LogLevel.Critical)
+                return
+        else:
+            # Unsaved comp: saving directly to the template path is fine — there
+            # is no prior identity to preserve.
+            if not comp.Save(path):
+                self.log(f"Failed to save template to {path}", ram.LogLevel.Critical)
+                return
+
+        self.log(f"Template '{name}' saved to {path}", ram.LogLevel.Info)
 
     @requires_connection
     def on_sync(self, ev: object) -> None:

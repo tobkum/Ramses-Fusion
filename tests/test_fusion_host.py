@@ -1088,5 +1088,62 @@ class TestFusionCompImport(unittest.TestCase):
         self.assertEqual(res, "")
         self.host.log.assert_called_with(ANY, LogLevel.Critical)
 
+class TestVersionFolderScanning(unittest.TestCase):
+    """Covers the patched RamFileManager version scanners (flat files AND
+    Ramses-Ingest style version directories), including the candidate
+    prefilter that replaced the arbitrary entries[:N] listing slice."""
+
+    def setUp(self):
+        import tempfile
+        self.tmp = tempfile.mkdtemp()
+        self.versions = os.path.join(self.tmp, "_versions")
+        os.makedirs(self.versions)
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _add_version_dir(self, dirname: str, filename: str) -> str:
+        d = os.path.join(self.versions, dirname)
+        os.makedirs(d, exist_ok=True)
+        p = os.path.join(d, filename)
+        with open(p, "w") as f:
+            f.write("x")
+        return p
+
+    def test_latest_version_found_in_directory_versions(self):
+        """Directory-based versions (001_OK, 002_WIP ...) resolve to the newest."""
+        from fusion_host import RamFileManager
+
+        self._add_version_dir("001_OK", "TEST_S_SH010_COMP.mov")
+        latest = self._add_version_dir("002_WIP", "TEST_S_SH010_COMP.mov")
+        # Noise that must not be picked up
+        self._add_version_dir("003_OK", "OTHER_SHOT.mov")  # wrong base name
+        os.makedirs(os.path.join(self.versions, "not_a_version"), exist_ok=True)
+
+        with patch.object(RamFileManager, "getVersionFolder", return_value=self.versions):
+            result = RamFileManager.getLatestVersionFilePath(
+                os.path.join(self.tmp, "TEST_S_SH010_COMP.comp")
+            )
+
+        self.assertEqual(os.path.normpath(result), os.path.normpath(latest))
+
+    def test_all_versions_listed_in_order(self):
+        from fusion_host import RamFileManager
+
+        v1 = self._add_version_dir("001_OK", "TEST_S_SH010_COMP.exr")
+        v2 = self._add_version_dir("002_OK", "TEST_S_SH010_COMP.exr")
+
+        with patch.object(RamFileManager, "getVersionFolder", return_value=self.versions):
+            result = RamFileManager.getVersionFilePaths(
+                os.path.join(self.tmp, "TEST_S_SH010_COMP.comp")
+            )
+
+        self.assertEqual(
+            [os.path.normpath(p) for p in result],
+            [os.path.normpath(v1), os.path.normpath(v2)],
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

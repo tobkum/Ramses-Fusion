@@ -49,6 +49,12 @@ except ImportError:
 
 __all__ = ["FusionHost"]
 
+# Fusion only provides the `bmd` scripting handle to the entry script's
+# globals, never to imported modules. The launcher (Ramses-Fusion.py) must
+# inject it here (``fusion_host.bmd = bmd``) before any UIManager dialog or
+# .comp merge is used. Kept as a module global so existing call sites work.
+bmd = None
+
 # =============================================================================
 # RENDER FORMAT CONSTANTS
 # =============================================================================
@@ -85,6 +91,35 @@ with _DAEMON_INIT_LOCK:
     # 2. Fix Case Sensitivity and robust matching for version files on Windows.
     _MAX_VERSION_ENTRIES = 2000  # Guard against runaway version folders; shared by both patch functions
 
+    # Version-style directory names: "001", "001_OK", "BG_001_OK" ...
+    _VERSION_DIR_RE = re.compile(r"^(?:.*_)?(\d{3})(?:_.*)?$")
+
+    def _list_version_candidates(versionsFolder, base_id):
+        """Lists version-folder entries that can possibly contribute a version.
+
+        Uses cheap string checks (no stat calls) to prefilter, then caps the
+        result at _MAX_VERSION_ENTRIES *after sorting* and keeps the tail, so
+        a runaway folder cannot hide the latest version behind an arbitrary
+        os.listdir() ordering (the previous entries[:N] slice could).
+        """
+        try:
+            entries = os.listdir(versionsFolder)
+        except OSError:
+            return []
+        candidates = [
+            f
+            for f in entries
+            if f.lower().startswith(base_id) or _VERSION_DIR_RE.match(f)
+        ]
+        if len(candidates) > _MAX_VERSION_ENTRIES:
+            print(
+                f"[Ramses] Warning: {versionsFolder} has {len(candidates)} version "
+                f"candidates; scanning only the {_MAX_VERSION_ENTRIES} highest-sorted."
+            )
+            candidates.sort()
+            candidates = candidates[-_MAX_VERSION_ENTRIES:]
+        return candidates
+
     def _patched_getLatestVersionFilePath(filePath, previous=False):
         """Resolves the latest version file path using robust matching (Files AND Folders)."""
         fileName = os.path.basename(filePath)
@@ -98,11 +133,7 @@ with _DAEMON_INIT_LOCK:
             return ""
 
         candidates = []
-        try:
-            entries = os.listdir(versionsFolder)
-        except OSError:
-            return ""
-        for f in entries[:_MAX_VERSION_ENTRIES]:
+        for f in _list_version_candidates(versionsFolder, base_id):
             path = os.path.join(versionsFolder, f)
 
             # Case A: File-based versioning (standard behavior of patch)
@@ -118,7 +149,7 @@ with _DAEMON_INIT_LOCK:
                 # Check if folder looks like a version (001... or res_001...)
                 # Regex matches: (optional resource_)(3 digits)(optional _state)
                 # e.g. "001", "001_OK", "BG_001_OK"
-                m_ver = re.match(r"^(?:.*_)?(\d{3})(?:_.*)?$", f)
+                m_ver = _VERSION_DIR_RE.match(f)
                 if m_ver:
                     version = int(m_ver.group(1))
 
@@ -160,11 +191,7 @@ with _DAEMON_INIT_LOCK:
             return []
 
         candidates = []
-        try:
-            entries = os.listdir(versionsFolder)
-        except OSError:
-            return []
-        for f in entries[:_MAX_VERSION_ENTRIES]:
+        for f in _list_version_candidates(versionsFolder, base_id):
             path = os.path.join(versionsFolder, f)
 
             # Case A: File-based
@@ -177,7 +204,7 @@ with _DAEMON_INIT_LOCK:
 
             # Case B: Directory-based
             elif os.path.isdir(path):
-                m_ver = re.match(r"^(?:.*_)?(\d{3})(?:_.*)?$", f)
+                m_ver = _VERSION_DIR_RE.match(f)
                 if m_ver:
                     # Look for match inside
                     try:
@@ -1007,6 +1034,11 @@ class FusionHost(RamHost):
             dict: A dictionary mapping field IDs to their values if the user clicks OK,
                   or None if the user cancels.
         """
+        if bmd is None:
+            raise RuntimeError(
+                "Fusion 'bmd' handle not injected into fusion_host. "
+                "Launch through Ramses-Fusion.py, which sets fusion_host.bmd."
+            )
         ui = self.fusion.UIManager
         disp = bmd.UIDispatcher(ui)
 
@@ -1203,6 +1235,26 @@ class FusionHost(RamHost):
 
         return ui.Label({"Text": "Unknown Field"}), 30
 
+    def _read_comp_file(self, path: str) -> str:
+        """Reads a .comp file as a clip string for comp.Paste().
+
+        Returns an empty string (and logs) when the Fusion scripting handle is
+        missing or the file cannot be read, so callers can treat "no content"
+        as a soft failure.
+        """
+        if bmd is None:
+            self.log(
+                "Cannot read .comp file: Fusion 'bmd' handle not injected "
+                "(launch through Ramses-Fusion.py).",
+                LogLevel.Critical,
+            )
+            return ""
+        try:
+            return bmd.readfile(path) or ""
+        except Exception as e:
+            self.log(f"Failed to read comp file {path}: {e}", LogLevel.Critical)
+            return ""
+
     # -------------------------------------------------------------------------
     # Pipeline Implementation
     # -------------------------------------------------------------------------
@@ -1272,7 +1324,7 @@ class FusionHost(RamHost):
                     try:
                         # Use the "Read & Paste" strategy to bypass Fusion's Merge node conflict.
                         # bmd.readfile() reads the .comp as a clip string; comp.Paste() inserts it.
-                        content = bmd.readfile(normalized_path)
+                        content = self._read_comp_file(normalized_path)
                         if content:
                             self.comp.Paste(content)
                             self.log(f"Merged nodes from composition: {normalized_path}", LogLevel.Info)
@@ -1460,7 +1512,7 @@ class FusionHost(RamHost):
                             return None
 
                         # bmd.readfile() reads the .comp as a clip string; comp.Paste() inserts it.
-                        content = bmd.readfile(self.normalizePath(path))
+                        content = self._read_comp_file(self.normalizePath(path))
                         if content:
                             self.comp.Paste(content)
                             self.log(f"Merged nodes from: {path}", LogLevel.Info)
@@ -2654,9 +2706,10 @@ class FusionHost(RamHost):
                         }
                         count += 1
                     else:
-                        # UP TO DATE: Clear warning visuals
+                        # UP TO DATE: Clear warning visuals (None restores the
+                        # default tile color; {0,0,0} would paint the node black)
                         updates[name] = {
-                            "color": {"R": 0.0, "G": 0.0, "B": 0.0},
+                            "color": None,
                             "comment": "",
                         }
 
@@ -2687,7 +2740,12 @@ class FusionHost(RamHost):
                         # Only update if current color differs
                         color = node.TileColor
                         target_color = data["color"]
-                        if (
+                        if target_color is None:
+                            # Clear back to the default tile color only if a
+                            # custom color is currently set.
+                            if color:
+                                node.TileColor = None
+                        elif (
                             not color
                             or abs(color.get("R", 0) - target_color["R"]) > 0.01
                             or abs(color.get("G", 0) - target_color["G"]) > 0.01
@@ -2864,12 +2922,8 @@ class FusionHost(RamHost):
                                                 "Ramses.Resource", new_info.resource
                                             )
 
-                                        # Reset Visuals
-                                        active.TileColor = {
-                                            "R": 0.0,
-                                            "G": 0.0,
-                                            "B": 0.0,
-                                        }
+                                        # Reset Visuals (None restores default tile color)
+                                        active.TileColor = None
                                         active.Comments[1] = ""
 
                                         self.log(

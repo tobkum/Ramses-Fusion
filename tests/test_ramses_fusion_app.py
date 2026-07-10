@@ -420,6 +420,10 @@ class TestRamsesFusionApp(unittest.TestCase):
                     self.assertTrue(mock_items["PubSettingsButton"].Enabled)
 
                 # 3. Standard Role, Single-User -> Enabled
+                # The single-user probe is cached per session (it is a daemon
+                # roundtrip); a change in user population is only picked up
+                # after a forced refresh clears the cache — simulate that.
+                self.app._single_user_cache = None
                 mock_user.role.return_value = ramses.UserRole.STANDARD
                 with patch.object(
                     self.app.ramses.daemonInterface(),
@@ -432,6 +436,51 @@ class TestRamsesFusionApp(unittest.TestCase):
                         mock_prop.return_value = mock_item
                         self.app._update_ui_state(True)
                         self.assertTrue(mock_items["PubSettingsButton"].Enabled)
+
+    def test_save_template_preserves_working_file_identity(self):
+        """'Save as Template' must not repoint the comp at the template path
+        (comp.Save(path) is a save-as): the working file is saved in place and
+        the template is written as a file copy."""
+        import tempfile
+        import shutil
+        import fusion_host as fh
+
+        tmp = tempfile.mkdtemp()
+        try:
+            step = MagicMock()
+            step.templatesFolderPath.return_value = tmp
+            step.projectShortName.return_value = "TEST"
+            step.shortName.return_value = "COMP"
+
+            host = self.app.ramses.host
+            src = "D:/proj/shot/TEST_S_SH010_COMP.comp"
+            comp = MagicMock()
+            comp.Save.return_value = True
+
+            with patch.object(
+                RamsesFusionApp, "current_step", new_callable=PropertyMock, return_value=step
+            ), patch.object(
+                type(host), "comp", new_callable=PropertyMock, return_value=comp
+            ), patch.object(
+                host, "currentFilePath", return_value=src
+            ), patch.object(
+                host, "_request_input", return_value={"Name": "MyTpl"}
+            ), patch.object(fh.RamFileManager, "copy") as mock_copy:
+                self.app.on_save_template(None)
+
+            # Saved in place — never to the template path
+            comp.Save.assert_called_once_with(src)
+            # Template written as a copy of the working file
+            mock_copy.assert_called_once()
+            copy_src, copy_dst = mock_copy.call_args[0][:2]
+            self.assertEqual(copy_src, src)
+            self.assertTrue(
+                copy_dst.replace("\\", "/").startswith(tmp.replace("\\", "/")),
+                f"Template must land in the templates folder, got {copy_dst}",
+            )
+            self.assertTrue(copy_dst.endswith(".comp"))
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
 
     def test_priority_and_color_rendering(self):
         """Verify that the header renders priority suffixes and Ramses colors."""
