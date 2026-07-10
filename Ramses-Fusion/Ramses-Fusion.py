@@ -326,7 +326,9 @@ class RamsesFusionApp:
             is_mismatch = False
             meta_uuid = ""
             if item and is_online:
-                active_proj = self.ramses.project()
+                # Use the cached project — a direct ramses.project() call here
+                # cost a daemon roundtrip on every UI refresh.
+                active_proj = self._get_project()
 
                 # Check 0: Metadata (The Golden Source)
                 try:
