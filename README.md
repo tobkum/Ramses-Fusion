@@ -15,8 +15,9 @@ Fusion Studio integration for [Ramses](https://ramses.rxlab.guide/) production m
   - Frame rate
   - Frame range (start, end based on shot duration)
 - **Render Anchor Generation**: Creates preconfigured Saver nodes with standardized paths:
-  - `_PREVIEW`: Draft renders for review (e.g., `PROJ_S_SH010_COMP.####.jpg`)
-  - `_FINAL`: Client deliverables with optional suffix (e.g., `PROJ_S_SH010_COMP_vfx.####.exr`)
+  - `_PREVIEW`: Review renders into the shot's `_preview` folder (default: ProRes 422 `.mov`, e.g. `PROJ_S_SH010_COMP.mov`)
+  - `_FINAL`: Client deliverables into the project export folder (default) or the step's `_published` folder, with optional client suffix (e.g. `A010_C003_vfx.####.exr`)
+  - Optional **source-plate frame numbering** for sequence deliverables: files carry the plate's original frame numbers while the comp stays at the studio start frame (see [Step Configuration](wiki/Step-Configuration.md))
 
 ### Asset Management
 - **Import Published Elements**: Load upstream renders (e.g., plates from PLATE step) with automatic Loader node creation
@@ -93,24 +94,30 @@ Copy contents to Fusion Scripts directory:
 
 ### Render Anchor Usage
 The tool creates two Saver nodes for standardized output:
-- **Preview Saver** (`_PREVIEW`): Automatic path to `_preview/PROJ_S_SH010_COMP.####.jpg`
-- **Final Saver** (`_FINAL`): Automatic path to `_published/vNNN_STATE/PROJ_S_SH010_COMP.####.exr`
+- **Preview Saver** (`_PREVIEW`): Automatic path into the shot's `_preview` folder (default format: ProRes 422 `.mov`)
+- **Final Saver** (`_FINAL`): Automatic path into the project export folder (default) or, with `export_dest: step`, a versioned `_published/NNN_STATE/` folder
 
-Paths are managed automatically - no manual file naming required.
+Paths, formats and (optionally) output frame numbering are managed automatically — no manual file naming required.
 
 ## Configuration
 
 ### Step Configuration
-Configure render output settings per step via Fusion UI:
+Configure render output settings per step via Fusion UI (Render Wizard —
+paste a configured Saver, no hand-written YAML needed):
 - Output format (EXR, DPX, etc.)
 - Color depth
 - Compression
 - Client suffix for deliverables (`_vfx`, `_final`, etc.)
+- Export destination (project export folder or versioned `_published`)
+- Source-plate frame numbering for sequence deliverables (tick *Set Sequence
+  Start* on the pasted Saver)
 
 ### User Settings
-Stored in `~/.config/RxLaboratory/Ramses/ramses.json`:
-- `projectsPath`: Root directory for all Ramses projects
+Stored in the standard Ramses add-ons config (`ramses_addons_settings.json` in
+the Ramses config directory, e.g. `%APPDATA%/Ramses/Config/` on Windows):
 - `compStartFrame`: Default timeline start frame (e.g., 1001)
+- `plateStepNames`: Step short names treated as plate/footage steps
+  (default: `Plate`, `Ingest`, `Footage` — shared with Ramses-Syntheyes)
 
 ## Troubleshooting
 
@@ -124,8 +131,8 @@ Stored in `~/.config/RxLaboratory/Ramses/ramses.json`:
 - Path must contain shot identifier matching Ramses database
 
 ### Loader nodes show orange
-- Upstream published version has been updated
-- Click node and select "Update to Latest" to refresh
+- Upstream published version has been updated (the node comment names the new version)
+- Select the Loader and click **Replace Loader** — the plugin offers the latest published version
 
 ## Architecture
 

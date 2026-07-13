@@ -1389,7 +1389,7 @@ class RamsesFusionApp:
                     "rampreview.png",
                     accent_color=bg_color,
                     weight=0,
-                    tooltip="Generate a preview render for supervisor review.",
+                    tooltip="Generate a preview render for supervisor review. Saved to the shot's _preview folder, where review tools (Ramses Client, Ramses-Out) pick it up.",
                 ),
                 self.create_button(
                     "UpdateStatusButton",
