@@ -1368,6 +1368,49 @@ class FusionHost(RamHost):
     # Pipeline Implementation
     # -------------------------------------------------------------------------
 
+    @staticmethod
+    def _collapse_import_paths(filePaths: list) -> list:
+        """Prepares a raw import list for Loader creation.
+
+        Skips sidecar files (dotfiles like ``.ramses_complete``, ``.json``
+        metadata, logs) and collapses each frame sequence to its **lowest
+        frame** — a Loader pointed at one frame loads the whole sequence, so
+        one Loader per frame would flood the flow.
+
+        Files without a frame token (movies, .comp merges, single stills)
+        pass through untouched, and the original selection order is kept.
+        """
+        skip_exts = {".json", ".txt", ".log", ".xml", ".tmp"}
+        result = []
+        seq_slots = {}  # (folder, name-with-#-token) -> (result index, frame)
+
+        for path in filePaths or []:
+            base = os.path.basename(str(path))
+            if base.startswith(".") or base.lower() == "thumbs.db":
+                continue
+            if os.path.splitext(base)[1].lower() in skip_exts:
+                continue
+
+            m = _FRAME_TOKEN_RE.search(base)
+            if not m:
+                result.append(path)
+                continue
+
+            frame = int(m.group(1))
+            key = (
+                os.path.dirname(str(path)).lower(),
+                (base[: m.start(1)] + "#" + base[m.end(1):]).lower(),
+            )
+            slot = seq_slots.get(key)
+            if slot is None:
+                seq_slots[key] = (len(result), frame)
+                result.append(path)
+            elif frame < slot[1]:
+                result[slot[0]] = path
+                seq_slots[key] = (slot[0], frame)
+
+        return result
+
     def _import(
         self,
         filePaths: list,
@@ -1397,6 +1440,21 @@ class FusionHost(RamHost):
         """
         if not self.comp:
             return False
+
+        # The upstream import flow may pass the full contents of a published
+        # version folder — every frame of a sequence plus Ingest sidecars.
+        # Collapse to one Loader per sequence and drop the sidecars.
+        original_count = len(filePaths)
+        filePaths = self._collapse_import_paths(filePaths)
+        if not filePaths:
+            self.log("Nothing importable in the selection.", LogLevel.Warning)
+            return False
+        if len(filePaths) < original_count:
+            self.log(
+                f"Import: collapsed {original_count} files into "
+                f"{len(filePaths)} import(s).",
+                LogLevel.Info,
+            )
 
         # Start undo group with descriptive name
         num_files = len(filePaths)

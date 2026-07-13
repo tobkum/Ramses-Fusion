@@ -1145,6 +1145,84 @@ class TestVersionFolderScanning(unittest.TestCase):
         )
 
 
+class TestImportCollapsing(unittest.TestCase):
+    """Sequence collapsing and sidecar filtering in _import.
+
+    The upstream import flow can pass every file of a published version
+    folder — without collapsing, a 240-frame EXR plate would create 240
+    Loaders (plus Loaders for .ramses_complete and _ramses_data.json).
+    """
+
+    SEQ = [
+        f"D:/pub/001/TEST_S_SH010_PLATE.{f}.exr" for f in (86402, 86400, 86401)
+    ]
+    SIDECARS = [
+        "D:/pub/001/.ramses_complete",
+        "D:/pub/001/_ramses_data.json",
+    ]
+
+    def setUp(self):
+        self.mock_fusion = MockFusion()
+        import fusion_host
+        fusion_host.bmd = sys.modules["bmd"]
+        self.host = FusionHost(self.mock_fusion)
+        self.comp = self.mock_fusion.GetCurrentComp()
+
+    # --- _collapse_import_paths ----------------------------------------------
+
+    def test_sequence_collapses_to_lowest_frame(self):
+        result = FusionHost._collapse_import_paths(self.SIDECARS + self.SEQ)
+        self.assertEqual(result, ["D:/pub/001/TEST_S_SH010_PLATE.86400.exr"])
+
+    def test_sidecars_are_skipped(self):
+        self.assertEqual(FusionHost._collapse_import_paths(self.SIDECARS), [])
+
+    def test_distinct_sequences_stay_separate(self):
+        files = [
+            "D:/pub/001/SH010_BG.1001.exr",
+            "D:/pub/001/SH010_BG.1002.exr",
+            "D:/pub/001/SH010_FG.1001.exr",
+        ]
+        result = FusionHost._collapse_import_paths(files)
+        self.assertEqual(
+            result,
+            ["D:/pub/001/SH010_BG.1001.exr", "D:/pub/001/SH010_FG.1001.exr"],
+        )
+
+    def test_movies_comps_and_versioned_files_pass_through(self):
+        """No frame token = no collapsing; .comp files must survive for the
+        merge path; _v001-style version tokens are not frame tokens."""
+        files = [
+            "D:/pub/001/SH010.mov",
+            "D:/pub/001/tracking.comp",
+            "D:/pub/001/TEST_S_Shot01_RENDER_v001.exr",
+            "D:/pub/001/TEST_S_Shot01_RENDER_v002.exr",
+        ]
+        self.assertEqual(FusionHost._collapse_import_paths(files), files)
+
+    def test_same_name_in_different_folders_not_merged(self):
+        files = [
+            "D:/pub/001/SH010.1001.exr",
+            "D:/pub/002/SH010.1001.exr",
+        ]
+        self.assertEqual(FusionHost._collapse_import_paths(files), files)
+
+    # --- _import integration ---------------------------------------------------
+
+    def test_import_creates_single_loader_for_sequence(self):
+        self.host._import(self.SIDECARS + self.SEQ, None, None, [], False)
+        loaders = [t for t in self.comp.tools.values() if t.ID == "Loader"]
+        self.assertEqual(len(loaders), 1)
+        self.assertEqual(
+            loaders[0].Clip[1], "D:/pub/001/TEST_S_SH010_PLATE.86400.exr"
+        )
+
+    def test_import_with_only_sidecars_fails_cleanly(self):
+        result = self.host._import(self.SIDECARS, None, None, [], False)
+        self.assertFalse(result)
+        self.assertEqual(len(self.comp.tools), 0)
+
+
 class TestSourceNumbering(unittest.TestCase):
     """Source-plate frame numbering on the _FINAL/_PREVIEW Savers.
 
