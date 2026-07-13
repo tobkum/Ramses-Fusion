@@ -1145,5 +1145,227 @@ class TestVersionFolderScanning(unittest.TestCase):
         )
 
 
+class TestSourceNumbering(unittest.TestCase):
+    """Source-plate frame numbering on the _FINAL/_PREVIEW Savers.
+
+    The comp timeline keeps the studio start-frame convention (1001);
+    when enabled per step, the Saver's SetSequenceStart/SequenceStartFrame
+    inputs make the rendered files carry the plate's own numbering.
+    """
+
+    PLATE_CLIP = (
+        "D:/proj/05-SHOTS/TEST_S_SH010/TEST_S_SH010_PLATE/"
+        "_published/001/TEST_S_SH010_PLATE.86400.exr"
+    )
+
+    def setUp(self):
+        self.mock_fusion = MockFusion()
+        import fusion_host
+        fusion_host.bmd = sys.modules["bmd"]
+        self.fusion_host = fusion_host
+        self.host = FusionHost(self.mock_fusion)
+        self.comp = self.mock_fusion.GetCurrentComp()
+
+        # Default plateStepNames come from user settings — isolate from the
+        # machine's real Ramses config.
+        settings = MagicMock()
+        settings.userSettings = {}
+        self._settings_patch = patch.object(fusion_host, "RAM_SETTINGS", settings)
+        self._settings_patch.start()
+        self.addCleanup(self._settings_patch.stop)
+
+    # --- parse_frame_number -------------------------------------------------
+
+    def test_parse_frame_number_dot_separator(self):
+        self.assertEqual(FusionHost.parse_frame_number("plate.86400.exr"), 86400)
+
+    def test_parse_frame_number_underscore_separator(self):
+        self.assertEqual(FusionHost.parse_frame_number("plate_1001.dpx"), 1001)
+
+    def test_parse_frame_number_rejects_version_tokens(self):
+        """_v001 is a version, not a frame — digits must follow the separator."""
+        self.assertIsNone(FusionHost.parse_frame_number("shot_v001.exr"))
+
+    def test_parse_frame_number_no_frame(self):
+        self.assertIsNone(FusionHost.parse_frame_number("TEST_S_SH010_PLATE.exr"))
+        self.assertIsNone(FusionHost.parse_frame_number(".ramses_complete"))
+        self.assertIsNone(FusionHost.parse_frame_number(None))
+
+    # --- resolveSourceStartFrame ---------------------------------------------
+
+    def _add_loader(self, clip_path):
+        loader = self.comp.AddTool("Loader", 0, 0)
+        loader.Clip[1] = clip_path
+        return loader
+
+    def test_resolve_from_plate_loader(self):
+        """A Loader pointing into a plate step's _published wins."""
+        self._add_loader(self.PLATE_CLIP)
+
+        plate_step = MagicMock()
+        plate_step.shortName.return_value = "Plate"
+        with patch.object(
+            self.fusion_host.RamStep, "fromPath", return_value=plate_step
+        ):
+            self.assertEqual(self.host.resolveSourceStartFrame(), 86400)
+
+    def test_resolve_ignores_non_plate_loaders(self):
+        """Loaders from non-plate steps (e.g. a CG render) don't define numbering."""
+        self._add_loader(
+            "D:/proj/05-SHOTS/TEST_S_SH010/TEST_S_SH010_CG/"
+            "_published/002/TEST_S_SH010_CG.1001.exr"
+        )
+        cg_step = MagicMock()
+        cg_step.shortName.return_value = "CG"
+        with patch.object(self.fusion_host.RamStep, "fromPath", return_value=cg_step), \
+             patch.object(self.host, "currentItem", return_value=None):
+            self.assertIsNone(self.host.resolveSourceStartFrame())
+
+    def test_resolve_uses_min_frame_across_plate_loaders(self):
+        self._add_loader(self.PLATE_CLIP)
+        self._add_loader(self.PLATE_CLIP.replace("86400", "86500"))
+
+        plate_step = MagicMock()
+        plate_step.shortName.return_value = "Plate"
+        with patch.object(
+            self.fusion_host.RamStep, "fromPath", return_value=plate_step
+        ):
+            self.assertEqual(self.host.resolveSourceStartFrame(), 86400)
+
+    def test_resolve_falls_back_to_published_plate_on_disk(self):
+        """No loaders: the latest published plate folder defines numbering.
+        Sidecars (.ramses_complete, _ramses_data.json) must be ignored."""
+        plate_step = MagicMock()
+        plate_step.shortName.return_value = "Ingest"
+        project = MagicMock()
+        project.steps.return_value = [plate_step]
+
+        item = MagicMock()
+        item.latestPublishedVersionFilePaths.return_value = [
+            "D:/pub/001/.ramses_complete",
+            "D:/pub/001/_ramses_data.json",
+            "D:/pub/001/TEST_S_SH010_PLATE.86400.exr",
+            "D:/pub/001/TEST_S_SH010_PLATE.86401.exr",
+        ]
+
+        with patch.object(self.host, "currentItem", return_value=item), \
+             patch.object(self.fusion_host.RAMSES, "project", return_value=project):
+            self.assertEqual(self.host.resolveSourceStartFrame(), 86400)
+
+    def test_resolve_returns_none_when_nothing_found(self):
+        with patch.object(self.host, "currentItem", return_value=None):
+            self.assertIsNone(self.host.resolveSourceStartFrame())
+
+    # --- _apply_source_numbering ----------------------------------------------
+
+    def _saver(self):
+        return self.comp.AddTool("Saver", 0, 0)
+
+    def _with_step_cfg(self, cfg):
+        return patch.object(self.host, "_get_fusion_settings", return_value=cfg)
+
+    def test_unmanaged_when_key_absent(self):
+        """No source_numbering key: the Saver's inputs are never touched."""
+        node = self._saver()
+        node.SetInput("SetSequenceStart", 1, 0)  # artist's manual choice
+        node.SetInput("SequenceStartFrame", 500, 0)
+
+        cfg = {"final": {"format": "OpenEXRFormat", "image_sequence": True}}
+        with self._with_step_cfg(cfg), \
+             patch.object(self.host, "currentStep", return_value=None):
+            self.host._apply_source_numbering(node, "final")
+
+        self.assertEqual(node.GetInput("SetSequenceStart"), 1)
+        self.assertEqual(node.GetInput("SequenceStartFrame"), 500)
+
+    def test_enabled_sets_saver_inputs(self):
+        node = self._saver()
+        cfg = {
+            "final": {
+                "format": "OpenEXRFormat",
+                "image_sequence": True,
+                "source_numbering": True,
+            }
+        }
+        with self._with_step_cfg(cfg), \
+             patch.object(self.host, "currentStep", return_value=None), \
+             patch.object(self.host, "resolveSourceStartFrame", return_value=86400):
+            self.host._apply_source_numbering(node, "final")
+
+        self.assertEqual(node.GetInput("SetSequenceStart"), 1)
+        self.assertEqual(node.GetInput("SequenceStartFrame"), 86400)
+
+    def test_enabled_but_no_plate_found_leaves_comp_numbering(self):
+        node = self._saver()
+        cfg = {
+            "final": {
+                "format": "OpenEXRFormat",
+                "image_sequence": True,
+                "source_numbering": True,
+            }
+        }
+        with self._with_step_cfg(cfg), \
+             patch.object(self.host, "currentStep", return_value=None), \
+             patch.object(self.host, "resolveSourceStartFrame", return_value=None):
+            self.host._apply_source_numbering(node, "final")
+
+        self.assertIsNone(node.GetInput("SetSequenceStart"))
+
+    def test_disabled_clears_previous_offset(self):
+        """source_numbering: false enforces comp-time numbering."""
+        node = self._saver()
+        node.SetInput("SetSequenceStart", 1, 0)
+
+        cfg = {
+            "final": {
+                "format": "OpenEXRFormat",
+                "image_sequence": True,
+                "source_numbering": False,
+            }
+        }
+        with self._with_step_cfg(cfg), \
+             patch.object(self.host, "currentStep", return_value=None):
+            self.host._apply_source_numbering(node, "final")
+
+        self.assertEqual(node.GetInput("SetSequenceStart"), 0)
+
+    def test_not_applied_to_movie_outputs(self):
+        """A .mov master has no frame numbering to offset."""
+        node = self._saver()
+        cfg = {
+            "final": {
+                "format": "QuickTimeMovies",
+                "source_numbering": True,
+            }
+        }
+        with self._with_step_cfg(cfg), \
+             patch.object(self.host, "currentStep", return_value=None), \
+             patch.object(self.host, "resolveSourceStartFrame") as mock_resolve:
+            self.host._apply_source_numbering(node, "final")
+
+        mock_resolve.assert_not_called()
+        self.assertIsNone(node.GetInput("SetSequenceStart"))
+
+    def test_apply_render_preset_invokes_source_numbering(self):
+        """End to end: apply_render_preset on a YAML-configured step wires
+        the sequence-start inputs alongside format/codec."""
+        node = self._saver()
+        cfg = {
+            "final": {
+                "format": "OpenEXRFormat",
+                "image_sequence": True,
+                "source_numbering": True,
+            }
+        }
+        with self._with_step_cfg(cfg), \
+             patch.object(self.host, "currentStep", return_value=None), \
+             patch.object(self.host, "resolveSourceStartFrame", return_value=86400):
+            self.host.apply_render_preset(node, "final")
+
+        self.assertEqual(node.GetInput("OutputFormat"), "OpenEXRFormat")
+        self.assertEqual(node.GetInput("SetSequenceStart"), 1)
+        self.assertEqual(node.GetInput("SequenceStartFrame"), 86400)
+
+
 if __name__ == "__main__":
     unittest.main()

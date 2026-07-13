@@ -64,6 +64,22 @@ CODEC_PRORES_422_HQ = "Apple ProRes 422 HQ_apch"
 
 _DEFAULT_SHOT_DURATION_SECS = 5.0  # Fallback duration when Ramses item has no duration set
 
+# Steps that hold ingested source plates. Same convention (and same user
+# setting, "plateStepNames") as Ramses-Syntheyes' new-scene-from-plate lookup.
+DEFAULT_PLATE_STEP_NAMES = ("Plate", "Ingest", "Footage")
+
+# Image-sequence extensions considered when deriving source frame numbering
+# from a published plate folder (filters out sidecars like .ramses_complete).
+_FOOTAGE_SEQ_EXTENSIONS = {
+    ".exr", ".dpx", ".png", ".jpg", ".jpeg", ".tif", ".tiff",
+    ".tga", ".cin", ".sgi", ".jp2", ".iff", ".pic", ".bmp",
+}
+
+# Trailing frame token of a sequence file: name.1001.exr or name_1001.exr.
+# The separator must directly precede the digits, so version tokens like
+# "_v001" never match.
+_FRAME_TOKEN_RE = re.compile(r"[._](\d+)\.[A-Za-z0-9]{1,5}$")
+
 # =============================================================================
 # MONKEY-PATCHING RAMSES API (Fixes critical environment bugs only)
 # =============================================================================
@@ -862,6 +878,99 @@ class FusionHost(RamHost):
         except Exception as e:
             self._log(f"Failed to resolve final path: {e}", LogLevel.Warning)
             return ""
+
+    @staticmethod
+    def parse_frame_number(path):
+        """Extracts the trailing frame number from a sequence file path.
+
+        Recognizes ``name.1001.exr`` and ``name_1001.exr``. Version tokens
+        such as ``_v001`` do not match (the digits must directly follow the
+        separator).
+
+        Returns:
+            int or None: The frame number, or None if the name carries none.
+        """
+        name = os.path.basename(str(path or ""))
+        m = _FRAME_TOKEN_RE.search(name)
+        return int(m.group(1)) if m else None
+
+    def resolveSourceStartFrame(self):
+        """Resolves the first frame number of the shot's source plate.
+
+        Used to number rendered files like the delivered plate while the comp
+        timeline keeps the studio start-frame convention.
+
+        Priority:
+        1. Plate Loaders in the comp (Clip path inside a plate step's
+           ``_published`` folder) — reflects what is actually being comped.
+        2. The latest published plate version on disk.
+
+        Plate steps are identified by short name, configurable via the
+        ``plateStepNames`` user setting (shared with Ramses-Syntheyes).
+
+        Returns:
+            int or None: The plate's first frame number, or None if unknown.
+        """
+        plate_names = {
+            str(n).lower()
+            for n in RAM_SETTINGS.userSettings.get(
+                "plateStepNames", DEFAULT_PLATE_STEP_NAMES
+            )
+        }
+
+        # 1) Plate Loaders in the comp
+        frames = []
+        if self.comp:
+            try:
+                loaders = self.comp.GetToolList(False, "Loader") or {}
+                for node in loaders.values():
+                    try:
+                        path = self.normalizePath(node.Clip[1])
+                    except Exception:
+                        continue
+                    if "/_published/" not in path:
+                        continue
+                    frame = self.parse_frame_number(path)
+                    if frame is None:
+                        continue
+                    step = RamStep.fromPath(path)
+                    if step and str(step.shortName()).lower() in plate_names:
+                        frames.append(frame)
+            except Exception as e:
+                self.log(
+                    f"Loader scan for source numbering failed: {e}",
+                    LogLevel.Debug,
+                )
+        if frames:
+            return min(frames)
+
+        # 2) Latest published plate version on disk
+        item = self.currentItem()
+        project = RAMSES.project()
+        if not item or not project:
+            return None
+        try:
+            steps = project.steps()
+        except Exception:
+            return None
+        for step in steps:
+            if str(step.shortName()).lower() not in plate_names:
+                continue
+            try:
+                files = item.latestPublishedVersionFilePaths(step=step)
+            except Exception:
+                continue
+            frames = []
+            for f in files:
+                # Skip sidecars (.ramses_complete, _ramses_data.json, ...)
+                if os.path.splitext(f)[1].lower() not in _FOOTAGE_SEQ_EXTENSIONS:
+                    continue
+                frame = self.parse_frame_number(f)
+                if frame is not None:
+                    frames.append(frame)
+            if frames:
+                return min(frames)
+        return None
 
     def _saveAs(
         self,
@@ -2316,6 +2425,7 @@ class FusionHost(RamHost):
             if target_cfg:
                 # Apply custom configuration
                 FusionConfig.apply_config(node, target_cfg)
+                self._apply_source_numbering(node, preset_name)
                 return
 
         except Exception as e:
@@ -2333,6 +2443,66 @@ class FusionHost(RamHost):
             # Final / default: Apple ProRes 422 HQ
             if node.GetInput(compression_key) != CODEC_PRORES_422_HQ:
                 node.SetInput(compression_key, CODEC_PRORES_422_HQ, 0)
+
+        self._apply_source_numbering(node, preset_name)
+
+    def _apply_source_numbering(self, node, preset_name: str) -> None:
+        """Aligns a Saver's output file numbering with the source plate.
+
+        Managed per step via YAML (``fusion.<preset>.source_numbering``):
+        key absent -> Saver untouched (artists keep manual control);
+        ``true``   -> rendered files are numbered from the plate's first
+        frame; ``false`` -> plain comp-time numbering is enforced.
+
+        Fusion numbers output files as ``SequenceStartFrame + frame -
+        GlobalStart``, so partial re-renders stay consistent and the comp
+        can keep the studio start-frame convention while deliverables carry
+        source numbering. Only meaningful for image-sequence outputs.
+        """
+        if not node:
+            return
+        try:
+            fusion_cfg = self._get_fusion_settings(self.currentStep())
+            preset_cfg = fusion_cfg.get(preset_name, {}) or {}
+            if "source_numbering" not in preset_cfg:
+                return  # unmanaged — never stomp manual Saver settings
+
+            enabled = bool(preset_cfg.get("source_numbering"))
+            _ext, is_sequence = self._get_preset_settings(preset_name)
+
+            start = None
+            if enabled and is_sequence:
+                start = self.resolveSourceStartFrame()
+                if start is None:
+                    self.log(
+                        f"{preset_name}: source_numbering is enabled but no "
+                        "plate numbering was found — using comp frame numbers.",
+                        LogLevel.Warning,
+                    )
+
+            def _as_float(value):
+                try:
+                    return float(value)
+                except (TypeError, ValueError):
+                    return None
+
+            if start is not None and start > 0:
+                if _as_float(node.GetInput("SetSequenceStart")) != 1.0:
+                    node.SetInput("SetSequenceStart", 1, 0)
+                if _as_float(node.GetInput("SequenceStartFrame")) != float(start):
+                    node.SetInput("SequenceStartFrame", start, 0)
+                self.log(
+                    f"{preset_name}: rendered files will be numbered from "
+                    f"the source plate (start frame {start}).",
+                    LogLevel.Info,
+                )
+            elif _as_float(node.GetInput("SetSequenceStart")):
+                node.SetInput("SetSequenceStart", 0, 0)
+        except Exception as e:
+            self.log(
+                f"Failed to apply source numbering ({preset_name}): {e}",
+                LogLevel.Warning,
+            )
 
     def _store_ramses_metadata(self, item: RamItem, step: RamStep = None) -> None:
         """Embeds Ramses identity (Project/Item/Step UUIDs) into Fusion composition metadata.
