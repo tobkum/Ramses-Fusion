@@ -1567,6 +1567,25 @@ class FusionHost(RamHost):
             self.comp.Unlock()
             self.comp.EndUndo(success)  # Commit if successful, discard if failed
 
+    @staticmethod
+    def findStepByShortName(project, *short_names):
+        """Case-insensitive step lookup by short name.
+
+        The upstream ``project.step()`` compares short names exactly, so a
+        step named "COMP" is invisible to a lookup for "Comp". Matches any
+        of *short_names* against the project's steps, ignoring case.
+        """
+        if not project:
+            return None
+        wanted = {str(n).lower() for n in short_names}
+        try:
+            for s in project.steps():
+                if str(s.shortName()).lower() in wanted:
+                    return s
+        except Exception:
+            return None
+        return None
+
     def _importUI(self, item: RamItem, step: RamStep) -> dict:
         """Shows the Ramses Asset Browser for importing."""
         if hasattr(self, 'app') and self.app and hasattr(self.app, 'qt_app') and self.app.qt_app:
@@ -1609,7 +1628,9 @@ class FusionHost(RamHost):
                 else:
                     project = RAMSES.project()
                     if project:
-                        comp_step = project.step("Comp") or project.step("Compositing")
+                        comp_step = self.findStepByShortName(
+                            project, "Comp", "Compositing"
+                        )
                         if comp_step:
                             dialog.setCurrentStep(comp_step)
                 if item:
@@ -1644,11 +1665,9 @@ class FusionHost(RamHost):
                         item_label = item.shortName() if item else ""
 
                         project = item.project() if item else RAMSES.project()
-                        comp_step = None
-                        if project:
-                            comp_step = (
-                                project.step("Comp") or project.step("Compositing")
-                            )
+                        comp_step = self.findStepByShortName(
+                            project, "Comp", "Compositing"
+                        )
                         comp_step_label = comp_step.name() if comp_step else "a Fusion step"
 
                         reply = qw.QMessageBox.question(
@@ -2733,8 +2752,10 @@ class FusionHost(RamHost):
                 if project:
                     # Default to Shot mode
                     dialog.setShot()
-                    # Pre-select Comp step
-                    comp_step = project.step("Comp") or project.step("Compositing")
+                    # Pre-select Comp step (case-insensitive)
+                    comp_step = self.findStepByShortName(
+                        project, "Comp", "Compositing"
+                    )
                     if comp_step:
                         dialog.setStep(comp_step)
 

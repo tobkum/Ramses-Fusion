@@ -1145,6 +1145,38 @@ class TestVersionFolderScanning(unittest.TestCase):
         )
 
 
+class TestStepLookup(unittest.TestCase):
+    """Case-insensitive step lookup (project.step() is exact-match only)."""
+
+    def _project(self, *step_names):
+        steps = []
+        for n in step_names:
+            s = MagicMock()
+            s.shortName.return_value = n
+            steps.append(s)
+        project = MagicMock()
+        project.steps.return_value = steps
+        return project
+
+    def test_finds_step_regardless_of_case(self):
+        project = self._project("PLATE", "COMP")
+        step = FusionHost.findStepByShortName(project, "Comp", "Compositing")
+        self.assertIsNotNone(step)
+        self.assertEqual(step.shortName(), "COMP")
+
+    def test_matches_any_of_the_given_names(self):
+        project = self._project("Compositing")
+        step = FusionHost.findStepByShortName(project, "Comp", "Compositing")
+        self.assertEqual(step.shortName(), "Compositing")
+
+    def test_returns_none_when_absent(self):
+        project = self._project("PLATE", "MaMo")
+        self.assertIsNone(
+            FusionHost.findStepByShortName(project, "Comp", "Compositing")
+        )
+        self.assertIsNone(FusionHost.findStepByShortName(None, "Comp"))
+
+
 class TestImportCollapsing(unittest.TestCase):
     """Sequence collapsing and sidecar filtering in _import.
 
