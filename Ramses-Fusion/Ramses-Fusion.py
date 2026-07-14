@@ -1920,6 +1920,13 @@ class RamsesFusionApp:
             itm["StepCombo"].Clear()
             fusion_steps = [s for s in session_cache["current_steps"] if host.isFusionStep(s)]
             if not fusion_steps: fusion_steps = session_cache["current_steps"]
+            # update_shots() and the OK handler below both index into
+            # session_cache["current_steps"][step_idx] using StepCombo's
+            # current index - keep them aligned with whatever list actually
+            # populated the combo, or that index points at the wrong step
+            # whenever fusion_steps is a filtered subset (e.g. only "Comp"
+            # has Fusion registered as its application).
+            session_cache["current_steps"] = fusion_steps
             for s in fusion_steps: itm["StepCombo"].AddItem(s.name())
             itm["StepCombo"].CurrentIndex = 0
             if cur_step:
