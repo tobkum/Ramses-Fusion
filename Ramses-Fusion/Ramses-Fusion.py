@@ -1447,7 +1447,7 @@ class RamsesFusionApp:
                         self.create_button(
                             "OpenPreviewButton",
                             "",
-                            "ramopen.png",
+                            "ramshot.png",
                             accent_color=bg_color,
                             weight=0,
                             min_size=[30, 30],
