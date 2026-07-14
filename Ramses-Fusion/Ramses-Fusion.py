@@ -7,6 +7,18 @@ import concurrent.futures
 import functools
 from typing import Optional, List, Any
 
+class DisableMakedirs:
+    """Context manager to temporarily disable os.makedirs.
+    Prevents Ramses-Py from aggressively creating directories on read."""
+    def __enter__(self):
+        import os
+        self._old = os.makedirs
+        os.makedirs = lambda *a, **k: None
+        return self
+    def __exit__(self, *args):
+        import os
+        os.makedirs = self._old
+
 # Add the 'lib' directory to Python's search path
 try:
     script_dir = os.path.dirname(os.path.realpath(__file__))
@@ -594,7 +606,8 @@ class RamsesFusionApp:
         """
         # 1. Try existing file
         try:
-            path = shot.stepFilePath(step=step, extension="comp")
+            with DisableMakedirs():
+                path = shot.stepFilePath(step=step, extension="comp")
             if path and os.path.exists(path):
                 return path, True
         except (AttributeError, TypeError) as e:
@@ -605,7 +618,8 @@ class RamsesFusionApp:
         # 2. Predict path
         folder = ""
         try:
-            folder = shot.stepFolderPath(step)
+            with DisableMakedirs():
+                folder = shot.stepFolderPath(step)
         except (AttributeError, TypeError) as e:
             self.log(f"Could not resolve step folder: {e}", ram.LogLevel.Debug)
 
@@ -664,8 +678,9 @@ class RamsesFusionApp:
             }
 
             # Pre-calculate paths via Host
-            preview_path = self.ramses.host.resolvePreviewPath()
-            publish_path = self.ramses.host.resolveFinalPath()
+            with DisableMakedirs():
+                preview_path = self.ramses.host.resolvePreviewPath()
+                publish_path = self.ramses.host.resolveFinalPath()
 
             for name, cfg in anchors_config.items():
                 node = comp.FindTool(name)
@@ -881,8 +896,9 @@ class RamsesFusionApp:
             return
 
         try:
-            preview_path = self.ramses.host.resolvePreviewPath()
-            final_path = self.ramses.host.resolveFinalPath()
+            with DisableMakedirs():
+                preview_path = self.ramses.host.resolvePreviewPath()
+                final_path = self.ramses.host.resolveFinalPath()
             if not preview_path and not final_path:
                 return
 
