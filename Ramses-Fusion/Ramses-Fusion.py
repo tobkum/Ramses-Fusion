@@ -7,33 +7,36 @@ import concurrent.futures
 import functools
 from typing import Optional, List, Any
 
+_makedirs_suppressed = threading.local()
+_real_makedirs = os.makedirs
+
+
+def _guarded_makedirs(*args, **kwargs):
+    if getattr(_makedirs_suppressed, "active", False):
+        return None
+    return _real_makedirs(*args, **kwargs)
+
+
+os.makedirs = _guarded_makedirs
+
+
 class DisableMakedirs:
     """Context manager to temporarily disable os.makedirs for the current thread.
-    Prevents Ramses-Py from aggressively creating directories on read."""
+    Prevents Ramses-Py from aggressively creating directories on read.
+
+    Implemented as a thread-local flag flipped on a single, permanently-installed
+    os.makedirs wrapper (rather than swapping the os.makedirs function object on
+    each __enter__/__exit__), so concurrent DisableMakedirs blocks on different
+    threads - and nested blocks on the same thread - can't race or clobber each
+    other's suppression state.
+    """
     def __enter__(self):
-        import os
-        import threading
-        self._old = getattr(os, 'makedirs')
-        self._thread_id = threading.get_ident()
-        
-        def safe_makedirs(*args, **kwargs):
-            if threading.get_ident() == self._thread_id:
-                return None
-            return self._old(*args, **kwargs)
-            
-        # Avoid nested overwriting
-        if getattr(self._old, "_is_safe_patch", False):
-            self._old = None
-            return self
-            
-        safe_makedirs._is_safe_patch = True
-        os.makedirs = safe_makedirs
+        self._prev = getattr(_makedirs_suppressed, "active", False)
+        _makedirs_suppressed.active = True
         return self
-        
+
     def __exit__(self, *args):
-        import os
-        if self._old is not None:
-            os.makedirs = self._old
+        _makedirs_suppressed.active = self._prev
 
 # Add the 'lib' directory to Python's search path
 try:
@@ -1968,7 +1971,17 @@ class RamsesFusionApp:
                     
                     if host.comp.Save(selected_path):
                         host._store_ramses_metadata(shot_data["shot"], selected_step)
-                        host.save(comment="Initial creation", setupFile=True, state=self.ramses.state("WIP"))
+                        wip_state = self.ramses.state("WIP")
+                        # host.save(state=...) only tags the local backup filename;
+                        # it doesn't touch the project's status table (see
+                        # RamHost.__save's newStateShortName). Set the actual
+                        # database status explicitly, same as updateStatus() does,
+                        # so a freshly-created Empty shot doesn't stay stuck on
+                        # whatever default state the daemon auto-created for it.
+                        host.save(comment="Initial creation", setupFile=True, state=wip_state)
+                        status = host.currentStatus()
+                        if status:
+                            status.setState(wip_state)
                         self.refresh_header(force_full=True)
                 else:
                     if host.open(shot_data["path"]):
