@@ -36,6 +36,7 @@ Fusion Studio integration for [Ramses](https://ramses.rxlab.guide/) production m
 ### Status Management
 - **Shot Status Updates**: Set task status (TODO, WIP, Review, Approved) directly from Fusion
 - **Comment Integration**: Add production notes synchronized with Ramses database
+- **Quick Preview Playback**: Side-button next to Create Preview opens the current shot's preview file in the OS default media player; enabled only when a preview already exists on disk
 
 ## Technical Details
 
