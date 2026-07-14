@@ -2,6 +2,7 @@
 import os
 import re
 from ramses import RamItem, RamStep, RamFileInfo, ItemType, LogLevel
+from ramses_patches import DisableMakedirs
 
 class AssetBrowser:
     def __init__(self, host, fusion_ui, dispatcher):
@@ -168,7 +169,7 @@ class AssetBrowser:
                 # Only return this step if it actually has published versions;
                 # a step can be "OK" or "WIP" without any files (e.g. a
                 # management step), which would leave the browser empty.
-                if shot.publishedVersionFolderPaths(upstream):
+                if self._published_version_folders(shot, upstream):
                     return upstream
                 # No files — keep looking further upstream
                 found = self.resolve_upstream_source(shot, upstream, _visited)
@@ -176,6 +177,25 @@ class AssetBrowser:
                     return found
 
         return None
+
+    def _published_version_folders(self, shot, step):
+        """Lists published version folders for shot/step without creating any.
+
+        RamItem.publishedVersionFolderPaths() -> publishFolderPath() creates
+        the step's _published folder as a side effect if it doesn't exist
+        yet - fine for an actual import, but this browser calls it just to
+        probe candidate steps (resolve_upstream_source() walks the whole
+        upstream pipe chain) and to populate the tree, neither of which
+        should litter the project with empty folders. DisableMakedirs stops
+        the folder from being created, which means it may genuinely not
+        exist on disk - os.listdir() inside publishedVersionFolderPaths()
+        would then raise, so treat that the same as "nothing published".
+        """
+        with DisableMakedirs():
+            try:
+                return shot.publishedVersionFolderPaths(step)
+            except OSError:
+                return []
 
     def populate_versions(self, step):
         """Populates the Tree with published versions."""
@@ -186,7 +206,7 @@ class AssetBrowser:
             return
             
         # Get published version folders
-        folders = self.current_shot.publishedVersionFolderPaths(step)
+        folders = self._published_version_folders(self.current_shot, step)
         
         # Reverse to show newest first
         for folder in reversed(folders):
