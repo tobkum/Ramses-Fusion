@@ -1452,6 +1452,7 @@ class RamsesFusionApp:
                             weight=0,
                             min_size=[30, 30],
                             max_size=[30, 30],
+                            icon_only=True,
                             tooltip="Open the current preview in your default media player.",
                         ),
                     ],
@@ -1521,6 +1522,7 @@ class RamsesFusionApp:
         min_size: Optional[List[int]] = None,
         max_size: Optional[List[int]] = None,
         accent_color: Optional[str] = None,
+        icon_only: bool = False,
     ) -> Any:
         """Creates a standardized UI Button with optional styling.
 
@@ -1535,12 +1537,18 @@ class RamsesFusionApp:
             min_size (list, optional): [w, h]. Defaults to None.
             max_size (list, optional): [w, h]. Defaults to None.
             accent_color (str, optional): Hex color code for background. Defaults to None.
+            icon_only (bool, optional): If True, centers the icon instead of
+                using the left-aligned/left-padded text-button layout.
+                Intended for small square icon-only buttons. Defaults to False.
 
         Returns:
             Any: The created Fusion UI button.
         """
         # Base Style: Reverted to the original flat 1px solid #222 border
-        ss = "QPushButton { text-align: left; padding-left: 12px; border: 1px solid #222; border-radius: 3px;"
+        if icon_only:
+            ss = "QPushButton { text-align: center; padding: 0; border: 1px solid #222; border-radius: 3px;"
+        else:
+            ss = "QPushButton { text-align: left; padding-left: 12px; border: 1px solid #222; border-radius: 3px;"
 
         if accent_color:
             ss += f" background-color: {accent_color}; }}"
