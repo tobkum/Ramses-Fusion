@@ -5,6 +5,7 @@ import time
 import threading
 import concurrent.futures
 import functools
+import subprocess
 from typing import Optional, List, Any
 
 _makedirs_suppressed = threading.local()
@@ -447,6 +448,19 @@ class RamsesFusionApp:
                 items["SaveAsButton"].Enabled = is_online
             if "SetupSceneButton" in items:
                 items["SetupSceneButton"].Enabled = is_online
+
+            # Group 3: Open Preview Button (pipeline-valid AND a preview file
+            # actually exists on disk for the current shot/step)
+            if "OpenPreviewButton" in items:
+                preview_exists = False
+                if is_online and is_pipeline:
+                    try:
+                        with DisableMakedirs():
+                            preview_path = self.ramses.host.resolvePreviewPath()
+                        preview_exists = bool(preview_path) and os.path.exists(preview_path)
+                    except (AttributeError, RuntimeError):
+                        pass
+                items["OpenPreviewButton"].Enabled = preview_exists
 
             self.resize_to_fit()
         except (AttributeError, KeyError) as e:
@@ -1179,6 +1193,7 @@ class RamsesFusionApp:
         self.dlg.On.IncrementalSaveButton.Clicked = self.on_incremental_save
         self.dlg.On.UpdateStatusButton.Clicked = self.on_update_status
         self.dlg.On.PreviewButton.Clicked = self.on_preview
+        self.dlg.On.OpenPreviewButton.Clicked = self.on_open_preview
         self.dlg.On.TemplateButton.Clicked = self.on_save_template
         self.dlg.On.SetupSceneButton.Clicked = self.on_sync
         self.dlg.On.RetrieveButton.Clicked = self.on_retrieve
@@ -1199,7 +1214,7 @@ class RamsesFusionApp:
                 "CommentButton",
                 "RetrieveButton",
             ],
-            "PublishContent": ["PreviewButton", "UpdateStatusButton"],
+            "PublishContent": ["PreviewButton", "OpenPreviewButton", "UpdateStatusButton"],
             "SettingsContent": ["PubSettingsButton", "CheckUpdateButton", "SettingsButton", "AboutButton"],
         }
 
@@ -1418,13 +1433,28 @@ class RamsesFusionApp:
                 self._create_section_header(
                     "PublishHeader", "REVIEW && PUBLISH", content_id
                 ),
-                self.create_button(
-                    "PreviewButton",
-                    "Create Preview",
-                    "rampreview.png",
-                    accent_color=bg_color,
-                    weight=0,
-                    tooltip="Generate a preview render for supervisor review. Saved to the shot's _preview folder, where review tools (Ramses Client, Ramses-Out) pick it up.",
+                self.ui.HGroup(
+                    {"Weight": 0},
+                    [
+                        self.create_button(
+                            "PreviewButton",
+                            "Create Preview",
+                            "rampreview.png",
+                            accent_color=bg_color,
+                            weight=1,
+                            tooltip="Generate a preview render for supervisor review. Saved to the shot's _preview folder, where review tools (Ramses Client, Ramses-Out) pick it up.",
+                        ),
+                        self.create_button(
+                            "OpenPreviewButton",
+                            "",
+                            "ramopen.png",
+                            accent_color=bg_color,
+                            weight=0,
+                            min_size=[30, 30],
+                            max_size=[30, 30],
+                            tooltip="Open the current preview in your default media player.",
+                        ),
+                    ],
                 ),
                 self.create_button(
                     "UpdateStatusButton",
@@ -2119,6 +2149,37 @@ class RamsesFusionApp:
             return
 
         self.ramses.host.savePreview()
+
+    def on_open_preview(self, ev: object) -> None:
+        """Handler for the 'Open Preview' side-button.
+
+        Opens the current shot's preview file in the user's default media
+        player/viewer for the file type (video player, image viewer, ...).
+
+        Args:
+            ev: The event object (unused).
+        """
+        try:
+            with DisableMakedirs():
+                preview_path = self.ramses.host.resolvePreviewPath()
+        except (AttributeError, RuntimeError) as e:
+            self.log(f"Could not resolve preview path: {e}", ram.LogLevel.Critical)
+            return
+
+        if not preview_path or not os.path.exists(preview_path):
+            self.log("No preview file found. Use 'Create Preview' first.", ram.LogLevel.Warning)
+            return
+
+        if qw:
+            # QDesktopServices resolves the OS default handler for the file
+            # type on Windows/macOS/Linux uniformly, without shelling out.
+            qg.QDesktopServices.openUrl(qc.QUrl.fromLocalFile(preview_path))
+        elif sys.platform == "win32":
+            os.startfile(preview_path)  # noqa: S606 - local, already-verified file path
+        elif sys.platform == "darwin":
+            subprocess.run(["open", preview_path], check=False)
+        else:
+            subprocess.run(["xdg-open", preview_path], check=False)
 
     def on_step_configuration(self, ev: object) -> None:
         """Handler for 'Step Configuration' button.
