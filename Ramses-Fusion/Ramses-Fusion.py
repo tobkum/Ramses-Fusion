@@ -8,37 +8,6 @@ import functools
 import subprocess
 from typing import Optional, List, Any
 
-_makedirs_suppressed = threading.local()
-_real_makedirs = os.makedirs
-
-
-def _guarded_makedirs(*args, **kwargs):
-    if getattr(_makedirs_suppressed, "active", False):
-        return None
-    return _real_makedirs(*args, **kwargs)
-
-
-os.makedirs = _guarded_makedirs
-
-
-class DisableMakedirs:
-    """Context manager to temporarily disable os.makedirs for the current thread.
-    Prevents Ramses-Py from aggressively creating directories on read.
-
-    Implemented as a thread-local flag flipped on a single, permanently-installed
-    os.makedirs wrapper (rather than swapping the os.makedirs function object on
-    each __enter__/__exit__), so concurrent DisableMakedirs blocks on different
-    threads - and nested blocks on the same thread - can't race or clobber each
-    other's suppression state.
-    """
-    def __enter__(self):
-        self._prev = getattr(_makedirs_suppressed, "active", False)
-        _makedirs_suppressed.active = True
-        return self
-
-    def __exit__(self, *args):
-        _makedirs_suppressed.active = self._prev
-
 # Add the 'lib' directory to Python's search path
 try:
     script_dir = os.path.dirname(os.path.realpath(__file__))
@@ -80,6 +49,7 @@ except ImportError:
 
 import fusion_host
 from fusion_config import FusionConfig
+from ramses_patches import DisableMakedirs
 
 if qw:
     from ramses_ui_pyside.open_dialog import RamOpenDialog
