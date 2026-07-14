@@ -4,7 +4,40 @@ import re
 import time
 import threading
 import concurrent.futures
+import functools
+import subprocess
 from typing import Optional, List, Any
+
+_makedirs_suppressed = threading.local()
+_real_makedirs = os.makedirs
+
+
+def _guarded_makedirs(*args, **kwargs):
+    if getattr(_makedirs_suppressed, "active", False):
+        return None
+    return _real_makedirs(*args, **kwargs)
+
+
+os.makedirs = _guarded_makedirs
+
+
+class DisableMakedirs:
+    """Context manager to temporarily disable os.makedirs for the current thread.
+    Prevents Ramses-Py from aggressively creating directories on read.
+
+    Implemented as a thread-local flag flipped on a single, permanently-installed
+    os.makedirs wrapper (rather than swapping the os.makedirs function object on
+    each __enter__/__exit__), so concurrent DisableMakedirs blocks on different
+    threads - and nested blocks on the same thread - can't race or clobber each
+    other's suppression state.
+    """
+    def __enter__(self):
+        self._prev = getattr(_makedirs_suppressed, "active", False)
+        _makedirs_suppressed.active = True
+        return self
+
+    def __exit__(self, *args):
+        _makedirs_suppressed.active = self._prev
 
 # Add the 'lib' directory to Python's search path
 try:
@@ -71,6 +104,7 @@ def requires_connection(func: callable) -> callable:
         callable: The wrapped function.
     """
 
+    @functools.wraps(func)
     def wrapper(self, ev):
         if not self._check_connection():
             return
@@ -115,6 +149,11 @@ class RamsesFusionApp:
                 "Ensure the script is launched from within Fusion."
             ) from exc
 
+        # Fusion only injects `bmd` into this entry script's globals, not into
+        # imported modules — hand it to fusion_host so its UIManager dialogs
+        # and .comp merging (bmd.UIDispatcher / bmd.readfile) work.
+        fusion_host.bmd = _bmd_obj
+
         self.ramses.host = fusion_host.FusionHost(_fusion_obj)
         self.ramses.host.app = self
 
@@ -126,6 +165,7 @@ class RamsesFusionApp:
         self.dlg = None
         self._project_cache = None
         self._user_name_cache = None
+        self._single_user_cache = None  # None = unknown; bool once probed
 
         # Context Caching
         self._context_lock = threading.Lock()
@@ -226,14 +266,13 @@ class RamsesFusionApp:
             item = self.ramses.host.currentItem()
             step = self.ramses.host.currentStep()
             with self._context_lock:
-                # Re-check: another thread may have already committed a newer path
-                # while we were making the slow API calls. Only overwrite if our
-                # path is still the current one (or no path is cached yet).
-                if path == self.ramses.host.currentFilePath() or not self._context_path:
-                    self._context_path = path
+                # Get the path that actually corresponds to the item we just fetched
+                actual_path = self.ramses.host.currentFilePath()
+                if not self._context_path or actual_path != self._context_path:
+                    self._context_path = actual_path
                     self._item_cache = item
                     self._step_cache = step
-        return path
+        return self._context_path
 
     def _get_project(self) -> Optional[ram.RamProject]:
         """Gets the active Project from the Ramses Daemon (Cached).
@@ -319,7 +358,9 @@ class RamsesFusionApp:
             is_mismatch = False
             meta_uuid = ""
             if item and is_online:
-                active_proj = self.ramses.project()
+                # Use the cached project — a direct ramses.project() call here
+                # cost a daemon roundtrip on every UI refresh.
+                active_proj = self._get_project()
 
                 # Check 0: Metadata (The Golden Source)
                 try:
@@ -368,15 +409,18 @@ class RamsesFusionApp:
                         if user.role() >= ram.UserRole.LEAD:
                             has_permission = True
                         else:
-                            # Check if local/single-user
-                            try:
-                                all_users = self.ramses.daemonInterface().getObjects(
-                                    "RamUser"
-                                )
-                                if len(all_users) <= 1:
-                                    has_permission = True
-                            except Exception:
-                                pass
+                            # Check if local/single-user (cached — fetching all
+                            # users on every UI refresh is a daemon roundtrip)
+                            if self._single_user_cache is None:
+                                try:
+                                    all_users = self.ramses.daemonInterface().getObjects(
+                                        "RamUser"
+                                    )
+                                    self._single_user_cache = len(all_users) <= 1
+                                except Exception:
+                                    pass  # Leave unknown; retry on next refresh
+                            if self._single_user_cache:
+                                has_permission = True
 
                 items["PubSettingsButton"].Enabled = (
                     is_online and is_pipeline and has_permission
@@ -404,6 +448,19 @@ class RamsesFusionApp:
                 items["SaveAsButton"].Enabled = is_online
             if "SetupSceneButton" in items:
                 items["SetupSceneButton"].Enabled = is_online
+
+            # Group 3: Open Preview Button (pipeline-valid AND a preview file
+            # actually exists on disk for the current shot/step)
+            if "OpenPreviewButton" in items:
+                preview_exists = False
+                if is_online and is_pipeline:
+                    try:
+                        with DisableMakedirs():
+                            preview_path = self.ramses.host.resolvePreviewPath()
+                        preview_exists = bool(preview_path) and os.path.exists(preview_path)
+                    except (AttributeError, RuntimeError):
+                        pass
+                items["OpenPreviewButton"].Enabled = preview_exists
 
             self.resize_to_fit()
         except (AttributeError, KeyError) as e:
@@ -582,8 +639,12 @@ class RamsesFusionApp:
         """
         # 1. Try existing file
         try:
-            path = shot.stepFilePath(step=step, extension="comp")
-            if path and os.path.exists(path):
+            with DisableMakedirs():
+                # stepFilePath() already validates existence internally
+                # (os.path.isfile) before returning a non-empty path - no
+                # need to stat it a second time here.
+                path = shot.stepFilePath(step=step, extension="comp")
+            if path:
                 return path, True
         except (AttributeError, TypeError) as e:
             self.log(
@@ -593,7 +654,8 @@ class RamsesFusionApp:
         # 2. Predict path
         folder = ""
         try:
-            folder = shot.stepFolderPath(step)
+            with DisableMakedirs():
+                folder = shot.stepFolderPath(step)
         except (AttributeError, TypeError) as e:
             self.log(f"Could not resolve step folder: {e}", ram.LogLevel.Debug)
 
@@ -622,6 +684,7 @@ class RamsesFusionApp:
             return
 
         comp.Lock()
+        comp.StartUndo("Create Render Anchors")
         try:
             # 1. Determine Reference Position (Grid Units)
             flow = comp.CurrentFrame.FlowView
@@ -651,8 +714,9 @@ class RamsesFusionApp:
             }
 
             # Pre-calculate paths via Host
-            preview_path = self.ramses.host.resolvePreviewPath()
-            publish_path = self.ramses.host.resolveFinalPath()
+            with DisableMakedirs():
+                preview_path = self.ramses.host.resolvePreviewPath()
+                publish_path = self.ramses.host.resolveFinalPath()
 
             for name, cfg in anchors_config.items():
                 node = comp.FindTool(name)
@@ -661,7 +725,7 @@ class RamsesFusionApp:
                 if not node:
                     node = comp.AddTool("Saver", cfg["target_x"], cfg["target_y"])
                     if not node:
-                        self.ramses.host.log(f"Failed to create {name} Saver node", ram.LogLevel.Error)
+                        self.ramses.host.log(f"Failed to create {name} Saver node", ram.LogLevel.Critical)
                         continue
                     node.SetAttrs({"TOOLS_Name": name})
 
@@ -686,6 +750,7 @@ class RamsesFusionApp:
                             "Final renders will be saved here. Connect your output."
                         )
         finally:
+            comp.EndUndo(True)
             comp.Unlock()
 
     def _validate_publish(
@@ -867,10 +932,16 @@ class RamsesFusionApp:
             return
 
         try:
-            preview_path = self.ramses.host.resolvePreviewPath()
-            final_path = self.ramses.host.resolveFinalPath()
+            with DisableMakedirs():
+                preview_path = self.ramses.host.resolvePreviewPath()
+                final_path = self.ramses.host.resolveFinalPath()
             if not preview_path and not final_path:
                 return
+
+            preview_node = None
+            final_node = None
+            preview_needs_update = False
+            final_needs_update = False
 
             comp.Lock()
             try:
@@ -880,16 +951,22 @@ class RamsesFusionApp:
                     curr_p = self.ramses.host.normalizePath(preview_node.Clip[1])
                     if curr_p != preview_path:
                         preview_node.Clip[1] = preview_path
-                        self.ramses.host.apply_render_preset(preview_node, "preview")
+                        preview_needs_update = True
 
                 final_node = comp.FindTool("_FINAL")
                 if final_node:
                     curr_f = self.ramses.host.normalizePath(final_node.Clip[1])
                     if curr_f != final_path:
                         final_node.Clip[1] = final_path
-                        self.ramses.host.apply_render_preset(final_node, "final")
+                        final_needs_update = True
             finally:
                 comp.Unlock()
+                
+            # Apply presets outside the lock to prevent daemon calls from blocking Fusion UI
+            if preview_needs_update and preview_node:
+                self.ramses.host.apply_render_preset(preview_node, "preview")
+            if final_needs_update and final_node:
+                self.ramses.host.apply_render_preset(final_node, "final")
         except (AttributeError, RuntimeError) as e:
             self.log(f"Render anchor sync failed: {e}", ram.LogLevel.Debug)
 
@@ -934,6 +1011,7 @@ class RamsesFusionApp:
                 if force_full:
                     self._project_cache = None
                     self._user_name_cache = None
+                    self._single_user_cache = None
 
                 # Clear item/step caches and path tracker to force re-fetch from host
                 self._item_cache = None
@@ -1118,6 +1196,7 @@ class RamsesFusionApp:
         self.dlg.On.IncrementalSaveButton.Clicked = self.on_incremental_save
         self.dlg.On.UpdateStatusButton.Clicked = self.on_update_status
         self.dlg.On.PreviewButton.Clicked = self.on_preview
+        self.dlg.On.OpenPreviewButton.Clicked = self.on_open_preview
         self.dlg.On.TemplateButton.Clicked = self.on_save_template
         self.dlg.On.SetupSceneButton.Clicked = self.on_sync
         self.dlg.On.RetrieveButton.Clicked = self.on_retrieve
@@ -1138,7 +1217,7 @@ class RamsesFusionApp:
                 "CommentButton",
                 "RetrieveButton",
             ],
-            "PublishContent": ["PreviewButton", "UpdateStatusButton"],
+            "PublishContent": ["PreviewButton", "OpenPreviewButton", "UpdateStatusButton"],
             "SettingsContent": ["PubSettingsButton", "CheckUpdateButton", "SettingsButton", "AboutButton"],
         }
 
@@ -1357,13 +1436,29 @@ class RamsesFusionApp:
                 self._create_section_header(
                     "PublishHeader", "REVIEW && PUBLISH", content_id
                 ),
-                self.create_button(
-                    "PreviewButton",
-                    "Create Preview",
-                    "rampreview.png",
-                    accent_color=bg_color,
-                    weight=0,
-                    tooltip="Generate a preview render for supervisor review.",
+                self.ui.HGroup(
+                    {"Weight": 0},
+                    [
+                        self.create_button(
+                            "PreviewButton",
+                            "Create Preview",
+                            "rampreview.png",
+                            accent_color=bg_color,
+                            weight=1,
+                            tooltip="Generate a preview render for supervisor review. Saved to the shot's _preview folder, where review tools (Ramses Client, Ramses-Out) pick it up.",
+                        ),
+                        self.create_button(
+                            "OpenPreviewButton",
+                            "",
+                            "ramshot.png",
+                            accent_color=bg_color,
+                            weight=0,
+                            min_size=[30, 30],
+                            max_size=[30, 30],
+                            icon_only=True,
+                            tooltip="Open the current preview in your default media player.",
+                        ),
+                    ],
                 ),
                 self.create_button(
                     "UpdateStatusButton",
@@ -1430,6 +1525,7 @@ class RamsesFusionApp:
         min_size: Optional[List[int]] = None,
         max_size: Optional[List[int]] = None,
         accent_color: Optional[str] = None,
+        icon_only: bool = False,
     ) -> Any:
         """Creates a standardized UI Button with optional styling.
 
@@ -1444,12 +1540,18 @@ class RamsesFusionApp:
             min_size (list, optional): [w, h]. Defaults to None.
             max_size (list, optional): [w, h]. Defaults to None.
             accent_color (str, optional): Hex color code for background. Defaults to None.
+            icon_only (bool, optional): If True, centers the icon instead of
+                using the left-aligned/left-padded text-button layout.
+                Intended for small square icon-only buttons. Defaults to False.
 
         Returns:
             Any: The created Fusion UI button.
         """
         # Base Style: Reverted to the original flat 1px solid #222 border
-        ss = "QPushButton { text-align: left; padding-left: 12px; border: 1px solid #222; border-radius: 3px;"
+        if icon_only:
+            ss = "QPushButton { text-align: center; padding: 0; border: 1px solid #222; border-radius: 3px;"
+        else:
+            ss = "QPushButton { text-align: left; padding-left: 12px; border: 1px solid #222; border-radius: 3px;"
 
         if accent_color:
             ss += f" background-color: {accent_color}; }}"
@@ -1811,10 +1913,12 @@ class RamsesFusionApp:
             selected_step = session_cache["current_steps"][step_idx]
             shots = session_cache["current_shots"]
             seq_map = session_cache["current_seq_map"]
+            status_map = session_cache["status_map"]
+            step_uuid = str(selected_step.uuid())
 
             valid_options = []
             for shot in shots:
-                status = shot.currentStatus(selected_step)
+                status = status_map.get((str(shot.uuid()), step_uuid))
                 if status:
                     st_uuid = str(ram.RamObject.getUuid(status.get("state")))
                     if state_map.get(st_uuid) in ["NO", "STB"]: continue
@@ -1846,7 +1950,6 @@ class RamsesFusionApp:
             itm["StepCombo"].Clear()
             fusion_steps = [s for s in session_cache["current_steps"] if host.isFusionStep(s)]
             if not fusion_steps: fusion_steps = session_cache["current_steps"]
-            session_cache["current_steps"] = fusion_steps
             for s in fusion_steps: itm["StepCombo"].AddItem(s.name())
             itm["StepCombo"].CurrentIndex = 0
             if cur_step:
@@ -1870,16 +1973,33 @@ class RamsesFusionApp:
         proj = active_project
         sequences = proj.sequences()
         seq_map = {str(s.uuid()): s.shortName() for s in sequences}
-        shots = []
-        for seq in sequences: shots.extend(proj.shots(sequence=seq, lazyLoading=False))
-        shots.extend(proj.shots(sequence="", lazyLoading=False))
-        
+        # A single project-wide fetch (sequence="") already returns every
+        # shot regardless of sequence (see daemon.cpp's getShots: an empty
+        # sequenceUuid returns PROJECT->shots(), the full list). The
+        # previous code additionally fetched every sequence's shots one by
+        # one first - a fully redundant round trip per sequence, since the
+        # results are a strict subset of this call and get deduplicated
+        # away immediately below.
+        shots = proj.shots(sequence="", lazyLoading=False)
+
         unique_shots = []
         seen = set()
         for s in shots:
             if str(s.uuid()) not in seen:
                 unique_shots.append(s)
                 seen.add(str(s.uuid()))
+
+        # Bulk-fetch every status once instead of one daemon round trip per
+        # shot per step change (see update_shots()) - getObjects() reads
+        # the whole local _Status table in a single request.
+        status_map = {}
+        try:
+            for status in daemon.getObjects("RamStatus"):
+                key = (str(status.get("item", "")), str(status.get("step", "")))
+                status_map[key] = status
+        except Exception as e:
+            self.log(f"Could not bulk-fetch statuses: {e}", ram.LogLevel.Debug)
+        session_cache["status_map"] = status_map
         
         session_cache["current_shots"] = unique_shots
         session_cache["current_seq_map"] = seq_map
@@ -1911,7 +2031,17 @@ class RamsesFusionApp:
                     
                     if host.comp.Save(selected_path):
                         host._store_ramses_metadata(shot_data["shot"], selected_step)
-                        host.save(comment="Initial creation", setupFile=True, state=self.ramses.state("WIP"))
+                        wip_state = self.ramses.state("WIP")
+                        # host.save(state=...) only tags the local backup filename;
+                        # it doesn't touch the project's status table (see
+                        # RamHost.__save's newStateShortName). Set the actual
+                        # database status explicitly, same as updateStatus() does,
+                        # so a freshly-created Empty shot doesn't stay stuck on
+                        # whatever default state the daemon auto-created for it.
+                        host.save(comment="Initial creation", setupFile=True, state=wip_state)
+                        status = host.currentStatus()
+                        if status:
+                            status.setState(wip_state)
                         self.refresh_header(force_full=True)
                 else:
                     if host.open(shot_data["path"]):
@@ -2049,6 +2179,37 @@ class RamsesFusionApp:
             return
 
         self.ramses.host.savePreview()
+
+    def on_open_preview(self, ev: object) -> None:
+        """Handler for the 'Open Preview' side-button.
+
+        Opens the current shot's preview file in the user's default media
+        player/viewer for the file type (video player, image viewer, ...).
+
+        Args:
+            ev: The event object (unused).
+        """
+        try:
+            with DisableMakedirs():
+                preview_path = self.ramses.host.resolvePreviewPath()
+        except (AttributeError, RuntimeError) as e:
+            self.log(f"Could not resolve preview path: {e}", ram.LogLevel.Critical)
+            return
+
+        if not preview_path or not os.path.exists(preview_path):
+            self.log("No preview file found. Use 'Create Preview' first.", ram.LogLevel.Warning)
+            return
+
+        if qw:
+            # QDesktopServices resolves the OS default handler for the file
+            # type on Windows/macOS/Linux uniformly, without shelling out.
+            qg.QDesktopServices.openUrl(qc.QUrl.fromLocalFile(preview_path))
+        elif sys.platform == "win32":
+            os.startfile(preview_path)  # noqa: S606 - local, already-verified file path
+        elif sys.platform == "darwin":
+            subprocess.run(["open", preview_path], check=False)
+        else:
+            subprocess.run(["xdg-open", preview_path], check=False)
 
     def on_step_configuration(self, ev: object) -> None:
         """Handler for 'Step Configuration' button.
@@ -2521,7 +2682,7 @@ class RamsesFusionApp:
         if not res or not res["Name"]:
             return
 
-        name = re.sub(r"[^a-zA-Z0-9\- ]", "", res["Name"])
+        name = re.sub(r"[^a-zA-Z0-9_]", "", res["Name"].replace(" ", "_").replace("-", "_"))
 
         tpl_folder = step.templatesFolderPath()
         if not tpl_folder:
@@ -2532,12 +2693,34 @@ class RamsesFusionApp:
 
         # Use build helper for naming consistency
         nm = self._build_file_info(ram.ItemType.GENERAL, step, name, "comp")
-        path = os.path.join(tpl_folder, nm.fileName())
+        path = self.ramses.host.normalizePath(os.path.join(tpl_folder, nm.fileName()))
 
         comp = self.ramses.host.comp
-        if comp:
-            comp.Save(self.ramses.host.normalizePath(path))
-            self.log(f"Template '{name}' saved to {path}", ram.LogLevel.Info)
+        if not comp:
+            return
+
+        # comp.Save(path) is a save-as: it would repoint COMPS_FileName at the
+        # templates folder and hijack the working file's identity. For an
+        # already-saved comp, save in place and copy the file instead.
+        src = self.ramses.host.currentFilePath()
+        if src:
+            if not comp.Save(src):
+                self.log("Could not save current comp before templating.", ram.LogLevel.Critical)
+                return
+            try:
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                fusion_host.RamFileManager.copy(src, path, separateThread=False)
+            except Exception as e:
+                self.log(f"Failed to copy template to {path}: {e}", ram.LogLevel.Critical)
+                return
+        else:
+            # Unsaved comp: saving directly to the template path is fine — there
+            # is no prior identity to preserve.
+            if not comp.Save(path):
+                self.log(f"Failed to save template to {path}", ram.LogLevel.Critical)
+                return
+
+        self.log(f"Template '{name}' saved to {path}", ram.LogLevel.Info)
 
     @requires_connection
     def on_sync(self, ev: object) -> None:

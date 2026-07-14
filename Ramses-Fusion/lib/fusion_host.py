@@ -49,6 +49,12 @@ except ImportError:
 
 __all__ = ["FusionHost"]
 
+# Fusion only provides the `bmd` scripting handle to the entry script's
+# globals, never to imported modules. The launcher (Ramses-Fusion.py) must
+# inject it here (``fusion_host.bmd = bmd``) before any UIManager dialog or
+# .comp merge is used. Kept as a module global so existing call sites work.
+bmd = None
+
 # =============================================================================
 # RENDER FORMAT CONSTANTS
 # =============================================================================
@@ -57,6 +63,22 @@ CODEC_PRORES_422 = "Apple ProRes 422_apcn"
 CODEC_PRORES_422_HQ = "Apple ProRes 422 HQ_apch"
 
 _DEFAULT_SHOT_DURATION_SECS = 5.0  # Fallback duration when Ramses item has no duration set
+
+# Steps that hold ingested source plates. Same convention (and same user
+# setting, "plateStepNames") as Ramses-Syntheyes' new-scene-from-plate lookup.
+DEFAULT_PLATE_STEP_NAMES = ("Plate", "Ingest", "Footage")
+
+# Image-sequence extensions considered when deriving source frame numbering
+# from a published plate folder (filters out sidecars like .ramses_complete).
+_FOOTAGE_SEQ_EXTENSIONS = {
+    ".exr", ".dpx", ".png", ".jpg", ".jpeg", ".tif", ".tiff",
+    ".tga", ".cin", ".sgi", ".jp2", ".iff", ".pic", ".bmp",
+}
+
+# Trailing frame token of a sequence file: name.1001.exr or name_1001.exr.
+# The separator must directly precede the digits, so version tokens like
+# "_v001" never match.
+_FRAME_TOKEN_RE = re.compile(r"[._](\d+)\.[A-Za-z0-9]{1,5}$")
 
 # =============================================================================
 # MONKEY-PATCHING RAMSES API (Fixes critical environment bugs only)
@@ -85,6 +107,35 @@ with _DAEMON_INIT_LOCK:
     # 2. Fix Case Sensitivity and robust matching for version files on Windows.
     _MAX_VERSION_ENTRIES = 2000  # Guard against runaway version folders; shared by both patch functions
 
+    # Version-style directory names: "001", "001_OK", "BG_001_OK" ...
+    _VERSION_DIR_RE = re.compile(r"^(?:.*_)?(\d{3})(?:_.*)?$")
+
+    def _list_version_candidates(versionsFolder, base_id):
+        """Lists version-folder entries that can possibly contribute a version.
+
+        Uses cheap string checks (no stat calls) to prefilter, then caps the
+        result at _MAX_VERSION_ENTRIES *after sorting* and keeps the tail, so
+        a runaway folder cannot hide the latest version behind an arbitrary
+        os.listdir() ordering (the previous entries[:N] slice could).
+        """
+        try:
+            entries = os.listdir(versionsFolder)
+        except OSError:
+            return []
+        candidates = [
+            f
+            for f in entries
+            if f.lower().startswith(base_id) or _VERSION_DIR_RE.match(f)
+        ]
+        if len(candidates) > _MAX_VERSION_ENTRIES:
+            print(
+                f"[Ramses] Warning: {versionsFolder} has {len(candidates)} version "
+                f"candidates; scanning only the {_MAX_VERSION_ENTRIES} highest-sorted."
+            )
+            candidates.sort()
+            candidates = candidates[-_MAX_VERSION_ENTRIES:]
+        return candidates
+
     def _patched_getLatestVersionFilePath(filePath, previous=False):
         """Resolves the latest version file path using robust matching (Files AND Folders)."""
         fileName = os.path.basename(filePath)
@@ -98,11 +149,7 @@ with _DAEMON_INIT_LOCK:
             return ""
 
         candidates = []
-        try:
-            entries = os.listdir(versionsFolder)
-        except OSError:
-            return ""
-        for f in entries[:_MAX_VERSION_ENTRIES]:
+        for f in _list_version_candidates(versionsFolder, base_id):
             path = os.path.join(versionsFolder, f)
 
             # Case A: File-based versioning (standard behavior of patch)
@@ -118,7 +165,7 @@ with _DAEMON_INIT_LOCK:
                 # Check if folder looks like a version (001... or res_001...)
                 # Regex matches: (optional resource_)(3 digits)(optional _state)
                 # e.g. "001", "001_OK", "BG_001_OK"
-                m_ver = re.match(r"^(?:.*_)?(\d{3})(?:_.*)?$", f)
+                m_ver = _VERSION_DIR_RE.match(f)
                 if m_ver:
                     version = int(m_ver.group(1))
 
@@ -160,11 +207,7 @@ with _DAEMON_INIT_LOCK:
             return []
 
         candidates = []
-        try:
-            entries = os.listdir(versionsFolder)
-        except OSError:
-            return []
-        for f in entries[:_MAX_VERSION_ENTRIES]:
+        for f in _list_version_candidates(versionsFolder, base_id):
             path = os.path.join(versionsFolder, f)
 
             # Case A: File-based
@@ -177,7 +220,7 @@ with _DAEMON_INIT_LOCK:
 
             # Case B: Directory-based
             elif os.path.isdir(path):
-                m_ver = re.match(r"^(?:.*_)?(\d{3})(?:_.*)?$", f)
+                m_ver = _VERSION_DIR_RE.match(f)
                 if m_ver:
                     # Look for match inside
                     try:
@@ -836,6 +879,99 @@ class FusionHost(RamHost):
             self._log(f"Failed to resolve final path: {e}", LogLevel.Warning)
             return ""
 
+    @staticmethod
+    def parse_frame_number(path):
+        """Extracts the trailing frame number from a sequence file path.
+
+        Recognizes ``name.1001.exr`` and ``name_1001.exr``. Version tokens
+        such as ``_v001`` do not match (the digits must directly follow the
+        separator).
+
+        Returns:
+            int or None: The frame number, or None if the name carries none.
+        """
+        name = os.path.basename(str(path or ""))
+        m = _FRAME_TOKEN_RE.search(name)
+        return int(m.group(1)) if m else None
+
+    def resolveSourceStartFrame(self):
+        """Resolves the first frame number of the shot's source plate.
+
+        Used to number rendered files like the delivered plate while the comp
+        timeline keeps the studio start-frame convention.
+
+        Priority:
+        1. Plate Loaders in the comp (Clip path inside a plate step's
+           ``_published`` folder) — reflects what is actually being comped.
+        2. The latest published plate version on disk.
+
+        Plate steps are identified by short name, configurable via the
+        ``plateStepNames`` user setting (shared with Ramses-Syntheyes).
+
+        Returns:
+            int or None: The plate's first frame number, or None if unknown.
+        """
+        plate_names = {
+            str(n).lower()
+            for n in RAM_SETTINGS.userSettings.get(
+                "plateStepNames", DEFAULT_PLATE_STEP_NAMES
+            )
+        }
+
+        # 1) Plate Loaders in the comp
+        frames = []
+        if self.comp:
+            try:
+                loaders = self.comp.GetToolList(False, "Loader") or {}
+                for node in loaders.values():
+                    try:
+                        path = self.normalizePath(node.Clip[1])
+                    except Exception:
+                        continue
+                    if "/_published/" not in path:
+                        continue
+                    frame = self.parse_frame_number(path)
+                    if frame is None:
+                        continue
+                    step = RamStep.fromPath(path)
+                    if step and str(step.shortName()).lower() in plate_names:
+                        frames.append(frame)
+            except Exception as e:
+                self.log(
+                    f"Loader scan for source numbering failed: {e}",
+                    LogLevel.Debug,
+                )
+        if frames:
+            return min(frames)
+
+        # 2) Latest published plate version on disk
+        item = self.currentItem()
+        project = RAMSES.project()
+        if not item or not project:
+            return None
+        try:
+            steps = project.steps()
+        except Exception:
+            return None
+        for step in steps:
+            if str(step.shortName()).lower() not in plate_names:
+                continue
+            try:
+                files = item.latestPublishedVersionFilePaths(step=step)
+            except Exception:
+                continue
+            frames = []
+            for f in files:
+                # Skip sidecars (.ramses_complete, _ramses_data.json, ...)
+                if os.path.splitext(f)[1].lower() not in _FOOTAGE_SEQ_EXTENSIONS:
+                    continue
+                frame = self.parse_frame_number(f)
+                if frame is not None:
+                    frames.append(frame)
+            if frames:
+                return min(frames)
+        return None
+
     def _saveAs(
         self,
         filePath: str,
@@ -1007,6 +1143,11 @@ class FusionHost(RamHost):
             dict: A dictionary mapping field IDs to their values if the user clicks OK,
                   or None if the user cancels.
         """
+        if bmd is None:
+            raise RuntimeError(
+                "Fusion 'bmd' handle not injected into fusion_host. "
+                "Launch through Ramses-Fusion.py, which sets fusion_host.bmd."
+            )
         ui = self.fusion.UIManager
         disp = bmd.UIDispatcher(ui)
 
@@ -1203,9 +1344,72 @@ class FusionHost(RamHost):
 
         return ui.Label({"Text": "Unknown Field"}), 30
 
+    def _read_comp_file(self, path: str) -> str:
+        """Reads a .comp file as a clip string for comp.Paste().
+
+        Returns an empty string (and logs) when the Fusion scripting handle is
+        missing or the file cannot be read, so callers can treat "no content"
+        as a soft failure.
+        """
+        if bmd is None:
+            self.log(
+                "Cannot read .comp file: Fusion 'bmd' handle not injected "
+                "(launch through Ramses-Fusion.py).",
+                LogLevel.Critical,
+            )
+            return ""
+        try:
+            return bmd.readfile(path) or ""
+        except Exception as e:
+            self.log(f"Failed to read comp file {path}: {e}", LogLevel.Critical)
+            return ""
+
     # -------------------------------------------------------------------------
     # Pipeline Implementation
     # -------------------------------------------------------------------------
+
+    @staticmethod
+    def _collapse_import_paths(filePaths: list) -> list:
+        """Prepares a raw import list for Loader creation.
+
+        Skips sidecar files (dotfiles like ``.ramses_complete``, ``.json``
+        metadata, logs) and collapses each frame sequence to its **lowest
+        frame** — a Loader pointed at one frame loads the whole sequence, so
+        one Loader per frame would flood the flow.
+
+        Files without a frame token (movies, .comp merges, single stills)
+        pass through untouched, and the original selection order is kept.
+        """
+        skip_exts = {".json", ".txt", ".log", ".xml", ".tmp"}
+        result = []
+        seq_slots = {}  # (folder, name-with-#-token) -> (result index, frame)
+
+        for path in filePaths or []:
+            base = os.path.basename(str(path))
+            if base.startswith(".") or base.lower() == "thumbs.db":
+                continue
+            if os.path.splitext(base)[1].lower() in skip_exts:
+                continue
+
+            m = _FRAME_TOKEN_RE.search(base)
+            if not m:
+                result.append(path)
+                continue
+
+            frame = int(m.group(1))
+            key = (
+                os.path.dirname(str(path)).lower(),
+                (base[: m.start(1)] + "#" + base[m.end(1):]).lower(),
+            )
+            slot = seq_slots.get(key)
+            if slot is None:
+                seq_slots[key] = (len(result), frame)
+                result.append(path)
+            elif frame < slot[1]:
+                result[slot[0]] = path
+                seq_slots[key] = (slot[0], frame)
+
+        return result
 
     def _import(
         self,
@@ -1236,6 +1440,21 @@ class FusionHost(RamHost):
         """
         if not self.comp:
             return False
+
+        # The upstream import flow may pass the full contents of a published
+        # version folder — every frame of a sequence plus Ingest sidecars.
+        # Collapse to one Loader per sequence and drop the sidecars.
+        original_count = len(filePaths)
+        filePaths = self._collapse_import_paths(filePaths)
+        if not filePaths:
+            self.log("Nothing importable in the selection.", LogLevel.Warning)
+            return False
+        if len(filePaths) < original_count:
+            self.log(
+                f"Import: collapsed {original_count} files into "
+                f"{len(filePaths)} import(s).",
+                LogLevel.Info,
+            )
 
         # Start undo group with descriptive name
         num_files = len(filePaths)
@@ -1272,22 +1491,23 @@ class FusionHost(RamHost):
                     try:
                         # Use the "Read & Paste" strategy to bypass Fusion's Merge node conflict.
                         # bmd.readfile() reads the .comp as a clip string; comp.Paste() inserts it.
-                        content = bmd.readfile(normalized_path)
+                        content = self._read_comp_file(normalized_path)
                         if content:
                             self.comp.Paste(content)
                             self.log(f"Merged nodes from composition: {normalized_path}", LogLevel.Info)
-                            continue # Proceed to next file, skip Loader logic
                         else:
-                            self.log(f"Could not read content from: {normalized_path}", LogLevel.Error)
+                            self.log(f"Could not read content from: {normalized_path}", LogLevel.Critical)
                     except Exception as e:
-                        self.log(f"Failed to merge comp {normalized_path}: {e}", LogLevel.Error)
-                        # Fallback: continue to try creating a loader
+                        self.log(f"Failed to merge comp {normalized_path}: {e}", LogLevel.Critical)
+                    # Always skip Loader creation for .comp files — a Loader cannot
+                    # load a .comp file and creating one would produce an invalid node.
+                    continue
 
                 loader = self.comp.AddTool("Loader", target_x, target_y)
                 if not loader:
                     self.log(
                         f"Failed to create Loader at ({target_x}, {target_y})",
-                        LogLevel.Error,
+                        LogLevel.Critical,
                     )
                     continue
                 # Explicitly set the clip path with forward slashes for cross-platform safety
@@ -1341,11 +1561,30 @@ class FusionHost(RamHost):
             success = True
             return True
         except Exception as e:
-            self.log(f"Import failed: {e}", LogLevel.Error)
+            self.log(f"Import failed: {e}", LogLevel.Critical)
             return False
         finally:
             self.comp.Unlock()
             self.comp.EndUndo(success)  # Commit if successful, discard if failed
+
+    @staticmethod
+    def findStepByShortName(project, *short_names):
+        """Case-insensitive step lookup by short name.
+
+        The upstream ``project.step()`` compares short names exactly, so a
+        step named "COMP" is invisible to a lookup for "Comp". Matches any
+        of *short_names* against the project's steps, ignoring case.
+        """
+        if not project:
+            return None
+        wanted = {str(n).lower() for n in short_names}
+        try:
+            for s in project.steps():
+                if str(s.shortName()).lower() in wanted:
+                    return s
+        except Exception:
+            return None
+        return None
 
     def _importUI(self, item: RamItem, step: RamStep) -> dict:
         """Shows the Ramses Asset Browser for importing."""
@@ -1389,7 +1628,9 @@ class FusionHost(RamHost):
                 else:
                     project = RAMSES.project()
                     if project:
-                        comp_step = project.step("Comp") or project.step("Compositing")
+                        comp_step = self.findStepByShortName(
+                            project, "Comp", "Compositing"
+                        )
                         if comp_step:
                             dialog.setCurrentStep(comp_step)
                 if item:
@@ -1424,11 +1665,9 @@ class FusionHost(RamHost):
                         item_label = item.shortName() if item else ""
 
                         project = item.project() if item else RAMSES.project()
-                        comp_step = None
-                        if project:
-                            comp_step = (
-                                project.step("Comp") or project.step("Compositing")
-                            )
+                        comp_step = self.findStepByShortName(
+                            project, "Comp", "Compositing"
+                        )
                         comp_step_label = comp_step.name() if comp_step else "a Fusion step"
 
                         reply = qw.QMessageBox.question(
@@ -1459,7 +1698,7 @@ class FusionHost(RamHost):
                             return None
 
                         # bmd.readfile() reads the .comp as a clip string; comp.Paste() inserts it.
-                        content = bmd.readfile(self.normalizePath(path))
+                        content = self._read_comp_file(self.normalizePath(path))
                         if content:
                             self.comp.Paste(content)
                             self.log(f"Merged nodes from: {path}", LogLevel.Info)
@@ -1542,6 +1781,11 @@ class FusionHost(RamHost):
             self._store_ramses_metadata(item, step)
             return selected_path
 
+        self.log(
+            f"Failed to save new composition to: {selected_path}. "
+            "Check write permissions and Fusion state.",
+            LogLevel.Critical,
+        )
         return ""
 
     def _preview(
@@ -1632,39 +1876,58 @@ class FusionHost(RamHost):
     def _publishOptions(
         self, proposedOptions: dict, showPublishUI: bool = False
     ) -> dict:
-        """Shows a UI to edit the publish options (YAML) if requested."""
+        """Shows a UI to edit the publish options (YAML) if requested.
+
+        Uses a capped retry loop (max 3 attempts) instead of recursion so that
+        repeated invalid YAML input cannot overflow the call stack.
+        """
         if not showPublishUI:
             return proposedOptions or {}
 
-        # Convert dict to YAML for editing
-        try:
-            current_yaml = yaml.dump(proposedOptions, default_flow_style=False)
-        except Exception:
-            current_yaml = ""
+        _MAX_RETRIES = 3
+        for _attempt in range(_MAX_RETRIES):
+            # Convert dict to YAML for editing
+            try:
+                current_yaml = yaml.dump(proposedOptions, default_flow_style=False)
+            except Exception:
+                current_yaml = ""
 
-        res = self._request_input(
-            "Edit Publish Settings",
-            [
-                {
-                    "id": "YAML",
-                    "label": "Settings (YAML):",
-                    "type": "text",
-                    "default": current_yaml,
-                    "lines": 20,
-                }
-            ],
-        )
+            res = self._request_input(
+                "Edit Publish Settings",
+                [
+                    {
+                        "id": "YAML",
+                        "label": "Settings (YAML):",
+                        "type": "text",
+                        "default": current_yaml,
+                        "lines": 20,
+                    }
+                ],
+            )
 
-        if res is not None:
+            if res is None:
+                return None  # User cancelled
+
             try:
                 new_options = yaml.safe_load(res["YAML"])
                 return new_options if isinstance(new_options, dict) else {}
             except Exception as e:
-                # On error, warn and show UI again (recursion)
-                self.log(f"Invalid YAML Settings: {e}", LogLevel.Warning)
-                return self._publishOptions(proposedOptions, True)
+                self.log(
+                    f"Invalid YAML Settings ({_attempt + 1}/{_MAX_RETRIES}): {e}",
+                    LogLevel.Warning,
+                )
+                # Loop back to show dialog again with current (invalid) text preserved
+                try:
+                    proposedOptions = yaml.safe_load(res["YAML"]) or proposedOptions
+                except Exception:
+                    pass  # Keep proposedOptions unchanged for next round
 
-        return None  # User cancelled
+        # Max retries reached — give up and return original options unchanged.
+        self.log(
+            "Publish settings editor: max retries reached. Using existing settings.",
+            LogLevel.Warning,
+        )
+        return proposedOptions or {}
 
     def _prePublish(self, publishInfo: RamFileInfo, publishOptions: dict) -> dict:
         """Hook called before the publish process begins.
@@ -1937,24 +2200,26 @@ class FusionHost(RamHost):
 
             self.log("Starting final master render...", LogLevel.Info)
 
-            # Resolve and create directory before render
-            render_path = self.normalizePath(final_node.Clip[1])
-            render_dir = os.path.dirname(render_path)
-            if render_dir:
-                try:
-                    os.makedirs(render_dir, exist_ok=True)
-                except OSError as e:
-                    self.log(
-                        f"Publish ABORTED: Cannot create render directory {render_dir}: {e}",
-                        LogLevel.Critical,
-                    )
-                    return []
-
             render_success = False
 
             # Lock comp during state modification and render
             comp.Lock()
             try:
+                # Resolve render path and create directory while holding the lock
+                # so the path cannot be changed by the user between directory
+                # creation and the actual render.
+                render_path = self.normalizePath(final_node.Clip[1])
+                render_dir = os.path.dirname(render_path)
+                if render_dir:
+                    try:
+                        os.makedirs(render_dir, exist_ok=True)
+                    except OSError as e:
+                        self.log(
+                            f"Publish ABORTED: Cannot create render directory {render_dir}: {e}",
+                            LogLevel.Critical,
+                        )
+                        return []
+
                 # Enable the node
                 final_node.SetAttrs({"TOOLB_PassThrough": False})
 
@@ -2106,7 +2371,7 @@ class FusionHost(RamHost):
             success = True
             return True
         except Exception as e:
-            self.log(f"Replace failed: {e}", LogLevel.Error)
+            self.log(f"Replace failed: {e}", LogLevel.Critical)
             return False
         finally:
             self.comp.Unlock()
@@ -2179,103 +2444,21 @@ class FusionHost(RamHost):
         )
         return versionFiles[res["Idx"]] if res else ""
 
-    def _saveAsUI(self) -> dict:
-        """Shows the native Fusion file request dialog for 'Save As'."""
-        if hasattr(self, 'app') and self.app and hasattr(self.app, 'qt_app') and self.app.qt_app:
-            try:
-                from ramses_ui_pyside.save_as_dialog import RamSaveAsDialog
-                file_types = [{"extension": "comp", "name": "Fusion Composition"}]
-                dialog = RamSaveAsDialog(file_types)
-
-                # Pre-set Defaults before showing
-                from ramses import ItemType
-                current_item = self.currentItem()
-                current_step = self.currentStep()
-                if current_item:
-                    item_type = current_item.itemType()
-                    if item_type == ItemType.ASSET:
-                        dialog.setAsset()
-                    elif item_type == ItemType.GENERAL:
-                        dialog.setGeneral()
-                    else:
-                        dialog.setShot()
-                    dialog.setItem(current_item)
-                else:
-                    dialog.setShot()
-                if current_step:
-                    dialog.setStep(current_step)
-                else:
-                    project = RAMSES.project()
-                    if project:
-                        comp_step = project.step("Comp") or project.step("Compositing")
-                        if comp_step:
-                            dialog.setStep(comp_step)
-
-                dialog.setWindowFlags(dialog.windowFlags() | qc.Qt.WindowStaysOnTopHint)
-                dialog.raise_()
-                dialog.activateWindow()
-
-                if getattr(dialog, 'exec', None):
-                    res = dialog.exec()
-                else:
-                    res = dialog.exec_()
-
-                if res:
-                    return {
-                        "item": dialog.item(),
-                        "step": dialog.step(),
-                        "extension": dialog.extension(),
-                        "resource": dialog.resource()
-                    }
-                return None
-            except ImportError:
-                pass
-
-        # Fallback
-        path = self.fusion.RequestFile()
-        if not path:
-            return None
-
-        # Use API to parse the selected path and instantiate the correctly typed object
-        item = RamItem.fromPath(path, virtualIfNotFound=True)
-        nm = RamFileInfo()
-        nm.setFilePath(path)
-
-        if not nm.project:
-            self.log(
-                "The selected path does not seem to belong to a Ramses project. This may cause pipeline issues.",
-                LogLevel.Warning,
-            )
-
-        if not item:
-            item = RamItem(
-                data={
-                    "name": nm.shortName or "New",
-                    "shortName": nm.shortName or "New",
-                },
-                create=False,
-            )
-
-        step = RamStep.fromPath(path)
-        # Ensure we have a valid Ramses step
-        if not step:
-            step = RamStep(
-                data={"name": nm.step or "New", "shortName": nm.step or "New"},
-                create=False,
-            )
-
-        return {
-            "item": item,
-            "step": step,
-            "extension": os.path.splitext(path)[1].lstrip("."),
-            "resource": nm.resource,
-        }
 
     def _saveChangesUI(self) -> str:
         """Shows a dialog asking to save changes before closing/opening.
 
         Returns:
             str: 'save', 'discard', or 'cancel'.
+
+        Note on type contract:
+            The base class RamHost declares _saveChangesUI() -> bool, but the
+            base class open() implementation already handles string returns
+            (checks 'if doSave == "cancel"' etc.). FusionHost intentionally
+            returns a three-way string so that the 'discard' path can bypass
+            saving without being mistaken for a failure. This is a known,
+            deliberate divergence — do not change the return type here without
+            also auditing RamHost.open().
         """
         res = self._request_input(
             "Save Changes?",
@@ -2319,6 +2502,7 @@ class FusionHost(RamHost):
             if target_cfg:
                 # Apply custom configuration
                 FusionConfig.apply_config(node, target_cfg)
+                self._apply_source_numbering(node, preset_name)
                 return
 
         except Exception as e:
@@ -2336,6 +2520,66 @@ class FusionHost(RamHost):
             # Final / default: Apple ProRes 422 HQ
             if node.GetInput(compression_key) != CODEC_PRORES_422_HQ:
                 node.SetInput(compression_key, CODEC_PRORES_422_HQ, 0)
+
+        self._apply_source_numbering(node, preset_name)
+
+    def _apply_source_numbering(self, node, preset_name: str) -> None:
+        """Aligns a Saver's output file numbering with the source plate.
+
+        Managed per step via YAML (``fusion.<preset>.source_numbering``):
+        key absent -> Saver untouched (artists keep manual control);
+        ``true``   -> rendered files are numbered from the plate's first
+        frame; ``false`` -> plain comp-time numbering is enforced.
+
+        Fusion numbers output files as ``SequenceStartFrame + frame -
+        GlobalStart``, so partial re-renders stay consistent and the comp
+        can keep the studio start-frame convention while deliverables carry
+        source numbering. Only meaningful for image-sequence outputs.
+        """
+        if not node:
+            return
+        try:
+            fusion_cfg = self._get_fusion_settings(self.currentStep())
+            preset_cfg = fusion_cfg.get(preset_name, {}) or {}
+            if "source_numbering" not in preset_cfg:
+                return  # unmanaged — never stomp manual Saver settings
+
+            enabled = bool(preset_cfg.get("source_numbering"))
+            _ext, is_sequence = self._get_preset_settings(preset_name)
+
+            start = None
+            if enabled and is_sequence:
+                start = self.resolveSourceStartFrame()
+                if start is None:
+                    self.log(
+                        f"{preset_name}: source_numbering is enabled but no "
+                        "plate numbering was found — using comp frame numbers.",
+                        LogLevel.Warning,
+                    )
+
+            def _as_float(value):
+                try:
+                    return float(value)
+                except (TypeError, ValueError):
+                    return None
+
+            if start is not None and start > 0:
+                if _as_float(node.GetInput("SetSequenceStart")) != 1.0:
+                    node.SetInput("SetSequenceStart", 1, 0)
+                if _as_float(node.GetInput("SequenceStartFrame")) != float(start):
+                    node.SetInput("SequenceStartFrame", start, 0)
+                self.log(
+                    f"{preset_name}: rendered files will be numbered from "
+                    f"the source plate (start frame {start}).",
+                    LogLevel.Info,
+                )
+            elif _as_float(node.GetInput("SetSequenceStart")):
+                node.SetInput("SetSequenceStart", 0, 0)
+        except Exception as e:
+            self.log(
+                f"Failed to apply source numbering ({preset_name}): {e}",
+                LogLevel.Warning,
+            )
 
     def _store_ramses_metadata(self, item: RamItem, step: RamStep = None) -> None:
         """Embeds Ramses identity (Project/Item/Step UUIDs) into Fusion composition metadata.
@@ -2488,7 +2732,7 @@ class FusionHost(RamHost):
             success = True
             return True
         except Exception as e:
-            self.log(f"Setup failed: {e}", LogLevel.Error)
+            self.log(f"Setup failed: {e}", LogLevel.Critical)
             return False
         finally:
             comp.EndUndo(success)
@@ -2508,8 +2752,10 @@ class FusionHost(RamHost):
                 if project:
                     # Default to Shot mode
                     dialog.setShot()
-                    # Pre-select Comp step
-                    comp_step = project.step("Comp") or project.step("Compositing")
+                    # Pre-select Comp step (case-insensitive)
+                    comp_step = self.findStepByShortName(
+                        project, "Comp", "Compositing"
+                    )
                     if comp_step:
                         dialog.setStep(comp_step)
 
@@ -2709,9 +2955,10 @@ class FusionHost(RamHost):
                         }
                         count += 1
                     else:
-                        # UP TO DATE: Clear warning visuals
+                        # UP TO DATE: Clear warning visuals (None restores the
+                        # default tile color; {0,0,0} would paint the node black)
                         updates[name] = {
-                            "color": {"R": 0.0, "G": 0.0, "B": 0.0},
+                            "color": None,
                             "comment": "",
                         }
 
@@ -2742,7 +2989,12 @@ class FusionHost(RamHost):
                         # Only update if current color differs
                         color = node.TileColor
                         target_color = data["color"]
-                        if (
+                        if target_color is None:
+                            # Clear back to the default tile color only if a
+                            # custom color is currently set.
+                            if color:
+                                node.TileColor = None
+                        elif (
                             not color
                             or abs(color.get("R", 0) - target_color["R"]) > 0.01
                             or abs(color.get("G", 0) - target_color["G"]) > 0.01
@@ -2919,12 +3171,8 @@ class FusionHost(RamHost):
                                                 "Ramses.Resource", new_info.resource
                                             )
 
-                                        # Reset Visuals
-                                        active.TileColor = {
-                                            "R": 0.0,
-                                            "G": 0.0,
-                                            "B": 0.0,
-                                        }
+                                        # Reset Visuals (None restores default tile color)
+                                        active.TileColor = None
                                         active.Comments[1] = ""
 
                                         self.log(

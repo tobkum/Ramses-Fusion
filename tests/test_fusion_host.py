@@ -36,10 +36,6 @@ from fusion_host import FusionHost, FORMAT_QUICKTIME, CODEC_PRORES_422, CODEC_PR
 from mocks import MockFusion
 from ramses import LogLevel
 
-# PATCH: fusion_host.py has bugs using LogLevel.Error which doesn't exist
-# Add Error as alias for Critical to prevent test failures from production bugs
-if not hasattr(LogLevel, 'Error'):
-    LogLevel.Error = LogLevel.Critical
 
 class TestFusionHost(unittest.TestCase):
 
@@ -1017,6 +1013,468 @@ class TestFusionCompImport(unittest.TestCase):
         
         # AddTool should be called once for the .exr
         comp.AddTool.assert_called_once_with("Loader", ANY, ANY)
+
+    def test_check_outdated_loaders(self):
+        """Verify check_outdated_loaders detects and handles outdated loaders."""
+        comp = self.mock_fusion.GetCurrentComp()
+        
+        # Add a loader with version 1
+        loader = comp.AddTool("Loader", 0, 0)
+        loader.Clip[1] = "D:/Project/05-SHOTS/SH010/COMP/_published/v001/SH010_v001.001.exr"
+        
+        import fusion_host
+        
+        mock_item = MagicMock()
+        mock_item.shortName.return_value = "SH010"
+        mock_item.latestPublishedVersionFolderPath.return_value = "D:/Project/05-SHOTS/SH010/COMP/_published/v002"
+        
+        mock_step = MagicMock()
+        
+        with patch.object(fusion_host.RamItem, "fromPath", return_value=mock_item), \
+             patch.object(fusion_host.RamStep, "fromPath", return_value=mock_step):
+            count = self.host.check_outdated_loaders()
+        
+        self.assertEqual(count, 1)
+
+    def test_import_comp_failure_no_fallthrough(self):
+        """Verify a failing .comp import does not create a Loader."""
+        comp = self.mock_fusion.GetCurrentComp()
+        import fusion_host
+        fusion_host.bmd.readfile = MagicMock(return_value=None)  # Simulate failure
+        comp.AddTool = MagicMock()
+
+        files = ["D:/MaMo/tracking_v001.comp"]
+        
+        with patch("os.path.exists", return_value=True), \
+             patch("os.path.getmtime", return_value=123456789.0):
+            self.host._import(files, MagicMock(), MagicMock(), [], False)
+
+        comp.AddTool.assert_not_called()
+
+    @patch("fusion_host.yaml.safe_load")
+    def test_publishOptions_retry_loop(self, mock_safe_load):
+        """Verify _publishOptions doesn't recurse infinitely on bad YAML."""
+        # Force safe_load to raise an exception to trigger the retry loop
+        mock_safe_load.side_effect = ValueError("Invalid YAML")
+        
+        # Provide bad YAML strings 3 times, simulating user repeatedly submitting invalid YAML
+        self.host._request_input = MagicMock(side_effect=[
+            {"YAML": "{ invalid: yaml: "},
+            {"YAML": "{ invalid: yaml: "},
+            {"YAML": "{ invalid: yaml: "}
+        ])
+        
+        original_opts = {"foo": "bar"}
+        # Should return the original options after max retries (3)
+        res = self.host._publishOptions(original_opts, showPublishUI=True)
+        self.assertEqual(res, original_opts)
+        self.assertEqual(self.host._request_input.call_count, 3)
+
+    def test_createNewComp_save_failure(self):
+        """Verify _createNewComp returns empty string and logs critical error when Save fails."""
+        comp = self.mock_fusion.GetCurrentComp()
+        comp.Save = MagicMock(return_value=False)
+        self.mock_fusion.NewComp = MagicMock()
+        
+        import fusion_host
+        fusion_host.RamItem = MagicMock()
+        fusion_host.RamItem.fromPath.return_value = MagicMock()
+        self.host._open = MagicMock(return_value=True)
+        self.host.log = MagicMock()
+        self.host.app = MagicMock()
+        self.host.app._resolve_shot_path.return_value = ("D:/test.comp", False)
+        
+        res = self.host._createNewComp(MagicMock(), MagicMock())
+        self.assertEqual(res, "")
+        self.host.log.assert_called_with(ANY, LogLevel.Critical)
+
+class TestVersionFolderScanning(unittest.TestCase):
+    """Covers the patched RamFileManager version scanners (flat files AND
+    Ramses-Ingest style version directories), including the candidate
+    prefilter that replaced the arbitrary entries[:N] listing slice."""
+
+    def setUp(self):
+        import tempfile
+        self.tmp = tempfile.mkdtemp()
+        self.versions = os.path.join(self.tmp, "_versions")
+        os.makedirs(self.versions)
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _add_version_dir(self, dirname: str, filename: str) -> str:
+        d = os.path.join(self.versions, dirname)
+        os.makedirs(d, exist_ok=True)
+        p = os.path.join(d, filename)
+        with open(p, "w") as f:
+            f.write("x")
+        return p
+
+    def test_latest_version_found_in_directory_versions(self):
+        """Directory-based versions (001_OK, 002_WIP ...) resolve to the newest."""
+        from fusion_host import RamFileManager
+
+        self._add_version_dir("001_OK", "TEST_S_SH010_COMP.mov")
+        latest = self._add_version_dir("002_WIP", "TEST_S_SH010_COMP.mov")
+        # Noise that must not be picked up
+        self._add_version_dir("003_OK", "OTHER_SHOT.mov")  # wrong base name
+        os.makedirs(os.path.join(self.versions, "not_a_version"), exist_ok=True)
+
+        with patch.object(RamFileManager, "getVersionFolder", return_value=self.versions):
+            result = RamFileManager.getLatestVersionFilePath(
+                os.path.join(self.tmp, "TEST_S_SH010_COMP.comp")
+            )
+
+        self.assertEqual(os.path.normpath(result), os.path.normpath(latest))
+
+    def test_all_versions_listed_in_order(self):
+        from fusion_host import RamFileManager
+
+        v1 = self._add_version_dir("001_OK", "TEST_S_SH010_COMP.exr")
+        v2 = self._add_version_dir("002_OK", "TEST_S_SH010_COMP.exr")
+
+        with patch.object(RamFileManager, "getVersionFolder", return_value=self.versions):
+            result = RamFileManager.getVersionFilePaths(
+                os.path.join(self.tmp, "TEST_S_SH010_COMP.comp")
+            )
+
+        self.assertEqual(
+            [os.path.normpath(p) for p in result],
+            [os.path.normpath(v1), os.path.normpath(v2)],
+        )
+
+
+class TestStepLookup(unittest.TestCase):
+    """Case-insensitive step lookup (project.step() is exact-match only)."""
+
+    def _project(self, *step_names):
+        steps = []
+        for n in step_names:
+            s = MagicMock()
+            s.shortName.return_value = n
+            steps.append(s)
+        project = MagicMock()
+        project.steps.return_value = steps
+        return project
+
+    def test_finds_step_regardless_of_case(self):
+        project = self._project("PLATE", "COMP")
+        step = FusionHost.findStepByShortName(project, "Comp", "Compositing")
+        self.assertIsNotNone(step)
+        self.assertEqual(step.shortName(), "COMP")
+
+    def test_matches_any_of_the_given_names(self):
+        project = self._project("Compositing")
+        step = FusionHost.findStepByShortName(project, "Comp", "Compositing")
+        self.assertEqual(step.shortName(), "Compositing")
+
+    def test_returns_none_when_absent(self):
+        project = self._project("PLATE", "MaMo")
+        self.assertIsNone(
+            FusionHost.findStepByShortName(project, "Comp", "Compositing")
+        )
+        self.assertIsNone(FusionHost.findStepByShortName(None, "Comp"))
+
+
+class TestImportCollapsing(unittest.TestCase):
+    """Sequence collapsing and sidecar filtering in _import.
+
+    The upstream import flow can pass every file of a published version
+    folder — without collapsing, a 240-frame EXR plate would create 240
+    Loaders (plus Loaders for .ramses_complete and _ramses_data.json).
+    """
+
+    SEQ = [
+        f"D:/pub/001/TEST_S_SH010_PLATE.{f}.exr" for f in (86402, 86400, 86401)
+    ]
+    SIDECARS = [
+        "D:/pub/001/.ramses_complete",
+        "D:/pub/001/_ramses_data.json",
+    ]
+
+    def setUp(self):
+        self.mock_fusion = MockFusion()
+        import fusion_host
+        fusion_host.bmd = sys.modules["bmd"]
+        self.host = FusionHost(self.mock_fusion)
+        self.comp = self.mock_fusion.GetCurrentComp()
+
+    # --- _collapse_import_paths ----------------------------------------------
+
+    def test_sequence_collapses_to_lowest_frame(self):
+        result = FusionHost._collapse_import_paths(self.SIDECARS + self.SEQ)
+        self.assertEqual(result, ["D:/pub/001/TEST_S_SH010_PLATE.86400.exr"])
+
+    def test_sidecars_are_skipped(self):
+        self.assertEqual(FusionHost._collapse_import_paths(self.SIDECARS), [])
+
+    def test_distinct_sequences_stay_separate(self):
+        files = [
+            "D:/pub/001/SH010_BG.1001.exr",
+            "D:/pub/001/SH010_BG.1002.exr",
+            "D:/pub/001/SH010_FG.1001.exr",
+        ]
+        result = FusionHost._collapse_import_paths(files)
+        self.assertEqual(
+            result,
+            ["D:/pub/001/SH010_BG.1001.exr", "D:/pub/001/SH010_FG.1001.exr"],
+        )
+
+    def test_movies_comps_and_versioned_files_pass_through(self):
+        """No frame token = no collapsing; .comp files must survive for the
+        merge path; _v001-style version tokens are not frame tokens."""
+        files = [
+            "D:/pub/001/SH010.mov",
+            "D:/pub/001/tracking.comp",
+            "D:/pub/001/TEST_S_Shot01_RENDER_v001.exr",
+            "D:/pub/001/TEST_S_Shot01_RENDER_v002.exr",
+        ]
+        self.assertEqual(FusionHost._collapse_import_paths(files), files)
+
+    def test_same_name_in_different_folders_not_merged(self):
+        files = [
+            "D:/pub/001/SH010.1001.exr",
+            "D:/pub/002/SH010.1001.exr",
+        ]
+        self.assertEqual(FusionHost._collapse_import_paths(files), files)
+
+    # --- _import integration ---------------------------------------------------
+
+    def test_import_creates_single_loader_for_sequence(self):
+        self.host._import(self.SIDECARS + self.SEQ, None, None, [], False)
+        loaders = [t for t in self.comp.tools.values() if t.ID == "Loader"]
+        self.assertEqual(len(loaders), 1)
+        self.assertEqual(
+            loaders[0].Clip[1], "D:/pub/001/TEST_S_SH010_PLATE.86400.exr"
+        )
+
+    def test_import_with_only_sidecars_fails_cleanly(self):
+        result = self.host._import(self.SIDECARS, None, None, [], False)
+        self.assertFalse(result)
+        self.assertEqual(len(self.comp.tools), 0)
+
+
+class TestSourceNumbering(unittest.TestCase):
+    """Source-plate frame numbering on the _FINAL/_PREVIEW Savers.
+
+    The comp timeline keeps the studio start-frame convention (1001);
+    when enabled per step, the Saver's SetSequenceStart/SequenceStartFrame
+    inputs make the rendered files carry the plate's own numbering.
+    """
+
+    PLATE_CLIP = (
+        "D:/proj/05-SHOTS/TEST_S_SH010/TEST_S_SH010_PLATE/"
+        "_published/001/TEST_S_SH010_PLATE.86400.exr"
+    )
+
+    def setUp(self):
+        self.mock_fusion = MockFusion()
+        import fusion_host
+        fusion_host.bmd = sys.modules["bmd"]
+        self.fusion_host = fusion_host
+        self.host = FusionHost(self.mock_fusion)
+        self.comp = self.mock_fusion.GetCurrentComp()
+
+        # Default plateStepNames come from user settings — isolate from the
+        # machine's real Ramses config.
+        settings = MagicMock()
+        settings.userSettings = {}
+        self._settings_patch = patch.object(fusion_host, "RAM_SETTINGS", settings)
+        self._settings_patch.start()
+        self.addCleanup(self._settings_patch.stop)
+
+    # --- parse_frame_number -------------------------------------------------
+
+    def test_parse_frame_number_dot_separator(self):
+        self.assertEqual(FusionHost.parse_frame_number("plate.86400.exr"), 86400)
+
+    def test_parse_frame_number_underscore_separator(self):
+        self.assertEqual(FusionHost.parse_frame_number("plate_1001.dpx"), 1001)
+
+    def test_parse_frame_number_rejects_version_tokens(self):
+        """_v001 is a version, not a frame — digits must follow the separator."""
+        self.assertIsNone(FusionHost.parse_frame_number("shot_v001.exr"))
+
+    def test_parse_frame_number_no_frame(self):
+        self.assertIsNone(FusionHost.parse_frame_number("TEST_S_SH010_PLATE.exr"))
+        self.assertIsNone(FusionHost.parse_frame_number(".ramses_complete"))
+        self.assertIsNone(FusionHost.parse_frame_number(None))
+
+    # --- resolveSourceStartFrame ---------------------------------------------
+
+    def _add_loader(self, clip_path):
+        loader = self.comp.AddTool("Loader", 0, 0)
+        loader.Clip[1] = clip_path
+        return loader
+
+    def test_resolve_from_plate_loader(self):
+        """A Loader pointing into a plate step's _published wins."""
+        self._add_loader(self.PLATE_CLIP)
+
+        plate_step = MagicMock()
+        plate_step.shortName.return_value = "Plate"
+        with patch.object(
+            self.fusion_host.RamStep, "fromPath", return_value=plate_step
+        ):
+            self.assertEqual(self.host.resolveSourceStartFrame(), 86400)
+
+    def test_resolve_ignores_non_plate_loaders(self):
+        """Loaders from non-plate steps (e.g. a CG render) don't define numbering."""
+        self._add_loader(
+            "D:/proj/05-SHOTS/TEST_S_SH010/TEST_S_SH010_CG/"
+            "_published/002/TEST_S_SH010_CG.1001.exr"
+        )
+        cg_step = MagicMock()
+        cg_step.shortName.return_value = "CG"
+        with patch.object(self.fusion_host.RamStep, "fromPath", return_value=cg_step), \
+             patch.object(self.host, "currentItem", return_value=None):
+            self.assertIsNone(self.host.resolveSourceStartFrame())
+
+    def test_resolve_uses_min_frame_across_plate_loaders(self):
+        self._add_loader(self.PLATE_CLIP)
+        self._add_loader(self.PLATE_CLIP.replace("86400", "86500"))
+
+        plate_step = MagicMock()
+        plate_step.shortName.return_value = "Plate"
+        with patch.object(
+            self.fusion_host.RamStep, "fromPath", return_value=plate_step
+        ):
+            self.assertEqual(self.host.resolveSourceStartFrame(), 86400)
+
+    def test_resolve_falls_back_to_published_plate_on_disk(self):
+        """No loaders: the latest published plate folder defines numbering.
+        Sidecars (.ramses_complete, _ramses_data.json) must be ignored."""
+        plate_step = MagicMock()
+        plate_step.shortName.return_value = "Ingest"
+        project = MagicMock()
+        project.steps.return_value = [plate_step]
+
+        item = MagicMock()
+        item.latestPublishedVersionFilePaths.return_value = [
+            "D:/pub/001/.ramses_complete",
+            "D:/pub/001/_ramses_data.json",
+            "D:/pub/001/TEST_S_SH010_PLATE.86400.exr",
+            "D:/pub/001/TEST_S_SH010_PLATE.86401.exr",
+        ]
+
+        with patch.object(self.host, "currentItem", return_value=item), \
+             patch.object(self.fusion_host.RAMSES, "project", return_value=project):
+            self.assertEqual(self.host.resolveSourceStartFrame(), 86400)
+
+    def test_resolve_returns_none_when_nothing_found(self):
+        with patch.object(self.host, "currentItem", return_value=None):
+            self.assertIsNone(self.host.resolveSourceStartFrame())
+
+    # --- _apply_source_numbering ----------------------------------------------
+
+    def _saver(self):
+        return self.comp.AddTool("Saver", 0, 0)
+
+    def _with_step_cfg(self, cfg):
+        return patch.object(self.host, "_get_fusion_settings", return_value=cfg)
+
+    def test_unmanaged_when_key_absent(self):
+        """No source_numbering key: the Saver's inputs are never touched."""
+        node = self._saver()
+        node.SetInput("SetSequenceStart", 1, 0)  # artist's manual choice
+        node.SetInput("SequenceStartFrame", 500, 0)
+
+        cfg = {"final": {"format": "OpenEXRFormat", "image_sequence": True}}
+        with self._with_step_cfg(cfg), \
+             patch.object(self.host, "currentStep", return_value=None):
+            self.host._apply_source_numbering(node, "final")
+
+        self.assertEqual(node.GetInput("SetSequenceStart"), 1)
+        self.assertEqual(node.GetInput("SequenceStartFrame"), 500)
+
+    def test_enabled_sets_saver_inputs(self):
+        node = self._saver()
+        cfg = {
+            "final": {
+                "format": "OpenEXRFormat",
+                "image_sequence": True,
+                "source_numbering": True,
+            }
+        }
+        with self._with_step_cfg(cfg), \
+             patch.object(self.host, "currentStep", return_value=None), \
+             patch.object(self.host, "resolveSourceStartFrame", return_value=86400):
+            self.host._apply_source_numbering(node, "final")
+
+        self.assertEqual(node.GetInput("SetSequenceStart"), 1)
+        self.assertEqual(node.GetInput("SequenceStartFrame"), 86400)
+
+    def test_enabled_but_no_plate_found_leaves_comp_numbering(self):
+        node = self._saver()
+        cfg = {
+            "final": {
+                "format": "OpenEXRFormat",
+                "image_sequence": True,
+                "source_numbering": True,
+            }
+        }
+        with self._with_step_cfg(cfg), \
+             patch.object(self.host, "currentStep", return_value=None), \
+             patch.object(self.host, "resolveSourceStartFrame", return_value=None):
+            self.host._apply_source_numbering(node, "final")
+
+        self.assertIsNone(node.GetInput("SetSequenceStart"))
+
+    def test_disabled_clears_previous_offset(self):
+        """source_numbering: false enforces comp-time numbering."""
+        node = self._saver()
+        node.SetInput("SetSequenceStart", 1, 0)
+
+        cfg = {
+            "final": {
+                "format": "OpenEXRFormat",
+                "image_sequence": True,
+                "source_numbering": False,
+            }
+        }
+        with self._with_step_cfg(cfg), \
+             patch.object(self.host, "currentStep", return_value=None):
+            self.host._apply_source_numbering(node, "final")
+
+        self.assertEqual(node.GetInput("SetSequenceStart"), 0)
+
+    def test_not_applied_to_movie_outputs(self):
+        """A .mov master has no frame numbering to offset."""
+        node = self._saver()
+        cfg = {
+            "final": {
+                "format": "QuickTimeMovies",
+                "source_numbering": True,
+            }
+        }
+        with self._with_step_cfg(cfg), \
+             patch.object(self.host, "currentStep", return_value=None), \
+             patch.object(self.host, "resolveSourceStartFrame") as mock_resolve:
+            self.host._apply_source_numbering(node, "final")
+
+        mock_resolve.assert_not_called()
+        self.assertIsNone(node.GetInput("SetSequenceStart"))
+
+    def test_apply_render_preset_invokes_source_numbering(self):
+        """End to end: apply_render_preset on a YAML-configured step wires
+        the sequence-start inputs alongside format/codec."""
+        node = self._saver()
+        cfg = {
+            "final": {
+                "format": "OpenEXRFormat",
+                "image_sequence": True,
+                "source_numbering": True,
+            }
+        }
+        with self._with_step_cfg(cfg), \
+             patch.object(self.host, "currentStep", return_value=None), \
+             patch.object(self.host, "resolveSourceStartFrame", return_value=86400):
+            self.host.apply_render_preset(node, "final")
+
+        self.assertEqual(node.GetInput("OutputFormat"), "OpenEXRFormat")
+        self.assertEqual(node.GetInput("SetSequenceStart"), 1)
+        self.assertEqual(node.GetInput("SequenceStartFrame"), 86400)
 
 
 if __name__ == "__main__":

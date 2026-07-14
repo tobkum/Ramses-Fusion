@@ -221,9 +221,18 @@ class MockComp:
     def Unlock(self):
         self.locked = False
 
-    def Paste(self, content):
-        """Mock pasting nodes."""
-        pass
+    def GetToolList(self, selected=False, tool_type=None):
+        """Mock retrieving the tool list."""
+        result = {}
+        idx = 1
+        for tool in self.tools.values():
+            if tool_type and tool.ID != tool_type:
+                continue
+            if selected and getattr(tool, 'Selected', False) != True:
+                continue
+            result[idx] = tool
+            idx += 1
+        return result
 
     def StartUndo(self, name):
         """Mock undo group start."""

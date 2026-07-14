@@ -71,6 +71,7 @@
     - **Goal**: One-click access to the OS directory for previews and final renders, reducing navigation friction.
     - **Implementation**: Small folder icon buttons next to "Create Preview" and "Update / Publish".
     - **Logic**: Resolves the path using `FusionHost.resolveFinalPath` / `previewPath` and opens the directory.
+    - **Related, done**: A side-button next to "Create Preview" that opens the preview *file itself* (not its containing folder) in the OS default media player, gated on the file existing, shipped separately. This item is still open for the folder-opening variant, and for "Update / Publish" / `_FINAL`.
 - [ ] **Smart Import Dialog ("Pipeline Loader")**
     - **Goal**: Replace the native file browser with a context-aware dialog for importing assets and step renders.
     - **Features**:

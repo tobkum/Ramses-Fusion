@@ -123,5 +123,51 @@ class TestFusionConfig(unittest.TestCase):
         self.assertEqual(FusionConfig.get_extension("OpenEXRFormat"), "exr")
         self.assertEqual(FusionConfig.get_extension("Unknown"), "")
 
+    def test_parse_saver_with_sequence_start(self):
+        """A ticked 'Set Sequence Start' becomes source_numbering: true;
+        the static SequenceStartFrame is never baked into the config."""
+        text = """
+        _FINAL = Saver {
+            Inputs = {
+                OutputFormat = Input { Value = FuID { "OpenEXRFormat" }, },
+                ["OpenEXRFormat.Depth"] = Input { Value = 1, },
+                SetSequenceStart = Input { Value = 1, },
+                SequenceStartFrame = Input { Value = 86400, },
+            }
+        }
+        """
+        config = FusionConfig.parse_saver_node(text)
+        self.assertEqual(config["format"], "OpenEXRFormat")
+        self.assertIs(config["source_numbering"], True)
+        # The per-shot value must stay dynamic — resolved at render-setup time
+        self.assertNotIn("SequenceStartFrame", config["properties"])
+        self.assertNotIn("SetSequenceStart", config["properties"])
+
+    def test_parse_saver_with_sequence_start_disabled(self):
+        """An explicit Value = 0 maps to source_numbering: false."""
+        text = """
+        _FINAL = Saver {
+            Inputs = {
+                OutputFormat = Input { Value = FuID { "OpenEXRFormat" }, },
+                SetSequenceStart = Input { Value = 0, },
+            }
+        }
+        """
+        config = FusionConfig.parse_saver_node(text)
+        self.assertIs(config["source_numbering"], False)
+
+    def test_parse_saver_without_sequence_start(self):
+        """No SetSequenceStart in the paste (Fusion omits default inputs):
+        the key is absent, leaving the Saver unmanaged."""
+        text = """
+        _FINAL = Saver {
+            Inputs = {
+                OutputFormat = Input { Value = FuID { "OpenEXRFormat" }, },
+            }
+        }
+        """
+        config = FusionConfig.parse_saver_node(text)
+        self.assertNotIn("source_numbering", config)
+
 if __name__ == "__main__":
     unittest.main()

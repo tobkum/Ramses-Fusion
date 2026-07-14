@@ -96,14 +96,28 @@ class FusionConfig:
             # Our tokenizer handles ["Key"] by stripping quotes, so key is clean.
             if not key.startswith(config["format"]):
                 continue
-                
+
             # Flatten the value if it's inside an Input { Value = ... } structure
             final_val = val
             if isinstance(val, dict) and "Value" in val:
                 final_val = val["Value"]
-            
+
             # Additional unwrapping for weird Fusion types if missed by parser (should rely on parser though)
             config["properties"][key] = final_val
+
+        # 5. Source-plate numbering intent
+        # "Set Sequence Start" is a top-level Saver input (not format-prefixed,
+        # so the loop above skips it). A ticked checkbox on the pasted Saver
+        # becomes the dynamic source_numbering option. The static
+        # SequenceStartFrame value is deliberately NOT carried over: the
+        # plugin resolves the plate's first frame per shot at render-setup
+        # time, and baking one shot's number would misnumber every other shot.
+        seq_start = get_val("SetSequenceStart")
+        if seq_start is not None:
+            try:
+                config["source_numbering"] = bool(float(seq_start))
+            except (TypeError, ValueError):
+                config["source_numbering"] = bool(seq_start)
 
         return config
 
@@ -173,6 +187,9 @@ class FusionConfig:
                     while j < n and s[j] != '"':
                         if s[j] == '\\' and j + 1 < n: j += 2
                         else: j += 1
+                    if j >= n:
+                        # Unterminated string literal — malformed Fusion node.
+                        raise ValueError("Unterminated string literal in Lua table")
                     tokens.append(('STR', s[i+1:j])); i = j + 1; continue
                 if char == '[':
                     j = s.find(']', i)
@@ -235,12 +252,10 @@ class FusionConfig:
                 if peek()[0] == 'OP' and peek()[1] == '}':
                     next_tok(); _depth[0] -= 1
                     return res_list if res_list and not res_dict else res_dict
-                # Lookahead for Key = Value
+                # Lookahead for Key = Value (peek() is bounds-checked, never raises)
                 is_assign = False
-                try:
-                    nxt = peek(1)
-                    if nxt and nxt[0] == 'OP' and nxt[1] == '=': is_assign = True
-                except (ValueError, IndexError): pass
+                nxt = peek(1)
+                if nxt and nxt[0] == 'OP' and nxt[1] == '=': is_assign = True
                 if is_assign:
                     key_tok = next_tok()
                     next_tok() # =
