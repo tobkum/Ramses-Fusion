@@ -206,23 +206,25 @@ class TestRamsesFusionApp(unittest.TestCase):
         mock_step.projectShortName.return_value = "PROJ"
 
         # 1. Test Existing File
+        # stepFilePath() itself validates existence internally (os.path.isfile)
+        # before returning a non-empty path, so _resolve_shot_path() trusts a
+        # non-empty return value directly rather than re-checking on disk.
         mock_shot.stepFilePath.return_value = "D:/Existing/PROJ_S_SH010_COMP_v001.comp"
-        with patch("os.path.exists", return_value=True):
-            path, exists = self.app._resolve_shot_path(mock_shot, mock_step)
-            self.assertTrue(exists)
-            self.assertEqual(path, "D:/Existing/PROJ_S_SH010_COMP_v001.comp")
+        path, exists = self.app._resolve_shot_path(mock_shot, mock_step)
+        self.assertTrue(exists)
+        self.assertEqual(path, "D:/Existing/PROJ_S_SH010_COMP_v001.comp")
 
-        # 2. Test Predicted Path (if file doesn't exist)
+        # 2. Test Predicted Path (no existing file: stepFilePath() returns "")
+        mock_shot.stepFilePath.return_value = ""
         mock_shot.stepFolderPath.return_value = "D:/NewFolder"
-        with patch("os.path.exists", return_value=False):
-            path, exists = self.app._resolve_shot_path(mock_shot, mock_step)
-            self.assertFalse(exists)
-            # Normalize for cross-platform comparison
-            norm_path = path.replace("\\", "/")
-            # Should predict name using Ramses convention: Project_Type_Name_Step_v-1.comp
-            # (Note: fileName helper in app uses version -1 for predicted paths)
-            self.assertIn("PROJ_S_SH010_COMP.comp", norm_path)
-            self.assertIn("D:/NewFolder", norm_path)
+        path, exists = self.app._resolve_shot_path(mock_shot, mock_step)
+        self.assertFalse(exists)
+        # Normalize for cross-platform comparison
+        norm_path = path.replace("\\", "/")
+        # Should predict name using Ramses convention: Project_Type_Name_Step_v-1.comp
+        # (Note: fileName helper in app uses version -1 for predicted paths)
+        self.assertIn("PROJ_S_SH010_COMP.comp", norm_path)
+        self.assertIn("D:/NewFolder", norm_path)
 
     def test_context_caching(self):
         """Verify that Project/Shot context is cached and only re-fetched when the file path changes."""
