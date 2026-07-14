@@ -640,8 +640,11 @@ class RamsesFusionApp:
         # 1. Try existing file
         try:
             with DisableMakedirs():
+                # stepFilePath() already validates existence internally
+                # (os.path.isfile) before returning a non-empty path - no
+                # need to stat it a second time here.
                 path = shot.stepFilePath(step=step, extension="comp")
-            if path and os.path.exists(path):
+            if path:
                 return path, True
         except (AttributeError, TypeError) as e:
             self.log(
@@ -1910,10 +1913,12 @@ class RamsesFusionApp:
             selected_step = session_cache["current_steps"][step_idx]
             shots = session_cache["current_shots"]
             seq_map = session_cache["current_seq_map"]
+            status_map = session_cache["status_map"]
+            step_uuid = str(selected_step.uuid())
 
             valid_options = []
             for shot in shots:
-                status = shot.currentStatus(selected_step)
+                status = status_map.get((str(shot.uuid()), step_uuid))
                 if status:
                     st_uuid = str(ram.RamObject.getUuid(status.get("state")))
                     if state_map.get(st_uuid) in ["NO", "STB"]: continue
@@ -1968,16 +1973,33 @@ class RamsesFusionApp:
         proj = active_project
         sequences = proj.sequences()
         seq_map = {str(s.uuid()): s.shortName() for s in sequences}
-        shots = []
-        for seq in sequences: shots.extend(proj.shots(sequence=seq, lazyLoading=False))
-        shots.extend(proj.shots(sequence="", lazyLoading=False))
-        
+        # A single project-wide fetch (sequence="") already returns every
+        # shot regardless of sequence (see daemon.cpp's getShots: an empty
+        # sequenceUuid returns PROJECT->shots(), the full list). The
+        # previous code additionally fetched every sequence's shots one by
+        # one first - a fully redundant round trip per sequence, since the
+        # results are a strict subset of this call and get deduplicated
+        # away immediately below.
+        shots = proj.shots(sequence="", lazyLoading=False)
+
         unique_shots = []
         seen = set()
         for s in shots:
             if str(s.uuid()) not in seen:
                 unique_shots.append(s)
                 seen.add(str(s.uuid()))
+
+        # Bulk-fetch every status once instead of one daemon round trip per
+        # shot per step change (see update_shots()) - getObjects() reads
+        # the whole local _Status table in a single request.
+        status_map = {}
+        try:
+            for status in daemon.getObjects("RamStatus"):
+                key = (str(status.get("item", "")), str(status.get("step", "")))
+                status_map[key] = status
+        except Exception as e:
+            self.log(f"Could not bulk-fetch statuses: {e}", ram.LogLevel.Debug)
+        session_cache["status_map"] = status_map
         
         session_cache["current_shots"] = unique_shots
         session_cache["current_seq_map"] = seq_map
