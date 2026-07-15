@@ -1120,20 +1120,18 @@ class RamsesFusionApp:
             {
                 "WindowTitle": "Ramses-Fusion",
                 "ID": "RamsesFusionMainWin",
-                "Geometry": [200, 200, 190, 825],
+                "Geometry": [200, 200, 212, 825],
             },
             [
+                # Single top-level VGroup: the previous outer VGroup + HGroup
+                # (which existed only to add the 2px frame gaps) each added
+                # their own baseline layout margin on top of the gaps. Folding
+                # everything into one group removes two more layers of that
+                # additive inset; the 2px frame is kept via the VGaps below.
                 self.ui.VGroup(
-                    {"Spacing": 0, "Weight": 1},
+                    {"Spacing": 4, "Weight": 1},
                     [
                         self.ui.VGap(2),
-                        self.ui.HGroup(
-                            {"Weight": 1},
-                            [
-                                self.ui.HGap(2),
-                                self.ui.VGroup(
-                                    {"Spacing": 4, "Weight": 1},
-                                    [
                                         # Context Header (Clickable - refreshes on click)
                                         self.ui.Stack(
                                             {"Weight": 0},
@@ -1244,11 +1242,6 @@ class RamsesFusionApp:
                                                 "Weight": 0,
                                             }
                                         ),
-                                    ],
-                                ),
-                                self.ui.HGap(2),
-                            ],
-                        ),
                         self.ui.VGap(2),
                     ],
                 )
