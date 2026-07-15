@@ -142,6 +142,11 @@ class RamsesFusionApp:
         self._item_cache = None
         self._step_cache = None
         self._context_path = ""
+        # True once item/step were resolved for _context_path - including
+        # when they legitimately resolved to None (non-pipeline comp).
+        # Without this flag, a None result was treated as "not cached yet"
+        # and every access re-ran the slow host/daemon lookups forever.
+        self._context_resolved = False
         self._last_synced_path = None
         self._last_refresh_time = 0.0
 
@@ -227,8 +232,7 @@ class RamsesFusionApp:
         with self._context_lock:
             needs_update = (
                 path != self._context_path
-                or not self._item_cache
-                or not self._step_cache
+                or not self._context_resolved
             )
         if needs_update:
             # Perform the slow API calls outside the lock to avoid blocking other
@@ -236,12 +240,20 @@ class RamsesFusionApp:
             item = self.ramses.host.currentItem()
             step = self.ramses.host.currentStep()
             with self._context_lock:
-                # Get the path that actually corresponds to the item we just fetched
+                # Only commit if the comp didn't switch mid-fetch: the item
+                # and step above were resolved for `path`, so they are only
+                # valid if that is still the current file. (The previous
+                # guard was inverted - it committed exactly when the path
+                # HAD changed, and never committed a None item/step for an
+                # unchanged path, defeating the cache for non-pipeline
+                # comps.) On a mid-fetch switch we skip; the next access
+                # sees the new path and retries.
                 actual_path = self.ramses.host.currentFilePath()
-                if not self._context_path or actual_path != self._context_path:
+                if actual_path == path:
                     self._context_path = actual_path
                     self._item_cache = item
                     self._step_cache = step
+                    self._context_resolved = True
         return self._context_path
 
     def _get_project(self) -> Optional[ram.RamProject]:

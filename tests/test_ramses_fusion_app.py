@@ -255,22 +255,44 @@ class TestRamsesFusionApp(unittest.TestCase):
         self.assertEqual(self.app.ramses.host.currentItem.call_count, 2)
 
     def test_update_context_toctou_race(self):
-        """Verify _update_context snapshots the actual path after slow API calls."""
-        # Simulate a race where the path changes while slow API calls are running
-        self.app.ramses.host.currentFilePath = MagicMock(side_effect=["D:/Path/A.comp", "D:/Path/B.comp"])
-        self.app.ramses.host.currentItem = MagicMock(return_value=MagicMock(name="ItemB"))
-        self.app.ramses.host.currentStep = MagicMock(return_value=MagicMock(name="StepB"))
-        
+        """Verify _update_context skips the commit when the comp switches mid-fetch.
+
+        The item/step were resolved for the path seen at entry (A.comp); if
+        the current file changed to B.comp while those slow calls ran,
+        committing them under B would pair A's item with B's path - and
+        because needs_update then goes False for B, the wrong item would be
+        served indefinitely. The correct behavior is to skip the commit and
+        resolve cleanly for B on the next access.
+        """
+        # Simulate a race where the path changes while slow API calls are
+        # running: entry sees A.comp, the commit-time re-check sees B.comp,
+        # and the retry access sees B.comp consistently.
+        self.app.ramses.host.currentFilePath = MagicMock(
+            side_effect=["D:/Path/A.comp", "D:/Path/B.comp",
+                         "D:/Path/B.comp", "D:/Path/B.comp"]
+        )
+        item_b = MagicMock(name="ItemB")
+        step_b = MagicMock(name="StepB")
+        self.app.ramses.host.currentItem = MagicMock(return_value=item_b)
+        self.app.ramses.host.currentStep = MagicMock(return_value=step_b)
+
         # Clear cache to trigger update
-        self.app._context_path = None
+        self.app._context_path = ""
         self.app._item_cache = None
-        
+        self.app._context_resolved = False
+
         path = self.app._update_context()
-        
-        # Even though the path at the start of the function was A.comp,
-        # it should snapshot and return B.comp (the actual path at commit time).
+
+        # Mid-fetch switch: nothing committed, prior (empty) context returned.
+        self.assertEqual(path, "")
+        self.assertFalse(self.app._context_resolved)
+
+        # Next access sees a stable B.comp and resolves it properly.
+        path = self.app._update_context()
         self.assertEqual(path, "D:/Path/B.comp")
         self.assertEqual(self.app._context_path, "D:/Path/B.comp")
+        self.assertIs(self.app._item_cache, item_b)
+        self.assertTrue(self.app._context_resolved)
 
     def test_requires_connection_decorator(self):
         """Verify that the @requires_connection decorator blocks handlers when the Ramses Daemon is offline."""
