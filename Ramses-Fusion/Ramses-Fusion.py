@@ -1120,7 +1120,7 @@ class RamsesFusionApp:
             {
                 "WindowTitle": "Ramses-Fusion",
                 "ID": "RamsesFusionMainWin",
-                "Geometry": [200, 200, 280, 825],
+                "Geometry": [200, 200, 190, 825],
             },
             [
                 self.ui.VGroup(
@@ -1157,7 +1157,7 @@ class RamsesFusionApp:
                                                                 "WordWrap": True,
                                                                 "Weight": 1,
                                                                 "MinimumSize": [
-                                                                    220,
+                                                                    150,
                                                                     85,
                                                                 ],
                                                             }
@@ -1195,7 +1195,7 @@ class RamsesFusionApp:
                                                         "Text": "",
                                                         "Flat": True,
                                                         "ToolTip": "Click to refresh",
-                                                        "MinimumSize": [220, 85],
+                                                        "MinimumSize": [150, 85],
                                                         "StyleSheet": "QPushButton { background-color: transparent; border: none; } QPushButton:hover { background-color: rgba(255, 255, 255, 12); border: 1px solid #4a5562; border-radius: 4px; } QPushButton:pressed { background-color: rgba(0, 0, 0, 25); }",
                                                     }
                                                 ),
@@ -1636,7 +1636,7 @@ class RamsesFusionApp:
         if icon_only:
             ss = "QPushButton { text-align: center; padding: 0; border: 1px solid #222; border-radius: 3px;" + weight_css
         else:
-            ss = "QPushButton { text-align: left; padding-left: 12px; border: 1px solid #222; border-radius: 3px;" + weight_css
+            ss = "QPushButton { text-align: left; padding-left: 6px; border: 1px solid #222; border-radius: 3px;" + weight_css
 
         if accent_color:
             ss += f" background-color: {accent_color}; }}"
