@@ -1333,11 +1333,11 @@ class RamsesFusionApp:
                 ),
                 self.create_button(
                     "SwitchShotButton",
-                    "Browse Shots / Tasks",
+                    "Switch Shot",
                     "ramshot.png",
                     accent_color=bg_color,
                     weight=0,
-                    tooltip="Quickly jump to another shot in this project or create a new one from a template.",
+                    tooltip="Jump to another shot in this project, or create a new one from a template.",
                 ),
                 self.create_button(
                     "SetupSceneButton",
@@ -2143,7 +2143,7 @@ class RamsesFusionApp:
 
     @requires_connection
     def on_comment(self, ev: object) -> None:
-        """Handler for 'Add Note && Save' button."""
+        """Handler for the 'Save with Note' button."""
         host = self.ramses.host
         status = host.currentStatus()
         current_note = status.comment() if status else ""
@@ -2153,7 +2153,7 @@ class RamsesFusionApp:
         if not qw:
             # Fallback to UIManager remains the same as it handles both
             res = host._request_input(
-                "Add Note && Save",
+                "Save with Note",
                 [
                     {
                         "id": "Comment",
@@ -2164,7 +2164,7 @@ class RamsesFusionApp:
                     },
                     {
                         "id": "Incremental",
-                        "label": "Save as New Version:",
+                        "label": "Save as new version:",
                         "type": "checkbox",
                         "default": False,
                     },
