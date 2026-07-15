@@ -1177,7 +1177,10 @@ class RamsesFusionApp:
                                                                         "ID": "RefreshIcon",
                                                                         "Text": "↻",
                                                                         "Weight": 0,
-                                                                        "StyleSheet": "QLabel { color: #777; font-size: 14px; font-weight: bold; padding: 3px 5px 0 0; }",
+                                                                        # Bordered chip so the refresh affordance is
+                                                                        # discoverable without hovering (the whole
+                                                                        # header is the click target, as before).
+                                                                        "StyleSheet": "QLabel { color: #9aa3ad; font-size: 13px; font-weight: bold; border: 1px solid #3a4048; border-radius: 3px; background-color: #23272d; padding: 0 4px; margin: 4px 4px 0 0; }",
                                                                     }
                                                                 ),
                                                             ],
@@ -1975,11 +1978,18 @@ class RamsesFusionApp:
                         ui.Label({"Text": "Shot:", "Weight": 0.25}),
                         ui.ComboBox({"ID": "ShotCombo", "Weight": 0.75})
                     ]),
+                    # Explains an empty Shot list instead of leaving it blank.
+                    ui.Label({
+                        "ID": "ShotHint",
+                        "Text": "",
+                        "Weight": 0,
+                        "StyleSheet": "QLabel { color: #e0b23d; font-size: 11px; }",
+                    }),
                 ]),
                 ui.VGap(10),
                 ui.HGroup({"Weight": 0}, [
                     ui.HGap(0, 1),
-                    ui.Button({"ID": "OkBtn", "Text": "OK", "Weight": 0, "MinimumSize": [120, 30]}),
+                    ui.Button({"ID": "OkBtn", "Text": "OK", "Weight": 0, "MinimumSize": [120, 30], "Default": True}),
                     ui.Button({"ID": "CancelBtn", "Text": "Cancel", "Weight": 0, "MinimumSize": [120, 30]}),
                 ]),
                 ui.VGap(5),
@@ -2021,7 +2031,14 @@ class RamsesFusionApp:
             session_cache["shot_options"] = valid_options
             for opt in valid_options:
                 itm["ShotCombo"].AddItem(opt["label"])
-            
+
+            # Explain an empty list rather than leaving a blank combo that
+            # silently does nothing on OK.
+            if not valid_options:
+                itm["ShotHint"].Text = "No shots to do for this step — try another step."
+            else:
+                itm["ShotHint"].Text = ""
+
             if cur_item:
                 for i, opt in enumerate(valid_options):
                     if str(opt["shot"].uuid()) == str(cur_item.uuid()):
