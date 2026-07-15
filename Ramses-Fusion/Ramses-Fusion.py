@@ -1126,11 +1126,11 @@ class RamsesFusionApp:
                 self.ui.VGroup(
                     {"Spacing": 0, "Weight": 1},
                     [
-                        self.ui.VGap(6),
+                        self.ui.VGap(2),
                         self.ui.HGroup(
                             {"Weight": 1},
                             [
-                                self.ui.HGap(6),
+                                self.ui.HGap(2),
                                 self.ui.VGroup(
                                     {"Spacing": 4, "Weight": 1},
                                     [
@@ -1243,10 +1243,10 @@ class RamsesFusionApp:
                                         ),
                                     ],
                                 ),
-                                self.ui.HGap(6),
+                                self.ui.HGap(2),
                             ],
                         ),
-                        self.ui.VGap(6),
+                        self.ui.VGap(2),
                     ],
                 )
             ],
