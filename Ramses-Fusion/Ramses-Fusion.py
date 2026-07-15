@@ -1219,17 +1219,20 @@ class RamsesFusionApp:
                                             }
                                         ),
                                         self.ui.VGap(6),
-                                        # Groups Container (No weight, stays as small as possible)
-                                        self.ui.VGroup(
-                                            {"Weight": 0, "Spacing": 4},
-                                            [
-                                                self._build_project_group(),
-                                                self._build_pipeline_group(),
-                                                self._build_working_group(),
-                                                self._build_publish_group(),
-                                                self._build_settings_group(),
-                                            ],
-                                        ),
+                                        # Section groups inlined directly into the
+                                        # content column (no wrapper VGroup): each
+                                        # nested layout level adds its own
+                                        # horizontal contents-margin, so removing
+                                        # this redundant layer lets the section
+                                        # headers sit closer to the panel edge.
+                                        # The content column's own Spacing (4)
+                                        # provides the gap between them, same as
+                                        # the removed wrapper did.
+                                        self._build_project_group(),
+                                        self._build_pipeline_group(),
+                                        self._build_working_group(),
+                                        self._build_publish_group(),
+                                        self._build_settings_group(),
                                         # Spacer to push everything up (Takes all remaining weight)
                                         self.ui.VGap(0, 1),
                                         # Footer Version
