@@ -26,6 +26,43 @@ ui_lib_path = os.path.join(lib_path, "ramses_ui_pyside")
 if ui_lib_path not in sys.path:
     sys.path.append(ui_lib_path)
 
+# The vendored SDK (ram_settings.py) parses its settings JSON at import
+# time with no error handling: a corrupt ramses_addons_settings.json (e.g.
+# a torn write from a crash) raises inside the import below and bricks the
+# whole add-on. Validate the file up front and quarantine it if unreadable
+# so the SDK falls back to defaults. Path construction mirrors
+# lib/ramses/ram_settings.py exactly.
+def _quarantine_corrupt_addon_settings():
+    import json as _json
+    import platform as _platform
+    system = _platform.system()
+    if system == "Windows":
+        folder = os.path.expandvars("${APPDATA}/Ramses/Config")
+    elif system == "Linux":
+        folder = os.path.expanduser("~/.config/Ramses/Config")
+    else:
+        return
+    settings_file = os.path.join(folder, "ramses_addons_settings.json")
+    if not os.path.isfile(settings_file):
+        return
+    try:
+        with open(settings_file, "r", encoding="utf8") as f:
+            _json.load(f)
+    except (ValueError, OSError):
+        quarantined = settings_file + ".corrupt"
+        try:
+            os.replace(settings_file, quarantined)
+            print(
+                "[Ramses] Warning: the add-on settings file was corrupt and "
+                "has been moved to " + quarantined + ". Default settings "
+                "will be used; re-configure the add-on if needed."
+            )
+        except OSError:
+            pass
+
+
+_quarantine_corrupt_addon_settings()
+
 import ramses as ram
 
 # PySide Setup
