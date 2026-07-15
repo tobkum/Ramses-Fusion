@@ -989,6 +989,37 @@ class RamsesFusionApp:
         except (AttributeError, RuntimeError) as e:
             self.log(f"Render anchor sync failed: {e}", ram.LogLevel.Debug)
 
+    def _set_status(self, text: str, kind: str = "ok") -> None:
+        """Shows a short message on the panel's feedback line under the header.
+
+        Gives the everyday actions (Save / Incremental / Publish / Preview)
+        the positive confirmation they used to lack - they only refreshed the
+        header silently, and errors went to the Fusion console that comp
+        artists never open. The line persists as a "last action" note until
+        the next action replaces it.
+
+        Args:
+            text: The message to show (empty string clears it).
+            kind: One of "ok" (green), "info" (grey), "warn" (amber),
+                "error" (red) - selects the colour.
+        """
+        color = {
+            "ok": "#7fbf8b",
+            "info": "#9aa3ad",
+            "warn": "#e0b23d",
+            "error": "#e07a5a",
+        }.get(kind, "#9aa3ad")
+        try:
+            lbl = self.dlg.GetItems()["StatusLine"]
+            lbl.Text = text
+            lbl.StyleSheet = (
+                "QLabel { color: %s; font-size: 11px; padding: 2px 0; }" % color
+            )
+        except Exception:
+            # UIManager not built yet, or running headless - feedback is
+            # best-effort and must never break the action it reports on.
+            pass
+
     def refresh_header(self, force_full: bool = False) -> None:
         """Updates the Context Header and UI state.
 
@@ -1167,7 +1198,24 @@ class RamsesFusionApp:
                                                 ),
                                             ],
                                         ),
-                                        self.ui.VGap(10),
+                                        # Transient feedback line: confirms the
+                                        # everyday actions (Save/Publish/Preview)
+                                        # that used to succeed silently. Empty
+                                        # until an action sets it; persists as a
+                                        # "last action" line until the next one.
+                                        self.ui.Label(
+                                            {
+                                                "ID": "StatusLine",
+                                                "Text": "",
+                                                "Weight": 0,
+                                                "Alignment": {
+                                                    "AlignHCenter": True,
+                                                    "AlignVCenter": True,
+                                                },
+                                                "StyleSheet": "QLabel { color: #7fbf8b; font-size: 11px; padding: 2px 0; }",
+                                            }
+                                        ),
+                                        self.ui.VGap(6),
                                         # Groups Container (No weight, stays as small as possible)
                                         self.ui.VGroup(
                                             {"Weight": 0, "Spacing": 8},
@@ -2084,15 +2132,22 @@ class RamsesFusionApp:
                         if status:
                             status.setState(wip_state)
                         self.refresh_header(force_full=True)
+                        self._set_status(
+                            f"✓ Created {shot_data['shot'].shortName()} (WIP).", "ok"
+                        )
                 else:
                     if host.open(shot_data["path"]):
                         self.refresh_header(force_full=True)
+                        self._set_status(
+                            f"✓ Opened {shot_data['shot'].shortName()}.", "ok"
+                        )
 
     @requires_connection
     def on_import(self, ev: object) -> None:
         """Handler for 'Import' button."""
         if self.ramses.host.importItem():
             self.refresh_header()
+            self._set_status("✓ Imported published input.", "ok")
 
     @requires_connection
     def on_replace(self, ev: object) -> None:
@@ -2100,6 +2155,7 @@ class RamsesFusionApp:
         # Smart Update logic is handled inside host.replaceItem()
         if self.ramses.host.replaceItem():
             self.refresh_header()
+            self._set_status("✓ Loader replaced.", "ok")
 
     @requires_connection
     def on_save(self, ev: object) -> None:
@@ -2121,6 +2177,12 @@ class RamsesFusionApp:
 
         if host.save(setupFile=has_project, state=state):
             self.refresh_header()
+            self._set_status(
+                f"✓ Saved v{host.currentVersion()} · {time.strftime('%H:%M')}",
+                "ok",
+            )
+        else:
+            self._set_status("Save failed — see the Fusion console.", "error")
 
     @requires_connection
     def on_incremental_save(self, ev: object) -> None:
@@ -2140,6 +2202,14 @@ class RamsesFusionApp:
 
         if host.save(incremental=True, setupFile=has_project, state=state):
             self.refresh_header()
+            self._set_status(
+                f"✓ Saved new version v{host.currentVersion()} · {time.strftime('%H:%M')}",
+                "ok",
+            )
+        else:
+            self._set_status(
+                "Incremental save failed — see the Fusion console.", "error"
+            )
 
     @requires_connection
     def on_comment(self, ev: object) -> None:
@@ -2182,6 +2252,14 @@ class RamsesFusionApp:
                             status.setComment(res["Comment"])
                             status.setVersion(host.currentVersion())
                         self.refresh_header()
+                        self._set_status(
+                            f"✓ Saved v{host.currentVersion()} with note · {time.strftime('%H:%M')}",
+                            "ok",
+                        )
+                    else:
+                        self._set_status(
+                            "Save failed — see the Fusion console.", "error"
+                        )
             return
 
         # Correct API usage: (version:int, comment:str)
@@ -2206,6 +2284,16 @@ class RamsesFusionApp:
 
         if self.ramses.host.updateStatus():
             self.refresh_header(force_full=True)
+            status = self.ramses.host.currentStatus()
+            state_name = (
+                status.state().shortName() if status and status.state() else "?"
+            )
+            self._set_status(f"✓ Status updated → {state_name}", "ok")
+        else:
+            self._set_status(
+                "Update / Publish did not complete — see the Fusion console.",
+                "error",
+            )
 
     @requires_connection
     def on_preview(self, ev: object) -> None:
@@ -2220,6 +2308,8 @@ class RamsesFusionApp:
             return
 
         self.ramses.host.savePreview()
+        self.refresh_header()
+        self._set_status(f"✓ Preview created · {time.strftime('%H:%M')}", "ok")
 
     def on_open_preview(self, ev: object) -> None:
         """Handler for the 'Open Preview' side-button.
@@ -2238,7 +2328,7 @@ class RamsesFusionApp:
             return
 
         if not preview_path or not os.path.exists(preview_path):
-            self.log("No preview file found. Use 'Create Preview' first.", ram.LogLevel.Warning)
+            self._set_status("No preview yet — use Create Preview first.", "warn")
             return
 
         if qw:
@@ -2762,18 +2852,23 @@ class RamsesFusionApp:
                 return
 
         self.log(f"Template '{name}' saved to {path}", ram.LogLevel.Info)
+        self._set_status(f"✓ Template '{name}' saved.", "ok")
 
     @requires_connection
     def on_sync(self, ev: object) -> None:
         """Handler for 'Sync Settings' button."""
         self.ramses.host.setupCurrentFile()
         self.refresh_header()
+        self._set_status("✓ Project settings synced (resolution, FPS, range).", "ok")
 
     @requires_connection
     def on_retrieve(self, ev: object) -> None:
         """Handler for 'Version History / Restore'."""
         if self.ramses.host.restoreVersion():
             self.refresh_header()
+            self._set_status(
+                f"✓ Restored — now at v{self.ramses.host.currentVersion()}.", "ok"
+            )
 
     def on_close(self, ev: object) -> None:
         """Handler for window close event.
