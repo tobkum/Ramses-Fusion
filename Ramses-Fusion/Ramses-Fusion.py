@@ -1126,11 +1126,11 @@ class RamsesFusionApp:
                 self.ui.VGroup(
                     {"Spacing": 0, "Weight": 1},
                     [
-                        self.ui.VGap(15),
+                        self.ui.VGap(6),
                         self.ui.HGroup(
                             {"Weight": 1},
                             [
-                                self.ui.HGap(15),
+                                self.ui.HGap(6),
                                 self.ui.VGroup(
                                     {"Spacing": 4, "Weight": 1},
                                     [
@@ -1221,7 +1221,7 @@ class RamsesFusionApp:
                                         self.ui.VGap(6),
                                         # Groups Container (No weight, stays as small as possible)
                                         self.ui.VGroup(
-                                            {"Weight": 0, "Spacing": 8},
+                                            {"Weight": 0, "Spacing": 4},
                                             [
                                                 self._build_project_group(),
                                                 self._build_pipeline_group(),
@@ -1243,10 +1243,10 @@ class RamsesFusionApp:
                                         ),
                                     ],
                                 ),
-                                self.ui.HGap(15),
+                                self.ui.HGap(6),
                             ],
                         ),
-                        self.ui.VGap(15),
+                        self.ui.VGap(6),
                     ],
                 )
             ],
@@ -1364,8 +1364,8 @@ class RamsesFusionApp:
                 "ID": id_name,
                 "Text": f"{prefix}  {title}",
                 "Weight": 0,
-                "MinimumSize": [16, 22],
-                "MaximumSize": [2000, 22],
+                "MinimumSize": [16, 20],
+                "MaximumSize": [2000, 20],
                 "Font": self.ui.Font({"PixelSize": 10, "Bold": True}),
                 "StyleSheet": ss,
                 "Checkable": True,
