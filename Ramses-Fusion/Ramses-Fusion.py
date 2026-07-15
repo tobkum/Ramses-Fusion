@@ -1252,7 +1252,7 @@ class RamsesFusionApp:
                     self._section_states[content_id] = is_collapsed
 
                     # Update Header Text
-                    prefix = "[ + ]" if is_collapsed else "[ − ]"
+                    prefix = "▸" if is_collapsed else "▾"
                     items[header_id].Text = f"{prefix}  {title}"
 
                     # Manually toggle each button's visibility
@@ -1303,10 +1303,10 @@ class RamsesFusionApp:
         """
         # Initial state
         is_collapsed = self._section_states.get(content_id, False)
-        prefix = "[ + ]" if is_collapsed else "[ − ]"
+        prefix = "▸" if is_collapsed else "▾"
 
-        ss = "QPushButton { text-align: left; padding-left: 5px; background-color: #1a1a1a; color: #888; border: none; border-top: 1px solid #111; border-bottom: 1px solid #333; }"
-        ss += " QPushButton:hover { color: #BBB; background-color: #222; }"
+        ss = "QPushButton { text-align: left; padding-left: 6px; background-color: #1a1a1a; color: #9aa3ad; border: none; border-top: 1px solid #111; border-bottom: 1px solid #333; }"
+        ss += " QPushButton:hover { color: #d7dbe1; background-color: #222; }"
 
         return self.ui.Button(
             {
@@ -1324,7 +1324,7 @@ class RamsesFusionApp:
 
     def _build_project_group(self):
         """Builds the 'Project & Scene' UI section."""
-        bg_color = "#2a3442"
+        bg_color = "#2c4468"  # PROJECT & SCENE (blue)
         content_id = "ProjectContent"
         return self.ui.VGroup(
             [
@@ -1360,7 +1360,7 @@ class RamsesFusionApp:
 
     def _build_pipeline_group(self):
         """Builds the 'Assets & Tools' UI section."""
-        bg_color = "#342a42"
+        bg_color = "#463063"  # ASSETS & TOOLS (purple)
         content_id = "PipelineContent"
         return self.ui.VGroup(
             [
@@ -1396,7 +1396,7 @@ class RamsesFusionApp:
 
     def _build_working_group(self):
         """Builds the 'Saving & Iteration' UI section."""
-        bg_color = "#2a423d"
+        bg_color = "#2b5a4c"  # SAVING & ITERATION (teal)
         content_id = "WorkingContent"
         return self.ui.VGroup(
             [
@@ -1410,6 +1410,7 @@ class RamsesFusionApp:
                     accent_color=bg_color,
                     weight=0,
                     tooltip="Overwrite the current working file version.",
+                    prominent=True,  # highest-frequency action - taller & bold
                 ),
                 self.create_button(
                     "SaveAsButton",
@@ -1448,7 +1449,7 @@ class RamsesFusionApp:
 
     def _build_publish_group(self):
         """Builds the 'Review & Publish' UI section."""
-        bg_color = "#2a422a"
+        bg_color = "#2f5a32"  # REVIEW & PUBLISH (green)
         content_id = "PublishContent"
         return self.ui.VGroup(
             [
@@ -1483,9 +1484,14 @@ class RamsesFusionApp:
                     "UpdateStatusButton",
                     "Update / Publish",
                     "ramstatus.png",
-                    tooltip="Change the shot status (e.g., WIP, Review) and optionally publish the final output.",
-                    accent_color=bg_color,
+                    # Amber, taller, bold, and alone in its colour: this is the
+                    # one transactional action on the panel (renders the final
+                    # master, archives the comp, writes the database) and must
+                    # not read like "Create Preview" one row above it.
+                    tooltip="Renders the final master, archives the comp, and advances the shot status in the database.",
+                    accent_color="#6e4a12",
                     weight=0,
+                    prominent=True,
                 ),
             ]
         )
@@ -1545,6 +1551,7 @@ class RamsesFusionApp:
         max_size: Optional[List[int]] = None,
         accent_color: Optional[str] = None,
         icon_only: bool = False,
+        prominent: bool = False,
     ) -> Any:
         """Creates a standardized UI Button with optional styling.
 
@@ -1562,15 +1569,23 @@ class RamsesFusionApp:
             icon_only (bool, optional): If True, centers the icon instead of
                 using the left-aligned/left-padded text-button layout.
                 Intended for small square icon-only buttons. Defaults to False.
+            prominent (bool, optional): If True, makes the button taller (36px
+                vs 30px) and semibold. Used to give the highest-frequency
+                action (Save) and the heaviest action (Update/Publish) more
+                visual weight than the routine buttons around them.
 
         Returns:
             Any: The created Fusion UI button.
         """
+        # Prominent buttons are taller and bold; routine buttons are 30px.
+        default_h = 36 if prominent else 30
+        weight_css = "font-weight: 600;" if prominent else ""
+
         # Base Style: Reverted to the original flat 1px solid #222 border
         if icon_only:
-            ss = "QPushButton { text-align: center; padding: 0; border: 1px solid #222; border-radius: 3px;"
+            ss = "QPushButton { text-align: center; padding: 0; border: 1px solid #222; border-radius: 3px;" + weight_css
         else:
-            ss = "QPushButton { text-align: left; padding-left: 12px; border: 1px solid #222; border-radius: 3px;"
+            ss = "QPushButton { text-align: left; padding-left: 12px; border: 1px solid #222; border-radius: 3px;" + weight_css
 
         if accent_color:
             ss += f" background-color: {accent_color}; }}"
@@ -1602,8 +1617,8 @@ class RamsesFusionApp:
                 "Text": text if text else "",
                 "Weight": weight,
                 "ToolTip": tooltip,
-                "MinimumSize": min_size or [16, 30],
-                "MaximumSize": max_size or [2000, 30],
+                "MinimumSize": min_size or [16, default_h],
+                "MaximumSize": max_size or [2000, default_h],
                 "IconSize": [16, 16],
                 "Icon": self._get_icon(icon_name),
                 "StyleSheet": ss,
