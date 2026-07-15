@@ -42,10 +42,14 @@ except ImportError:
 try:
     import ramses_patches
     ramses_patches.apply()
+    from ramses_patches import DisableMakedirs
 except ImportError:
     print(
         "[Ramses] Warning: ramses_patches module not found. Critical fixes may be missing."
     )
+    # Read-only probes below use `with DisableMakedirs():` - degrade to a
+    # no-op context manager rather than crashing if the patches are missing.
+    from contextlib import nullcontext as DisableMakedirs
 
 __all__ = ["FusionHost"]
 
@@ -321,12 +325,19 @@ with _DAEMON_INIT_LOCK:
         if ramPublishOptions.get("useTempFile", False):
             self.createTempWorkingFile()
 
+        # From here on a temp working file may be open (created above when
+        # useTempFile is set) - every failure return must close it, or the
+        # temp file is left in place. Upstream RamHost.publish does the same
+        # on its failure path; closeTempWorkingFile() is a safe no-op when
+        # no temp file was created.
         if not self._RamHost__runUserScripts(
             "before_pre_publish", publishInfo, publishOptions, item, step
         ):
+            self.closeTempWorkingFile()
             return False
         publishOptions = self._prePublish(publishInfo, publishOptions)
         if publishOptions is False or publishOptions is None:
+            self.closeTempWorkingFile()
             return False
 
         if ramPublishOptions.get("backupFile", False):
@@ -334,6 +345,7 @@ with _DAEMON_INIT_LOCK:
         if not self._RamHost__runUserScripts(
             "before_publish", publishInfo, item, step, publishOptions
         ):
+            self.closeTempWorkingFile()
             return False
 
         published_files = self._publish(publishInfo, publishOptions)
@@ -341,12 +353,14 @@ with _DAEMON_INIT_LOCK:
         # produced — both are treated as failure here because a successful Fusion
         # render always yields at least one output file.
         if not published_files:
+            self.closeTempWorkingFile()
             return False
         for file in published_files:
             self._RamHost__setPublishMetadata(file, publishInfo)
         if not self._RamHost__runUserScripts(
             "on_publish", published_files, publishInfo, item, step, publishOptions
         ):
+            self.closeTempWorkingFile()
             return False
 
         status = self.currentStatus()
@@ -957,7 +971,11 @@ class FusionHost(RamHost):
             if str(step.shortName()).lower() not in plate_names:
                 continue
             try:
-                files = item.latestPublishedVersionFilePaths(step=step)
+                # Read-only probe: without DisableMakedirs this creates a
+                # _published folder in every plate step just to look for
+                # source frame numbers (SDK getters mkdir on read).
+                with DisableMakedirs():
+                    files = item.latestPublishedVersionFilePaths(step=step)
             except Exception:
                 continue
             frames = []
@@ -1010,7 +1028,18 @@ class FusionHost(RamHost):
                 )
 
         try:
-            self.comp.Save(filePath)
+            # comp.Save() reports non-exception failures (disk full, locked
+            # or invalid path, read-only share) via its return value.
+            # Discarding it made a failed save report success: identity
+            # metadata was written for a file that doesn't exist and
+            # updateStatus went on to publish/update the DB against a
+            # phantom version. (_createNewComp already checks this return.)
+            if not self.comp.Save(filePath):
+                self.log(
+                    f"Fusion refused to save the comp to: {filePath}",
+                    LogLevel.Critical,
+                )
+                return False
             self._store_ramses_metadata(item, step)
             return True
         except Exception as e:
@@ -2126,11 +2155,24 @@ class FusionHost(RamHost):
         # 5. Step 3 of Transaction: Update the Database
         # Only reached if Publish succeeded OR was not requested.
         status = self.currentStatus()
-        if status:
-            status.setComment(comment)
-            status.setCompletionRatio(completionRatio)
-            status.setState(state)
-            status.setVersion(self.currentVersion())
+        if not status:
+            # Same contract as the publish-failure path above: the save (and
+            # possibly publish) succeeded but the database was NOT updated.
+            # Silently returning True here left the artist believing the
+            # state/comment/completion were recorded when nothing reached
+            # the DB (e.g. a transient daemon hiccup in currentStatus()).
+            self.log(
+                "CRITICAL: The file was saved, but the status could not be "
+                "retrieved from the Ramses daemon - the database was NOT "
+                "updated. Please update the status manually to fix the "
+                "desync.",
+                LogLevel.Warning,
+            )
+            return False
+        status.setComment(comment)
+        status.setCompletionRatio(completionRatio)
+        status.setState(state)
+        status.setVersion(self.currentVersion())
 
         # 6. Preview (Non-critical, doesn't abort the status update if it fails)
         if savePreview:
@@ -2310,7 +2352,11 @@ class FusionHost(RamHost):
         if not self.comp:
             return False
         active = self.comp.ActiveTool
-        if not active or active.GetAttrs()["TOOLS_RegID"] != "Loader":
+        # GetAttrs() can return None/False from Fusion; subscripting it
+        # directly raised an uncaught TypeError (the guarding try block
+        # only starts further down).
+        attrs = active.GetAttrs() if active else None
+        if not attrs or attrs.get("TOOLS_RegID") != "Loader":
             self.log("Please select a Loader node to replace.", LogLevel.Warning)
             return False
 
@@ -2928,9 +2974,13 @@ class FusionHost(RamHost):
                 res = info.resource
 
                 # 3. Check Latest Version Folder
-                latest_dir = item.latestPublishedVersionFolderPath(
-                    step=step, resource=res
-                )
+                # Read-only probe: without DisableMakedirs this creates
+                # _published folders for arbitrary imported items/steps just
+                # to color outdated Loader nodes on refresh.
+                with DisableMakedirs():
+                    latest_dir = item.latestPublishedVersionFolderPath(
+                        step=step, resource=res
+                    )
                 is_outdated = False
 
                 if latest_dir:
@@ -3059,9 +3109,12 @@ class FusionHost(RamHost):
                         loader_resource = info.resource
 
                         # Use correct API: latestPublishedVersionFolderPath with resource filter
-                        latest_dir = itm.latestPublishedVersionFolderPath(
-                            step=stp, resource=loader_resource
-                        )
+                        # Read-only probe ("is this loader outdated?") before
+                        # the user has chosen anything - don't mkdir on read.
+                        with DisableMakedirs():
+                            latest_dir = itm.latestPublishedVersionFolderPath(
+                                step=stp, resource=loader_resource
+                            )
 
                         # If outdated, intervene with Smart Dialog
                         if latest_dir and os.path.dirname(path).lower().rstrip(

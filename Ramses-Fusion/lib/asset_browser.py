@@ -49,7 +49,7 @@ class AssetBrowser:
                 self.ui.VGap(10),
                 self.ui.HGroup({"Weight": 0}, [
                     self.ui.HGap(0, 1),
-                    self.ui.Button({"ID": "ImportBtn", "Text": "Import", "Weight": 0, "MinimumSize": [100, 30]}),
+                    self.ui.Button({"ID": "ImportBtn", "Text": "Import", "Weight": 0, "MinimumSize": [100, 30], "Default": True}),
                     self.ui.Button({"ID": "CancelBtn", "Text": "Cancel", "Weight": 0, "MinimumSize": [100, 30]}),
                 ])
             ])
@@ -123,11 +123,22 @@ class AssetBrowser:
         self.dlg.On.ImportBtn.Clicked = on_import
         self.dlg.On.CancelBtn.Clicked = on_cancel
         self.dlg.On[win_id].Close = on_cancel
-        
-        self.dlg.Show()
-        self.disp.RunLoop()
-        self.dlg.Hide()
-        
+
+        # Block the main panel behind the browser, like every other dialog
+        # (_request_input, the Switch Shot wizard). Without this the panel
+        # stayed live and the browser could be opened a second time on top
+        # of itself.
+        main_win = getattr(getattr(self.host, "app", None), "dlg", None)
+        if main_win:
+            main_win.Enabled = False
+        try:
+            self.dlg.Show()
+            self.disp.RunLoop()
+        finally:
+            self.dlg.Hide()
+            if main_win:
+                main_win.Enabled = True
+
         return results[0]
 
     def resolve_upstream_source(self, shot, current_step, _visited=None):
@@ -207,10 +218,11 @@ class AssetBrowser:
             
         # Get published version folders
         folders = self._published_version_folders(self.current_shot, step)
-        
+
+        rows_added = 0
         # Reverse to show newest first
         for folder in reversed(folders):
-            v_folder = os.path.basename(folder) 
+            v_folder = os.path.basename(folder)
             
             # Parse from the right: [RESOURCE_]VERSION_STATE
             # VERSION is always the second-to-last block, STATE is the last.
@@ -234,6 +246,15 @@ class AssetBrowser:
                 item.Text[0] = f"{display_v}  ({os.path.basename(media_file)})"
                 item.Text[1] = media_file
                 tree.AddTopLevelItem(item)
+                rows_added += 1
+
+        # Explain an empty tree rather than leaving it blank.
+        if rows_added == 0:
+            step_name = step.name() if hasattr(step, "name") else "this step"
+            placeholder = tree.NewItem()
+            placeholder.Text[0] = f"Nothing published in {step_name} yet."
+            placeholder.Text[1] = ""  # no path -> on_import's os.path.exists guard ignores it
+            tree.AddTopLevelItem(placeholder)
 
     def _find_media(self, folder):
         """Finds the most relevant media file in a folder."""

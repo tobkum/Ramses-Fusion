@@ -26,6 +26,43 @@ ui_lib_path = os.path.join(lib_path, "ramses_ui_pyside")
 if ui_lib_path not in sys.path:
     sys.path.append(ui_lib_path)
 
+# The vendored SDK (ram_settings.py) parses its settings JSON at import
+# time with no error handling: a corrupt ramses_addons_settings.json (e.g.
+# a torn write from a crash) raises inside the import below and bricks the
+# whole add-on. Validate the file up front and quarantine it if unreadable
+# so the SDK falls back to defaults. Path construction mirrors
+# lib/ramses/ram_settings.py exactly.
+def _quarantine_corrupt_addon_settings():
+    import json as _json
+    import platform as _platform
+    system = _platform.system()
+    if system == "Windows":
+        folder = os.path.expandvars("${APPDATA}/Ramses/Config")
+    elif system == "Linux":
+        folder = os.path.expanduser("~/.config/Ramses/Config")
+    else:
+        return
+    settings_file = os.path.join(folder, "ramses_addons_settings.json")
+    if not os.path.isfile(settings_file):
+        return
+    try:
+        with open(settings_file, "r", encoding="utf8") as f:
+            _json.load(f)
+    except (ValueError, OSError):
+        quarantined = settings_file + ".corrupt"
+        try:
+            os.replace(settings_file, quarantined)
+            print(
+                "[Ramses] Warning: the add-on settings file was corrupt and "
+                "has been moved to " + quarantined + ". Default settings "
+                "will be used; re-configure the add-on if needed."
+            )
+        except OSError:
+            pass
+
+
+_quarantine_corrupt_addon_settings()
+
 import ramses as ram
 
 # PySide Setup
@@ -142,6 +179,11 @@ class RamsesFusionApp:
         self._item_cache = None
         self._step_cache = None
         self._context_path = ""
+        # True once item/step were resolved for _context_path - including
+        # when they legitimately resolved to None (non-pipeline comp).
+        # Without this flag, a None result was treated as "not cached yet"
+        # and every access re-ran the slow host/daemon lookups forever.
+        self._context_resolved = False
         self._last_synced_path = None
         self._last_refresh_time = 0.0
 
@@ -227,8 +269,7 @@ class RamsesFusionApp:
         with self._context_lock:
             needs_update = (
                 path != self._context_path
-                or not self._item_cache
-                or not self._step_cache
+                or not self._context_resolved
             )
         if needs_update:
             # Perform the slow API calls outside the lock to avoid blocking other
@@ -236,12 +277,20 @@ class RamsesFusionApp:
             item = self.ramses.host.currentItem()
             step = self.ramses.host.currentStep()
             with self._context_lock:
-                # Get the path that actually corresponds to the item we just fetched
+                # Only commit if the comp didn't switch mid-fetch: the item
+                # and step above were resolved for `path`, so they are only
+                # valid if that is still the current file. (The previous
+                # guard was inverted - it committed exactly when the path
+                # HAD changed, and never committed a None item/step for an
+                # unchanged path, defeating the cache for non-pipeline
+                # comps.) On a mid-fetch switch we skip; the next access
+                # sees the new path and retries.
                 actual_path = self.ramses.host.currentFilePath()
-                if not self._context_path or actual_path != self._context_path:
+                if actual_path == path:
                     self._context_path = actual_path
                     self._item_cache = item
                     self._step_cache = step
+                    self._context_resolved = True
         return self._context_path
 
     def _get_project(self) -> Optional[ram.RamProject]:
@@ -940,6 +989,37 @@ class RamsesFusionApp:
         except (AttributeError, RuntimeError) as e:
             self.log(f"Render anchor sync failed: {e}", ram.LogLevel.Debug)
 
+    def _set_status(self, text: str, kind: str = "ok") -> None:
+        """Shows a short message on the panel's feedback line under the header.
+
+        Gives the everyday actions (Save / Incremental / Publish / Preview)
+        the positive confirmation they used to lack - they only refreshed the
+        header silently, and errors went to the Fusion console that comp
+        artists never open. The line persists as a "last action" note until
+        the next action replaces it.
+
+        Args:
+            text: The message to show (empty string clears it).
+            kind: One of "ok" (green), "info" (grey), "warn" (amber),
+                "error" (red) - selects the colour.
+        """
+        color = {
+            "ok": "#7fbf8b",
+            "info": "#9aa3ad",
+            "warn": "#e0b23d",
+            "error": "#e07a5a",
+        }.get(kind, "#9aa3ad")
+        try:
+            lbl = self.dlg.GetItems()["StatusLine"]
+            lbl.Text = text
+            lbl.StyleSheet = (
+                "QLabel { color: %s; font-size: 11px; padding: 2px 0; }" % color
+            )
+        except Exception:
+            # UIManager not built yet, or running headless - feedback is
+            # best-effort and must never break the action it reports on.
+            pass
+
     def refresh_header(self, force_full: bool = False) -> None:
         """Updates the Context Header and UI state.
 
@@ -1040,20 +1120,18 @@ class RamsesFusionApp:
             {
                 "WindowTitle": "Ramses-Fusion",
                 "ID": "RamsesFusionMainWin",
-                "Geometry": [200, 200, 280, 825],
+                "Geometry": [200, 200, 212, 825],
             },
             [
+                # Single top-level VGroup: the previous outer VGroup + HGroup
+                # (which existed only to add the 2px frame gaps) each added
+                # their own baseline layout margin on top of the gaps. Folding
+                # everything into one group removes two more layers of that
+                # additive inset; the 2px frame is kept via the VGaps below.
                 self.ui.VGroup(
-                    {"Spacing": 0, "Weight": 1},
+                    {"Spacing": 4, "Weight": 1},
                     [
-                        self.ui.VGap(15),
-                        self.ui.HGroup(
-                            {"Weight": 1},
-                            [
-                                self.ui.HGap(15),
-                                self.ui.VGroup(
-                                    {"Spacing": 4, "Weight": 1},
-                                    [
+                        self.ui.VGap(2),
                                         # Context Header (Clickable - refreshes on click)
                                         self.ui.Stack(
                                             {"Weight": 0},
@@ -1077,7 +1155,7 @@ class RamsesFusionApp:
                                                                 "WordWrap": True,
                                                                 "Weight": 1,
                                                                 "MinimumSize": [
-                                                                    220,
+                                                                    150,
                                                                     85,
                                                                 ],
                                                             }
@@ -1097,7 +1175,10 @@ class RamsesFusionApp:
                                                                         "ID": "RefreshIcon",
                                                                         "Text": "↻",
                                                                         "Weight": 0,
-                                                                        "StyleSheet": "QLabel { color: #777; font-size: 14px; font-weight: bold; padding: 3px 5px 0 0; }",
+                                                                        # Bordered chip so the refresh affordance is
+                                                                        # discoverable without hovering (the whole
+                                                                        # header is the click target, as before).
+                                                                        "StyleSheet": "QLabel { color: #9aa3ad; font-size: 13px; font-weight: bold; border: 1px solid #3a4048; border-radius: 3px; background-color: #23272d; padding: 0 4px; margin: 4px 4px 0 0; }",
                                                                     }
                                                                 ),
                                                             ],
@@ -1112,24 +1193,44 @@ class RamsesFusionApp:
                                                         "Text": "",
                                                         "Flat": True,
                                                         "ToolTip": "Click to refresh",
-                                                        "MinimumSize": [220, 85],
+                                                        "MinimumSize": [150, 85],
                                                         "StyleSheet": "QPushButton { background-color: transparent; border: none; } QPushButton:hover { background-color: rgba(255, 255, 255, 12); border: 1px solid #4a5562; border-radius: 4px; } QPushButton:pressed { background-color: rgba(0, 0, 0, 25); }",
                                                     }
                                                 ),
                                             ],
                                         ),
-                                        self.ui.VGap(10),
-                                        # Groups Container (No weight, stays as small as possible)
-                                        self.ui.VGroup(
-                                            {"Weight": 0, "Spacing": 8},
-                                            [
-                                                self._build_project_group(),
-                                                self._build_pipeline_group(),
-                                                self._build_working_group(),
-                                                self._build_publish_group(),
-                                                self._build_settings_group(),
-                                            ],
+                                        # Transient feedback line: confirms the
+                                        # everyday actions (Save/Publish/Preview)
+                                        # that used to succeed silently. Empty
+                                        # until an action sets it; persists as a
+                                        # "last action" line until the next one.
+                                        self.ui.Label(
+                                            {
+                                                "ID": "StatusLine",
+                                                "Text": "",
+                                                "Weight": 0,
+                                                "Alignment": {
+                                                    "AlignHCenter": True,
+                                                    "AlignVCenter": True,
+                                                },
+                                                "StyleSheet": "QLabel { color: #7fbf8b; font-size: 11px; padding: 2px 0; }",
+                                            }
                                         ),
+                                        self.ui.VGap(6),
+                                        # Section groups inlined directly into the
+                                        # content column (no wrapper VGroup): each
+                                        # nested layout level adds its own
+                                        # horizontal contents-margin, so removing
+                                        # this redundant layer lets the section
+                                        # headers sit closer to the panel edge.
+                                        # The content column's own Spacing (4)
+                                        # provides the gap between them, same as
+                                        # the removed wrapper did.
+                                        self._build_project_group(),
+                                        self._build_pipeline_group(),
+                                        self._build_working_group(),
+                                        self._build_publish_group(),
+                                        self._build_settings_group(),
                                         # Spacer to push everything up (Takes all remaining weight)
                                         self.ui.VGap(0, 1),
                                         # Footer Version
@@ -1141,12 +1242,7 @@ class RamsesFusionApp:
                                                 "Weight": 0,
                                             }
                                         ),
-                                    ],
-                                ),
-                                self.ui.HGap(15),
-                            ],
-                        ),
-                        self.ui.VGap(15),
+                        self.ui.VGap(2),
                     ],
                 )
             ],
@@ -1203,7 +1299,7 @@ class RamsesFusionApp:
                     self._section_states[content_id] = is_collapsed
 
                     # Update Header Text
-                    prefix = "[ + ]" if is_collapsed else "[ − ]"
+                    prefix = "▸" if is_collapsed else "▾"
                     items[header_id].Text = f"{prefix}  {title}"
 
                     # Manually toggle each button's visibility
@@ -1254,18 +1350,18 @@ class RamsesFusionApp:
         """
         # Initial state
         is_collapsed = self._section_states.get(content_id, False)
-        prefix = "[ + ]" if is_collapsed else "[ − ]"
+        prefix = "▸" if is_collapsed else "▾"
 
-        ss = "QPushButton { text-align: left; padding-left: 5px; background-color: #1a1a1a; color: #888; border: none; border-top: 1px solid #111; border-bottom: 1px solid #333; }"
-        ss += " QPushButton:hover { color: #BBB; background-color: #222; }"
+        ss = "QPushButton { text-align: left; padding-left: 6px; background-color: #1a1a1a; color: #9aa3ad; border: none; border-top: 1px solid #111; border-bottom: 1px solid #333; }"
+        ss += " QPushButton:hover { color: #d7dbe1; background-color: #222; }"
 
         return self.ui.Button(
             {
                 "ID": id_name,
                 "Text": f"{prefix}  {title}",
                 "Weight": 0,
-                "MinimumSize": [16, 22],
-                "MaximumSize": [2000, 22],
+                "MinimumSize": [16, 20],
+                "MaximumSize": [2000, 20],
                 "Font": self.ui.Font({"PixelSize": 10, "Bold": True}),
                 "StyleSheet": ss,
                 "Checkable": True,
@@ -1275,7 +1371,7 @@ class RamsesFusionApp:
 
     def _build_project_group(self):
         """Builds the 'Project & Scene' UI section."""
-        bg_color = "#2a3442"
+        bg_color = "#2c4468"  # PROJECT & SCENE (blue)
         content_id = "ProjectContent"
         return self.ui.VGroup(
             [
@@ -1284,11 +1380,11 @@ class RamsesFusionApp:
                 ),
                 self.create_button(
                     "SwitchShotButton",
-                    "Browse Shots / Tasks",
+                    "Switch Shot",
                     "ramshot.png",
                     accent_color=bg_color,
                     weight=0,
-                    tooltip="Quickly jump to another shot in this project or create a new one from a template.",
+                    tooltip="Jump to another shot in this project, or create a new one from a template.",
                 ),
                 self.create_button(
                     "SetupSceneButton",
@@ -1311,7 +1407,7 @@ class RamsesFusionApp:
 
     def _build_pipeline_group(self):
         """Builds the 'Assets & Tools' UI section."""
-        bg_color = "#342a42"
+        bg_color = "#463063"  # ASSETS & TOOLS (purple)
         content_id = "PipelineContent"
         return self.ui.VGroup(
             [
@@ -1347,7 +1443,7 @@ class RamsesFusionApp:
 
     def _build_working_group(self):
         """Builds the 'Saving & Iteration' UI section."""
-        bg_color = "#2a423d"
+        bg_color = "#2b5a4c"  # SAVING & ITERATION (teal)
         content_id = "WorkingContent"
         return self.ui.VGroup(
             [
@@ -1361,6 +1457,7 @@ class RamsesFusionApp:
                     accent_color=bg_color,
                     weight=0,
                     tooltip="Overwrite the current working file version.",
+                    prominent=True,  # highest-frequency action - taller & bold
                 ),
                 self.create_button(
                     "SaveAsButton",
@@ -1399,7 +1496,7 @@ class RamsesFusionApp:
 
     def _build_publish_group(self):
         """Builds the 'Review & Publish' UI section."""
-        bg_color = "#2a422a"
+        bg_color = "#2f5a32"  # REVIEW & PUBLISH (green)
         content_id = "PublishContent"
         return self.ui.VGroup(
             [
@@ -1434,9 +1531,14 @@ class RamsesFusionApp:
                     "UpdateStatusButton",
                     "Update / Publish",
                     "ramstatus.png",
-                    tooltip="Change the shot status (e.g., WIP, Review) and optionally publish the final output.",
-                    accent_color=bg_color,
+                    # Amber, taller, bold, and alone in its colour: this is the
+                    # one transactional action on the panel (renders the final
+                    # master, archives the comp, writes the database) and must
+                    # not read like "Create Preview" one row above it.
+                    tooltip="Renders the final master, archives the comp, and advances the shot status in the database.",
+                    accent_color="#6e4a12",
                     weight=0,
+                    prominent=True,
                 ),
             ]
         )
@@ -1496,6 +1598,7 @@ class RamsesFusionApp:
         max_size: Optional[List[int]] = None,
         accent_color: Optional[str] = None,
         icon_only: bool = False,
+        prominent: bool = False,
     ) -> Any:
         """Creates a standardized UI Button with optional styling.
 
@@ -1513,15 +1616,23 @@ class RamsesFusionApp:
             icon_only (bool, optional): If True, centers the icon instead of
                 using the left-aligned/left-padded text-button layout.
                 Intended for small square icon-only buttons. Defaults to False.
+            prominent (bool, optional): If True, makes the button taller (36px
+                vs 30px) and semibold. Used to give the highest-frequency
+                action (Save) and the heaviest action (Update/Publish) more
+                visual weight than the routine buttons around them.
 
         Returns:
             Any: The created Fusion UI button.
         """
+        # Prominent buttons are taller and bold; routine buttons are 30px.
+        default_h = 36 if prominent else 30
+        weight_css = "font-weight: 600;" if prominent else ""
+
         # Base Style: Reverted to the original flat 1px solid #222 border
         if icon_only:
-            ss = "QPushButton { text-align: center; padding: 0; border: 1px solid #222; border-radius: 3px;"
+            ss = "QPushButton { text-align: center; padding: 0; border: 1px solid #222; border-radius: 3px;" + weight_css
         else:
-            ss = "QPushButton { text-align: left; padding-left: 12px; border: 1px solid #222; border-radius: 3px;"
+            ss = "QPushButton { text-align: left; padding-left: 6px; border: 1px solid #222; border-radius: 3px;" + weight_css
 
         if accent_color:
             ss += f" background-color: {accent_color}; }}"
@@ -1553,8 +1664,8 @@ class RamsesFusionApp:
                 "Text": text if text else "",
                 "Weight": weight,
                 "ToolTip": tooltip,
-                "MinimumSize": min_size or [16, 30],
-                "MaximumSize": max_size or [2000, 30],
+                "MinimumSize": min_size or [16, default_h],
+                "MaximumSize": max_size or [2000, default_h],
                 "IconSize": [16, 16],
                 "Icon": self._get_icon(icon_name),
                 "StyleSheet": ss,
@@ -1863,11 +1974,18 @@ class RamsesFusionApp:
                         ui.Label({"Text": "Shot:", "Weight": 0.25}),
                         ui.ComboBox({"ID": "ShotCombo", "Weight": 0.75})
                     ]),
+                    # Explains an empty Shot list instead of leaving it blank.
+                    ui.Label({
+                        "ID": "ShotHint",
+                        "Text": "",
+                        "Weight": 0,
+                        "StyleSheet": "QLabel { color: #e0b23d; font-size: 11px; }",
+                    }),
                 ]),
                 ui.VGap(10),
                 ui.HGroup({"Weight": 0}, [
                     ui.HGap(0, 1),
-                    ui.Button({"ID": "OkBtn", "Text": "OK", "Weight": 0, "MinimumSize": [120, 30]}),
+                    ui.Button({"ID": "OkBtn", "Text": "OK", "Weight": 0, "MinimumSize": [120, 30], "Default": True}),
                     ui.Button({"ID": "CancelBtn", "Text": "Cancel", "Weight": 0, "MinimumSize": [120, 30]}),
                 ]),
                 ui.VGap(5),
@@ -1909,7 +2027,14 @@ class RamsesFusionApp:
             session_cache["shot_options"] = valid_options
             for opt in valid_options:
                 itm["ShotCombo"].AddItem(opt["label"])
-            
+
+            # Explain an empty list rather than leaving a blank combo that
+            # silently does nothing on OK.
+            if not valid_options:
+                itm["ShotHint"].Text = "No shots to do for this step — try another step."
+            else:
+                itm["ShotHint"].Text = ""
+
             if cur_item:
                 for i, opt in enumerate(valid_options):
                     if str(opt["shot"].uuid()) == str(cur_item.uuid()):
@@ -2020,15 +2145,22 @@ class RamsesFusionApp:
                         if status:
                             status.setState(wip_state)
                         self.refresh_header(force_full=True)
+                        self._set_status(
+                            f"✓ Created {shot_data['shot'].shortName()} (WIP).", "ok"
+                        )
                 else:
                     if host.open(shot_data["path"]):
                         self.refresh_header(force_full=True)
+                        self._set_status(
+                            f"✓ Opened {shot_data['shot'].shortName()}.", "ok"
+                        )
 
     @requires_connection
     def on_import(self, ev: object) -> None:
         """Handler for 'Import' button."""
         if self.ramses.host.importItem():
             self.refresh_header()
+            self._set_status("✓ Imported published input.", "ok")
 
     @requires_connection
     def on_replace(self, ev: object) -> None:
@@ -2036,6 +2168,7 @@ class RamsesFusionApp:
         # Smart Update logic is handled inside host.replaceItem()
         if self.ramses.host.replaceItem():
             self.refresh_header()
+            self._set_status("✓ Loader replaced.", "ok")
 
     @requires_connection
     def on_save(self, ev: object) -> None:
@@ -2057,6 +2190,12 @@ class RamsesFusionApp:
 
         if host.save(setupFile=has_project, state=state):
             self.refresh_header()
+            self._set_status(
+                f"✓ Saved v{host.currentVersion()} · {time.strftime('%H:%M')}",
+                "ok",
+            )
+        else:
+            self._set_status("Save failed — see the Fusion console.", "error")
 
     @requires_connection
     def on_incremental_save(self, ev: object) -> None:
@@ -2076,10 +2215,18 @@ class RamsesFusionApp:
 
         if host.save(incremental=True, setupFile=has_project, state=state):
             self.refresh_header()
+            self._set_status(
+                f"✓ Saved new version v{host.currentVersion()} · {time.strftime('%H:%M')}",
+                "ok",
+            )
+        else:
+            self._set_status(
+                "Incremental save failed — see the Fusion console.", "error"
+            )
 
     @requires_connection
     def on_comment(self, ev: object) -> None:
-        """Handler for 'Add Note && Save' button."""
+        """Handler for the 'Save with Note' button."""
         host = self.ramses.host
         status = host.currentStatus()
         current_note = status.comment() if status else ""
@@ -2089,7 +2236,7 @@ class RamsesFusionApp:
         if not qw:
             # Fallback to UIManager remains the same as it handles both
             res = host._request_input(
-                "Add Note && Save",
+                "Save with Note",
                 [
                     {
                         "id": "Comment",
@@ -2100,7 +2247,7 @@ class RamsesFusionApp:
                     },
                     {
                         "id": "Incremental",
-                        "label": "Save as New Version:",
+                        "label": "Save as new version:",
                         "type": "checkbox",
                         "default": False,
                     },
@@ -2118,6 +2265,14 @@ class RamsesFusionApp:
                             status.setComment(res["Comment"])
                             status.setVersion(host.currentVersion())
                         self.refresh_header()
+                        self._set_status(
+                            f"✓ Saved v{host.currentVersion()} with note · {time.strftime('%H:%M')}",
+                            "ok",
+                        )
+                    else:
+                        self._set_status(
+                            "Save failed — see the Fusion console.", "error"
+                        )
             return
 
         # Correct API usage: (version:int, comment:str)
@@ -2142,6 +2297,16 @@ class RamsesFusionApp:
 
         if self.ramses.host.updateStatus():
             self.refresh_header(force_full=True)
+            status = self.ramses.host.currentStatus()
+            state_name = (
+                status.state().shortName() if status and status.state() else "?"
+            )
+            self._set_status(f"✓ Status updated → {state_name}", "ok")
+        else:
+            self._set_status(
+                "Update / Publish did not complete — see the Fusion console.",
+                "error",
+            )
 
     @requires_connection
     def on_preview(self, ev: object) -> None:
@@ -2156,6 +2321,8 @@ class RamsesFusionApp:
             return
 
         self.ramses.host.savePreview()
+        self.refresh_header()
+        self._set_status(f"✓ Preview created · {time.strftime('%H:%M')}", "ok")
 
     def on_open_preview(self, ev: object) -> None:
         """Handler for the 'Open Preview' side-button.
@@ -2174,7 +2341,7 @@ class RamsesFusionApp:
             return
 
         if not preview_path or not os.path.exists(preview_path):
-            self.log("No preview file found. Use 'Create Preview' first.", ram.LogLevel.Warning)
+            self._set_status("No preview yet — use Create Preview first.", "warn")
             return
 
         if qw:
@@ -2698,18 +2865,23 @@ class RamsesFusionApp:
                 return
 
         self.log(f"Template '{name}' saved to {path}", ram.LogLevel.Info)
+        self._set_status(f"✓ Template '{name}' saved.", "ok")
 
     @requires_connection
     def on_sync(self, ev: object) -> None:
         """Handler for 'Sync Settings' button."""
         self.ramses.host.setupCurrentFile()
         self.refresh_header()
+        self._set_status("✓ Project settings synced (resolution, FPS, range).", "ok")
 
     @requires_connection
     def on_retrieve(self, ev: object) -> None:
         """Handler for 'Version History / Restore'."""
         if self.ramses.host.restoreVersion():
             self.refresh_header()
+            self._set_status(
+                f"✓ Restored — now at v{self.ramses.host.currentVersion()}.", "ok"
+            )
 
     def on_close(self, ev: object) -> None:
         """Handler for window close event.
