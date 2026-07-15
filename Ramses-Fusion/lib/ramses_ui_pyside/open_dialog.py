@@ -82,7 +82,11 @@ class RamOpenDialog(RamDialog):
         self.recentMenu = qw.QMenu()
         self.recentButton.setMenu(self.recentMenu)
 
-        for file in recent_files:
+        # Iterate a copy: removing from the list being iterated makes the
+        # iterator skip the element after every removal - valid recent files
+        # were silently dropped from the menu, and the corrupted list was
+        # then persisted back to the settings below.
+        for file in list(recent_files):
 
             if not os.path.isfile(file):
                 recent_files.remove(file)
@@ -205,7 +209,11 @@ class RamOpenDialog(RamDialog):
 
         if itemType == ItemType.GENERAL:
             # List files in the step folder
-            stepFolder = step.folderPath()
+            # step can be None and the folder may not exist yet - either
+            # would abort the whole dialog population with an exception.
+            stepFolder = step.folderPath() if step else ""
+            if not stepFolder or not os.path.isdir(stepFolder):
+                return
             for f in os.listdir(stepFolder):
                 filePath = os.path.join(stepFolder, f)
 

@@ -275,7 +275,12 @@ class RamImportDialog(RamDialog):
                 title = " | ".join(folderName)
 
             self.versionBox.addItem(title, f)
-            self.__update_published_files()
+
+        # Refresh the file list once after the loop: calling it per-added
+        # item rebuilt (clear + refill) the list O(N) times with visible
+        # flicker - and each addItem already triggers it again through the
+        # currentIndexChanged connection when the first item lands.
+        self.__update_published_files()
 
         # Save the step to restore it next time
         SETTINGS = RAMSES.settings()

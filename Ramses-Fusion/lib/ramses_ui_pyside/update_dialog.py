@@ -49,11 +49,13 @@ class RamUpdateDialog( qw.QDialog ):
         if updateInfo.get("update", False):
             self.setWindowTitle("New " + toolName + " available!" )
 
-            latestVersionLabel = qw.QLabel("New version: " + updateInfo.get("version") )
+            # The server response may omit these keys; .get() then returns
+            # None, which crashes the string concat / setMarkdown.
+            latestVersionLabel = qw.QLabel("New version: " + updateInfo.get("version", "?") )
             mainLayout.addWidget(latestVersionLabel)
 
             descriptionEdit = qw.QTextEdit()
-            descriptionEdit.setMarkdown(updateInfo.get("description"))
+            descriptionEdit.setMarkdown(updateInfo.get("description", ""))
             descriptionEdit.setReadOnly(True)
             mainLayout.addWidget(descriptionEdit)
 
