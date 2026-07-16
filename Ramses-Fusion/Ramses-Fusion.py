@@ -2835,8 +2835,16 @@ class RamsesFusionApp:
             )
             return
 
-        # Use build helper for naming consistency
-        nm = self._build_file_info(ram.ItemType.GENERAL, step, name, "comp")
+        # GENERAL-type file names omit shortName (RamFileInfo.fileName only
+        # includes it for ASSET/SHOT), so the template name must go in the
+        # resource field — otherwise every template collides at
+        # PROJ_G_<step>.comp and silently overwrites the previous one.
+        nm = ram.RamFileInfo()
+        nm.project = step.projectShortName()
+        nm.ramType = ram.ItemType.GENERAL
+        nm.step = step.shortName()
+        nm.resource = name
+        nm.extension = "comp"
         path = self.ramses.host.normalizePath(os.path.join(tpl_folder, nm.fileName()))
 
         comp = self.ramses.host.comp
