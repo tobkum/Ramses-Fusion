@@ -506,6 +506,48 @@ class TestRamsesFusionApp(unittest.TestCase):
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
+    def test_save_template_distinct_names_distinct_files(self):
+        """Two templates with different names must NOT collide.
+
+        Regression: GENERAL-type RamFileInfo.fileName() omits shortName, so the
+        template name has to land in the resource field. Using shortName (the
+        old code) produced PROJ_G_<step>.comp for every template, silently
+        overwriting the previous one."""
+        import tempfile
+        import shutil
+        import fusion_host as fh
+
+        tmp = tempfile.mkdtemp()
+        try:
+            step = MagicMock()
+            step.templatesFolderPath.return_value = tmp
+            step.projectShortName.return_value = "TEST"
+            step.shortName.return_value = "COMP"
+
+            host = self.app.ramses.host
+            src = "D:/proj/shot/TEST_S_SH010_COMP.comp"
+            comp = MagicMock()
+            comp.Save.return_value = True
+
+            dsts = []
+            for tpl_name in ("Alpha", "Beta"):
+                with patch.object(
+                    RamsesFusionApp, "current_step", new_callable=PropertyMock, return_value=step
+                ), patch.object(
+                    type(host), "comp", new_callable=PropertyMock, return_value=comp
+                ), patch.object(
+                    host, "currentFilePath", return_value=src
+                ), patch.object(
+                    host, "_request_input", return_value={"Name": tpl_name}
+                ), patch.object(fh.RamFileManager, "copy") as mock_copy:
+                    self.app.on_save_template(None)
+                    dsts.append(os.path.basename(mock_copy.call_args[0][1]))
+
+            self.assertNotEqual(dsts[0], dsts[1],
+                                f"Templates collided: both wrote {dsts[0]}")
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
     def test_priority_and_color_rendering(self):
         """Verify that the header renders priority suffixes and Ramses colors."""
         mock_item = MagicMock()

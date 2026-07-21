@@ -665,7 +665,12 @@ class RamsesFusionApp:
                 path = shot.stepFilePath(step=step, extension="comp")
             if path:
                 return path, True
-        except (AttributeError, TypeError) as e:
+        except Exception as e:
+            # The vendored SDK raises a plain Exception (not just
+            # AttributeError/TypeError) for fileless items - e.g. "Cannot
+            # publish a file which does not exists" for a freshly ingested
+            # shot with no step folder yet. Catch broadly so one such shot
+            # can't abort the whole Switch Shot dialog build.
             self.log(
                 f"Could not resolve existing path for shot: {e}", ram.LogLevel.Debug
             )
@@ -675,7 +680,7 @@ class RamsesFusionApp:
         try:
             with DisableMakedirs():
                 folder = shot.stepFolderPath(step)
-        except (AttributeError, TypeError) as e:
+        except Exception as e:
             self.log(f"Could not resolve step folder: {e}", ram.LogLevel.Debug)
 
         if not folder:
@@ -2006,23 +2011,37 @@ class RamsesFusionApp:
 
             valid_options = []
             for shot in shots:
-                status = status_map.get((str(shot.uuid()), step_uuid))
-                if status:
-                    st_uuid = str(ram.RamObject.getUuid(status.get("state")))
-                    if state_map.get(st_uuid) in ["NO", "STB"]: continue
+                try:
+                    status = status_map.get((str(shot.uuid()), step_uuid))
+                    # Only hide shots explicitly marked "NO" (nothing to do for
+                    # this step). Standby (STB) shots are exactly the ones you
+                    # switch to in order to START them - freshly ingested shots
+                    # default to STB - so they must stay visible (hiding them
+                    # was leaving the whole list empty for new shots).
+                    state_name = "NEW"
+                    if status:
+                        st_uuid = str(ram.RamObject.getUuid(status.get("state")))
+                        state_name = state_map.get(st_uuid, "WIP")
+                        if state_name == "NO":
+                            continue
 
-                expected_path, exists = self._resolve_shot_path(shot, selected_step)
-                seq_name = seq_map.get(str(ram.RamObject.getUuid(shot.get("sequence"))), "None")
-                
-                state_name = status.state().name() if status and status.state() else "WIP"
-                label = f"{seq_name} / {shot.shortName()} [{state_name}]" if exists else f"{seq_name} / {shot.shortName()} [EMPTY]"
-                
-                valid_options.append({
-                    "label": label,
-                    "shot": shot,
-                    "path": expected_path,
-                    "exists": exists
-                })
+                    seq_name = seq_map.get(
+                        str(ram.RamObject.getUuid(shot.get("sequence"))), "None"
+                    )
+                    # Existence is deliberately NOT resolved here: stepFilePath()
+                    # stats the filesystem per shot, which on a Drive-synced
+                    # project turns a quick list into minutes. The path + on-disk
+                    # existence are resolved once, for the chosen shot only, on
+                    # OK (below).
+                    label = f"{seq_name} / {shot.shortName()} [{state_name}]"
+                    valid_options.append({"label": label, "shot": shot})
+                except Exception as e:
+                    # One malformed shot (e.g. incomplete late-ingest data) must
+                    # not abort the whole dialog - skip it and keep going.
+                    self.log(
+                        f"Skipping shot in Switch Shot list: {e}", ram.LogLevel.Debug
+                    )
+                    continue
 
             session_cache["shot_options"] = valid_options
             for opt in valid_options:
@@ -2122,17 +2141,28 @@ class RamsesFusionApp:
             if shot_idx >= 0 and step_idx >= 0:
                 shot_data = session_cache["shot_options"][shot_idx]
                 selected_step = session_cache["current_steps"][step_idx]
-                
-                if not shot_data["exists"]:
+                shot = shot_data["shot"]
+
+                # Resolve the path + on-disk existence now, for this one shot
+                # only. Kept out of the list build so populating the combo stays
+                # fast (see update_shots).
+                selected_path, exists = self._resolve_shot_path(shot, selected_step)
+                if not selected_path:
+                    self._set_status(
+                        f"Could not resolve a path for {shot.shortName()}.", "error"
+                    )
+                    return
+
+                if not exists:
                     # Create new logic
                     host.fusion.NewComp()
-                    selected_path = host.normalizePath(shot_data["path"])
+                    selected_path = host.normalizePath(selected_path)
                     os.makedirs(os.path.dirname(selected_path), exist_ok=True)
                     os.makedirs(os.path.join(os.path.dirname(selected_path), "_versions"), exist_ok=True)
                     os.makedirs(os.path.join(os.path.dirname(selected_path), "_published"), exist_ok=True)
-                    
+
                     if host.comp.Save(selected_path):
-                        host._store_ramses_metadata(shot_data["shot"], selected_step)
+                        host._store_ramses_metadata(shot, selected_step)
                         wip_state = self.ramses.state("WIP")
                         # host.save(state=...) only tags the local backup filename;
                         # it doesn't touch the project's status table (see
@@ -2146,13 +2176,13 @@ class RamsesFusionApp:
                             status.setState(wip_state)
                         self.refresh_header(force_full=True)
                         self._set_status(
-                            f"✓ Created {shot_data['shot'].shortName()} (WIP).", "ok"
+                            f"✓ Created {shot.shortName()} (WIP).", "ok"
                         )
                 else:
-                    if host.open(shot_data["path"]):
+                    if host.open(selected_path):
                         self.refresh_header(force_full=True)
                         self._set_status(
-                            f"✓ Opened {shot_data['shot'].shortName()}.", "ok"
+                            f"✓ Opened {shot.shortName()}.", "ok"
                         )
 
     @requires_connection
@@ -2835,8 +2865,16 @@ class RamsesFusionApp:
             )
             return
 
-        # Use build helper for naming consistency
-        nm = self._build_file_info(ram.ItemType.GENERAL, step, name, "comp")
+        # GENERAL-type file names omit shortName (RamFileInfo.fileName only
+        # includes it for ASSET/SHOT), so the template name must go in the
+        # resource field — otherwise every template collides at
+        # PROJ_G_<step>.comp and silently overwrites the previous one.
+        nm = ram.RamFileInfo()
+        nm.project = step.projectShortName()
+        nm.ramType = ram.ItemType.GENERAL
+        nm.step = step.shortName()
+        nm.resource = name
+        nm.extension = "comp"
         path = self.ramses.host.normalizePath(os.path.join(tpl_folder, nm.fileName()))
 
         comp = self.ramses.host.comp
