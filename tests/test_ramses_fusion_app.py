@@ -946,5 +946,61 @@ class TestForeignAssigneeNote(unittest.TestCase):
         self.assertEqual(note, "")
 
 
+class TestFusionFileFormats(unittest.TestCase):
+    """host.fusionFileFormats() reads the mergeable extensions from the linked
+    RamApplication's fileFormats, with a safe .comp fallback."""
+
+    def setUp(self):
+        self.mock_fusion = MockFusion()
+        ram_fusion_mod.fusion = self.mock_fusion
+        ram_fusion_mod.fu = self.mock_fusion
+        ram_fusion_mod.bmd = sys.modules["bmd"]
+        import fusion_host
+        fusion_host.bmd = sys.modules["bmd"]
+        self.fusion_host = fusion_host
+        self.app = RamsesFusionApp()
+        self.host = self.app.ramses.host
+
+    def _step_with_apps(self, app_uuids):
+        step = MagicMock()
+        step.data.return_value = {"applications": list(app_uuids)}
+        return step
+
+    def test_reads_fileformats_from_fusion_app(self):
+        self.host.currentStep = MagicMock(return_value=self._step_with_apps(["u1"]))
+        with patch.object(self.fusion_host, "RAMSES") as R:
+            R.daemonInterface.return_value.getData.return_value = {
+                "name": "Fusion", "fileFormats": ["comp"]
+            }
+            self.assertEqual(self.host.fusionFileFormats(), {".comp"})
+
+    def test_normalizes_dot_and_case(self):
+        self.host.currentStep = MagicMock(return_value=self._step_with_apps(["u1"]))
+        with patch.object(self.fusion_host, "RAMSES") as R:
+            R.daemonInterface.return_value.getData.return_value = {
+                "name": "Blackmagic Fusion", "fileFormats": [".COMP", "setting"]
+            }
+            self.assertEqual(self.host.fusionFileFormats(), {".comp", ".setting"})
+
+    def test_no_app_falls_back_to_comp(self):
+        self.host.currentStep = MagicMock(return_value=self._step_with_apps([]))
+        with patch.object(self.fusion_host, "RAMSES"):
+            self.assertEqual(self.host.fusionFileFormats(), {".comp"})
+
+    def test_non_fusion_app_falls_back_to_comp(self):
+        self.host.currentStep = MagicMock(return_value=self._step_with_apps(["u1"]))
+        with patch.object(self.fusion_host, "RAMSES") as R:
+            R.daemonInterface.return_value.getData.return_value = {
+                "name": "Nuke", "fileFormats": ["nk"]
+            }
+            self.assertEqual(self.host.fusionFileFormats(), {".comp"})
+
+    def test_lookup_error_falls_back(self):
+        self.host.currentStep = MagicMock(return_value=self._step_with_apps(["u1"]))
+        with patch.object(self.fusion_host, "RAMSES") as R:
+            R.daemonInterface.return_value.getData.side_effect = RuntimeError("boom")
+            self.assertEqual(self.host.fusionFileFormats(), {".comp"})
+
+
 if __name__ == "__main__":
     unittest.main()

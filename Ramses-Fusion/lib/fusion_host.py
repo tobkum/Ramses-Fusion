@@ -635,6 +635,36 @@ class FusionHost(RamHost):
 
         return False
 
+    def fusionFileFormats(self, step: RamStep = None) -> set:
+        """Extensions the Fusion app on `step` can open, dotted and lowercased
+        (e.g. ``{".comp"}``).
+
+        Read from the linked ``RamApplication``'s ``fileFormats`` (the same
+        config surfaced in Ramses when Fusion is added as an application to a
+        step), mirroring ``isFusionStep()``'s application lookup. `step`
+        defaults to the current step - the DCC doing the importing - because
+        upstream producer steps often have no application linked. Falls back to
+        ``{".comp"}`` when nothing resolves (offline, no app, misconfigured) so
+        the import browser never regresses to hiding comps.
+        """
+        exts = set()
+        try:
+            if step is None:
+                step = self.currentStep()
+            if step:
+                daemon = RAMSES.daemonInterface()
+                for app_uuid in step.data().get("applications", []) or []:
+                    app_data = daemon.getData(str(app_uuid), "RamApplication")
+                    name = str(app_data.get("name", "")).upper()
+                    if "FUSION" in name or "BMF" in name:
+                        for fmt in app_data.get("fileFormats", []) or []:
+                            fmt = str(fmt).lower().lstrip(".")
+                            if fmt:
+                                exts.add("." + fmt)
+        except Exception as e:
+            self.log(f"Could not resolve Fusion file formats: {e}", LogLevel.Debug)
+        return exts or {".comp"}
+
     def collectItemSettings(self, item: RamItem) -> dict:
         """Collects resolution and timing settings for the given item.
 

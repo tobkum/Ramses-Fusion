@@ -4,6 +4,11 @@ import re
 from ramses import RamItem, RamStep, RamFileInfo, ItemType, LogLevel
 from ramses_patches import DisableMakedirs
 
+# A trailing frame token, e.g. "...PLATE.01599116.exr" -> group(1) == "01599116".
+# Used to collapse an image sequence to a single deliverable (mirrors the same
+# pattern in fusion_host._FRAME_TOKEN_RE).
+_FRAME_TOKEN_RE = re.compile(r"[._](\d+)\.[A-Za-z0-9]{1,5}$")
+
 class AssetBrowser:
     def __init__(self, host, fusion_ui, dispatcher):
         self.host = host
@@ -219,6 +224,11 @@ class AssetBrowser:
         # Get published version folders
         folders = self._published_version_folders(self.current_shot, step)
 
+        # Extensions the current Fusion tool can ingest beyond footage (e.g.
+        # {".comp"}), read from the Ramses app config - not the upstream `step`
+        # (which often has no app linked), so no argument = current step.
+        extra_exts = self.host.fusionFileFormats()
+
         rows_added = 0
         # Reverse to show newest first
         for folder in reversed(folders):
@@ -237,14 +247,13 @@ class AssetBrowser:
                     display_v = f"v{version_part}"
             else:
                 display_v = v_folder
-            
-            # Find main media file
-            media_file = self._find_media(folder)
-            if media_file:
-                # Create Tree Item correctly via tree.NewItem()
+
+            # One row per logical deliverable in the version (footage AND a
+            # .comp, if both were published), instead of collapsing to one file.
+            for d in self._list_deliverables(folder, extra_exts):
                 item = tree.NewItem()
-                item.Text[0] = f"{display_v}  ({os.path.basename(media_file)})"
-                item.Text[1] = media_file
+                item.Text[0] = f"{display_v} · {d['label']}"
+                item.Text[1] = d["path"]
                 tree.AddTopLevelItem(item)
                 rows_added += 1
 
@@ -256,25 +265,82 @@ class AssetBrowser:
             placeholder.Text[1] = ""  # no path -> on_import's os.path.exists guard ignores it
             tree.AddTopLevelItem(placeholder)
 
-    def _find_media(self, folder):
-        """Finds the most relevant media file in a folder."""
+    # Media the browser can surface. Movies and image sequences are always
+    # loadable (Loaders); app formats (e.g. .comp) come from the Fusion app
+    # config and get merged instead. Sidecars are dropped.
+    _MOVIE_EXTS = (".mov", ".mp4", ".mxf")
+    _SEQUENCE_EXTS = (".exr", ".dpx", ".png", ".jpg", ".jpeg", ".tif", ".tiff")
+    _IGNORE_EXT = (".json", ".tmp", ".xml", ".txt", ".log", ".ramses_complete")
+
+    def _list_deliverables(self, folder, extra_exts=()):
+        """Lists the logical deliverables in a published version folder.
+
+        One entry per distinct movie, image sequence (frames collapsed to the
+        first one) and app-format file (e.g. ``.comp``). Hidden files and
+        metadata sidecars (``_ramses_data.json``, ``.ramses_complete``) are
+        dropped. Replaces the old single-file ``_find_media`` so a version that
+        publishes several outputs (e.g. a tracked ``.comp`` AND a preview
+        render) offers each as its own selectable row.
+
+        Args:
+            folder: The published version folder to scan.
+            extra_exts: Dotted, lowercased extensions to treat as mergeable
+                deliverables (from ``host.fusionFileFormats()``), e.g.
+                ``{".comp"}``.
+
+        Returns:
+            list of dicts ``{"path", "label", "kind"}`` where kind is one of
+            "movie", "sequence", "comp".
+        """
         try:
-            # FILTER: Ignore hidden files, temp files, and metadata sidecars
-            IGNORE_EXT = ('.json', '.tmp', '.xml', '.txt', '.log', '.ramses_complete')
-            files = [f for f in os.listdir(folder) if not f.startswith(".") and not f.lower().endswith(IGNORE_EXT)]
-            files.sort() # Ensure deterministic first-frame selection
+            names = [
+                f for f in os.listdir(folder)
+                if not f.startswith(".")
+                and not f.lower().endswith(self._IGNORE_EXT)
+            ]
         except OSError:
-            return None
-            
-        # Priority 1: Movies
-        for f in files:
-            if f.lower().endswith(('.mov', '.mp4', '.mxf')):
-                return os.path.join(folder, f)
-        
-        # Priority 2: Sequences (exr, dpx, png)
-        # Return the first frame
-        for f in files:
-            if f.lower().endswith(('.exr', '.dpx', '.png', '.jpg', '.tif', '.tiff')):
-                return os.path.join(folder, f)
-                
-        return None
+            return []
+        names.sort()  # deterministic first-frame (and stable row) order
+
+        extra = tuple(e.lower() for e in extra_exts)
+        deliverables = []
+        seen_sequences = set()
+
+        for name in names:
+            lower = name.lower()
+            path = os.path.join(folder, name)
+
+            # Movies: one entry each, no frame grouping.
+            if lower.endswith(self._MOVIE_EXTS):
+                deliverables.append({"path": path, "label": name, "kind": "movie"})
+                continue
+
+            # App formats (e.g. .comp): one entry each, merged on import.
+            if extra and lower.endswith(extra):
+                deliverables.append({"path": path, "label": name, "kind": "comp"})
+                continue
+
+            # Image sequences: collapse frames to a single entry at frame 1.
+            if lower.endswith(self._SEQUENCE_EXTS):
+                m = _FRAME_TOKEN_RE.search(name)
+                if m:
+                    ext = os.path.splitext(name)[1]
+                    stem = name[:m.start()]  # name without ".<frame>.<ext>"
+                    key = (stem, ext.lower())
+                    if key in seen_sequences:
+                        continue  # already recorded this sequence's first frame
+                    seen_sequences.add(key)
+                    deliverables.append(
+                        {"path": path, "label": f"{stem}.[####]{ext}", "kind": "sequence"}
+                    )
+                else:
+                    # A single still with no frame token: its own row.
+                    deliverables.append({"path": path, "label": name, "kind": "sequence"})
+                continue
+
+            # Unknown / non-importable types: skipped.
+
+        # Stable presentation order: movies, then sequences, then app formats.
+        order = {"movie": 0, "sequence": 1, "comp": 2}
+        deliverables.sort(key=lambda d: (order.get(d["kind"], 9), d["label"].lower()))
+        return deliverables
