@@ -889,5 +889,62 @@ class TestValidationEdgeCases(unittest.TestCase):
                 self.fail(f"Validation should handle missing item gracefully: {e}")
 
 
+class TestForeignAssigneeNote(unittest.TestCase):
+    """The status-line reminder that flags a shot assigned to someone else."""
+
+    def setUp(self):
+        self.mock_fusion = MockFusion()
+        ram_fusion_mod.fusion = self.mock_fusion
+        ram_fusion_mod.fu = self.mock_fusion
+        ram_fusion_mod.bmd = sys.modules["bmd"]
+        import fusion_host
+        fusion_host.bmd = sys.modules["bmd"]
+        self.app = RamsesFusionApp()
+
+    def _status(self, assignee):
+        st = MagicMock()
+        st.get.return_value = assignee  # status.get("assignedUser", "")
+        return st
+
+    def _set_local_user(self, uuid):
+        me = MagicMock()
+        me.uuid.return_value = uuid
+        self.app.ramses.user = MagicMock(return_value=me)
+
+    def test_none_status_yields_empty(self):
+        self._set_local_user("me")
+        self.assertEqual(self.app._foreign_assignee_note(None), "")
+
+    def test_unassigned_sentinels_yield_empty(self):
+        """Empty / none / unassigned (any case) are all 'up for grabs'."""
+        self._set_local_user("me")
+        for val in ("", "none", "unassigned", "None", "UNASSIGNED"):
+            self.assertEqual(
+                self.app._foreign_assignee_note(self._status(val)), "",
+                msg=f"{val!r} should read as unassigned",
+            )
+
+    def test_assigned_to_me_yields_empty(self):
+        """Never warn about your own shot."""
+        self._set_local_user("me-uuid")
+        self.assertEqual(
+            self.app._foreign_assignee_note(self._status("me-uuid")), ""
+        )
+
+    def test_assigned_to_other_names_them(self):
+        self._set_local_user("me-uuid")
+        with patch.object(ramses, "RamUser") as MockUser:
+            MockUser.return_value.name.return_value = "Jane Doe"
+            note = self.app._foreign_assignee_note(self._status("other-uuid"))
+        self.assertEqual(note, "assigned to Jane Doe")
+
+    def test_lookup_failure_is_silent(self):
+        """A broken user lookup must never break the action being annotated."""
+        self._set_local_user("me-uuid")
+        with patch.object(ramses, "RamUser", side_effect=RuntimeError("boom")):
+            note = self.app._foreign_assignee_note(self._status("other-uuid"))
+        self.assertEqual(note, "")
+
+
 if __name__ == "__main__":
     unittest.main()
