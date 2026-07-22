@@ -1025,6 +1025,42 @@ class RamsesFusionApp:
             # best-effort and must never break the action it reports on.
             pass
 
+    def _foreign_assignee_note(self, status) -> str:
+        """Return 'assigned to <name>' when `status` belongs to a user other
+        than the local one, else '' (empty for your own or unassigned shots).
+
+        Lets the status line quietly flag when you're working on a shot that
+        is someone else's. Read-only counterpart to the claim-on-create
+        behaviour: "assignedUser" is the same field Ramses-Client assigns
+        (RamTask::KEY_AssignedUser). Best-effort - any lookup failure yields ''
+        so it can never break the action it annotates.
+        """
+        try:
+            if not status:
+                return ""
+            assignee = (status.get("assignedUser", "") or "")
+            if assignee.lower() in ("", "none", "unassigned"):
+                return ""
+            me = self.ramses.user()
+            if me and me.uuid() == assignee:
+                return ""
+            name = ram.RamUser(assignee).name() or "another user"
+            return f"assigned to {name}"
+        except Exception:
+            return ""
+
+    def _emit_action_status(self, base_msg: str, status, kind: str = "ok") -> None:
+        """Show `base_msg` on the status line, appending an 'assigned to X'
+        suffix (and switching to the warn colour) when `status` belongs to
+        someone else. Centralises the assignee reminder across the
+        open/save/preview confirmations; a no-op suffix for your own shots.
+        """
+        note = self._foreign_assignee_note(status)
+        if note:
+            self._set_status(f"{base_msg} · {note}", "warn")
+        else:
+            self._set_status(base_msg, kind)
+
     def refresh_header(self, force_full: bool = False) -> None:
         """Updates the Context Header and UI state.
 
@@ -2174,6 +2210,17 @@ class RamsesFusionApp:
                         status = host.currentStatus()
                         if status:
                             status.setState(wip_state)
+                            # Claim the shot for whoever started it, but only if
+                            # it is still up for grabs. Never override a lead's
+                            # deliberate assignment. "assignedUser" is the same
+                            # JSON key Ramses-Client writes when assigning a user
+                            # (RamTask::KEY_AssignedUser); RamStatus shares that
+                            # object, so a generic set() is all it takes.
+                            current_assignee = (status.get("assignedUser", "") or "").lower()
+                            if current_assignee in ("", "none", "unassigned"):
+                                me = self.ramses.user()
+                                if me and me.uuid():
+                                    status.set("assignedUser", me.uuid())
                         self.refresh_header(force_full=True)
                         self._set_status(
                             f"✓ Created {shot.shortName()} (WIP).", "ok"
@@ -2181,8 +2228,8 @@ class RamsesFusionApp:
                 else:
                     if host.open(selected_path):
                         self.refresh_header(force_full=True)
-                        self._set_status(
-                            f"✓ Opened {shot.shortName()}.", "ok"
+                        self._emit_action_status(
+                            f"✓ Opened {shot.shortName()}", host.currentStatus()
                         )
 
     @requires_connection
@@ -2220,9 +2267,9 @@ class RamsesFusionApp:
 
         if host.save(setupFile=has_project, state=state):
             self.refresh_header()
-            self._set_status(
+            self._emit_action_status(
                 f"✓ Saved v{host.currentVersion()} · {time.strftime('%H:%M')}",
-                "ok",
+                status,
             )
         else:
             self._set_status("Save failed — see the Fusion console.", "error")
@@ -2245,9 +2292,9 @@ class RamsesFusionApp:
 
         if host.save(incremental=True, setupFile=has_project, state=state):
             self.refresh_header()
-            self._set_status(
+            self._emit_action_status(
                 f"✓ Saved new version v{host.currentVersion()} · {time.strftime('%H:%M')}",
-                "ok",
+                status,
             )
         else:
             self._set_status(
@@ -2352,7 +2399,10 @@ class RamsesFusionApp:
 
         self.ramses.host.savePreview()
         self.refresh_header()
-        self._set_status(f"✓ Preview created · {time.strftime('%H:%M')}", "ok")
+        self._emit_action_status(
+            f"✓ Preview created · {time.strftime('%H:%M')}",
+            self.ramses.host.currentStatus(),
+        )
 
     def on_open_preview(self, ev: object) -> None:
         """Handler for the 'Open Preview' side-button.
