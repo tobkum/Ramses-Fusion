@@ -1524,7 +1524,10 @@ class RamsesFusionApp:
                         gap(),
                         # --- Review & Publish --------------------------------
                         txt_btn("PreviewButton", "Preview", "rampreview.png", "Create Preview", self._H_REVIEW, 80),
-                        icon_btn("OpenPreviewButton", "ramopen.png", "Open Preview in media player", self._H_REVIEW),
+                        # Same film-strip ("media") icon the vertical layout
+                        # uses for this button - ramopen.png was a copy-documents
+                        # glyph, wrong for "play the preview".
+                        icon_btn("OpenPreviewButton", "ramshot.png", "Open Preview in media player", self._H_REVIEW),
                         txt_btn("UpdateStatusButton", "Publish", "ramstatus.png", "Renders the final master, archives the comp, and advances the shot status in the database.", self._H_PUBLISH, 90),
                         gap(),
                         # --- Status line (takes all remaining width) ---------
