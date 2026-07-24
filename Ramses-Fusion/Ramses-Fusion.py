@@ -1432,29 +1432,18 @@ class RamsesFusionApp:
                 tooltip=tooltip,
             )
 
-        def sep():
-            # Thin vertical divider between groups - the visible grouping the
-            # dark colour tints failed to provide.
-            return self.ui.VGroup(
-                {"Weight": 0},
-                [
-                    self.ui.VGap(3),
-                    self.ui.Label(
-                        {
-                            "Weight": 0,
-                            "MinimumSize": [2, 26],
-                            "MaximumSize": [2, 26],
-                            "StyleSheet": "QLabel { background-color: #3a4048; }",
-                        }
-                    ),
-                    self.ui.VGap(3),
-                ],
-            )
+        # Groups are separated by a wider gap and read by their colour tint
+        # (now clearly visible). Explicit divider lines were removed - they sat
+        # at a different height than the buttons and looked misaligned.
+        def gap():
+            return self.ui.HGap(14)
 
         return self.ui.VGroup(
             {"Spacing": 0, "Weight": 1},
             [
-                self.ui.VGap(2),
+                # Stretchy gaps above and below centre the row vertically, so it
+                # sits in the middle of a taller dock instead of hugging the top.
+                self.ui.VGap(0, 1),
                 self.ui.HGroup(
                     {"Weight": 0, "Spacing": 4},
                     [
@@ -1477,7 +1466,7 @@ class RamsesFusionApp:
                                                 "Alignment": {"AlignVCenter": True},
                                                 "WordWrap": False,
                                                 "Weight": 1,
-                                                "MinimumSize": [300, 34],
+                                                "MinimumSize": [300, 32],
                                                 "StyleSheet": "QLabel { padding: 0 8px; }",
                                             }
                                         ),
@@ -1509,35 +1498,35 @@ class RamsesFusionApp:
                                         "Text": "",
                                         "Flat": True,
                                         "ToolTip": "Click to refresh",
-                                        "MinimumSize": [300, 34],
+                                        "MinimumSize": [300, 32],
                                         "StyleSheet": "QPushButton { background-color: transparent; border: none; } QPushButton:hover { background-color: rgba(255, 255, 255, 12); border: 1px solid #4a5562; border-radius: 4px; } QPushButton:pressed { background-color: rgba(0, 0, 0, 25); }",
                                     }
                                 ),
                             ],
                         ),
-                        sep(),
+                        gap(),
                         # --- Project & Scene ---------------------------------
                         txt_btn("SwitchShotButton", "Switch", "ramshot.png", "Switch Shot", self._H_SCENE, 74),
                         txt_btn("SetupSceneButton", "Setup", "ramsetupscene.png", "Sync Project Settings", self._H_SCENE, 68),
                         txt_btn("RamsesButton", "Ramses", "ramses.png", "Open Ramses Client", self._H_SCENE, 78),
-                        sep(),
+                        gap(),
                         # --- Assets & Tools ----------------------------------
                         txt_btn("ImportButton", "Import", "ramimport.png", "Import Published", self._H_ASSET, 74),
                         txt_btn("ReplaceButton", "Replace", "ramreplace.png", "Replace Loader", self._H_ASSET, 80),
                         txt_btn("TemplateButton", "Template", "ramtemplate.png", "Save as Template", self._H_ASSET, 86),
-                        sep(),
+                        gap(),
                         # --- Saving & Iteration ------------------------------
                         txt_btn("SaveButton", "Save", "ramsave.png", "Save", self._H_WORK, 62),
                         txt_btn("SaveAsButton", "Save As", "ramsave.png", "Save As / Create...", self._H_WORK, 78),
                         txt_btn("IncrementalSaveButton", "Incr", "ramsaveincremental.png", "Save Incremental", self._H_WORK, 58),
                         txt_btn("CommentButton", "Note", "ramcomment.png", "Save with Note", self._H_WORK, 60),
                         txt_btn("RetrieveButton", "History", "ramretrieve.png", "Version History / Restore", self._H_WORK, 74),
-                        sep(),
+                        gap(),
                         # --- Review & Publish --------------------------------
                         txt_btn("PreviewButton", "Preview", "rampreview.png", "Create Preview", self._H_REVIEW, 80),
                         icon_btn("OpenPreviewButton", "ramopen.png", "Open Preview in media player", self._H_REVIEW),
                         txt_btn("UpdateStatusButton", "Publish", "ramstatus.png", "Renders the final master, archives the comp, and advances the shot status in the database.", self._H_PUBLISH, 90),
-                        sep(),
+                        gap(),
                         # --- Status line (takes all remaining width) ---------
                         # The Settings group and the user/version footer are
                         # dropped from the slim bar: Settings is reached by
@@ -1555,16 +1544,18 @@ class RamsesFusionApp:
                             }
                         ),
                         # --- Back to the vertical layout, one click ----------
-                        # Styled as an outlined "view mode" control, distinct
-                        # from the filled action buttons.
+                        # Icon-only "view mode" control (the glyph suggests a
+                        # stacked layout); outlined, distinct from the filled
+                        # action buttons. Name is in the tooltip.
                         self.ui.HGap(8),
                         self.ui.Button(
                             {
                                 "ID": "LayoutToggleButton",
-                                "Text": "▤  Vertical",
+                                "Text": "▤",
                                 "Weight": 0,
-                                "MinimumSize": [96, 32],
-                                "MaximumSize": [96, 32],
+                                "MinimumSize": [34, 32],
+                                "MaximumSize": [34, 32],
+                                "Font": self.ui.Font({"PixelSize": 15}),
                                 "ToolTip": "Switch back to the vertical (stacked) panel layout.",
                                 "StyleSheet": "QPushButton { text-align: center; border: 1px solid #3a4048; border-radius: 3px; background-color: #23272d; color: #c5ccd2; } QPushButton:hover { background-color: #2e353b; border-color: #4a5562; } QPushButton:pressed { background-color: #1c2023; }",
                             }
@@ -1572,7 +1563,7 @@ class RamsesFusionApp:
                         self.ui.HGap(2),
                     ],
                 ),
-                self.ui.VGap(2),
+                self.ui.VGap(0, 1),
             ],
         )
 
