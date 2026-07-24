@@ -84,6 +84,40 @@ _FOOTAGE_SEQ_EXTENSIONS = {
 # "_v001" never match.
 _FRAME_TOKEN_RE = re.compile(r"[._](\d+)\.[A-Za-z0-9]{1,5}$")
 
+
+def _is_delivery_path(host, path: str) -> bool:
+    """Whether a path lies inside the project's export (delivery) folder.
+
+    Deliveries leave the Ramses-managed tree and go to a client, so pipeline
+    sidecars (``_ramses_data.json``) have no business being written there.
+
+    Returns False whenever the export folder cannot be resolved, so the
+    caller keeps its previous behaviour and a publish can never fail over
+    this check.
+    """
+    try:
+        project = RAMSES.project()
+        if not project:
+            return False
+        # Read-only probe: this SDK getter creates the folder as a side effect.
+        with DisableMakedirs():
+            export_folder = project.exportPath()
+        if not export_folder:
+            return False
+        # normcase folds case on Windows but also flips separators to "\",
+        # so restore "/" afterwards to keep the comparison slash-consistent.
+        def _norm(p):
+            return os.path.normcase(host.normalizePath(p)).replace("\\", "/")
+
+        export_folder = _norm(export_folder).rstrip("/")
+        if not export_folder:
+            return False
+        # Trailing slash so a sibling like "06-EXPORTS_OLD" cannot match
+        # "06-EXPORT".
+        return _norm(path).startswith(export_folder + "/")
+    except Exception:
+        return False
+
 # =============================================================================
 # MONKEY-PATCHING RAMSES API (Fixes critical environment bugs only)
 # =============================================================================
@@ -356,6 +390,17 @@ with _DAEMON_INIT_LOCK:
             self.closeTempWorkingFile()
             return False
         for file in published_files:
+            # A delivered render leaves the pipeline — writing a sidecar next
+            # to it would ship internal version/state data to the client (and
+            # for a sequence it would be keyed to the Saver's padding token,
+            # a filename that never exists). The comp backup in the step's
+            # _published folder still gets its metadata.
+            if _is_delivery_path(self, file):
+                self.log(
+                    f"Delivery path — no pipeline sidecar written: {file}",
+                    LogLevel.Debug,
+                )
+                continue
             self._RamHost__setPublishMetadata(file, publishInfo)
         if not self._RamHost__runUserScripts(
             "on_publish", published_files, publishInfo, item, step, publishOptions

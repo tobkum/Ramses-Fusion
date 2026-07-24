@@ -1573,5 +1573,106 @@ class TestSourceNumbering(unittest.TestCase):
         self.assertEqual(node.GetInput("SequenceStartFrame"), 86400)
 
 
+class TestDeliverySidecarSuppression(unittest.TestCase):
+    """Pipeline sidecars (_ramses_data.json) must not be written into the
+    project export folder — that folder is a client delivery, not pipeline
+    storage. The comp backup inside the step tree keeps its metadata."""
+
+    EXPORT = "D:/proj/06-EXPORT"
+    RENDER = "D:/proj/06-EXPORT/DNX_0515_v00_vfx/DNX_0515_v00_vfx.00000000.exr"
+    BACKUP = "D:/proj/05-SHOTS/TEST_S_SH010/TEST_S_SH010_COMP/_published/005_OK/comp.comp"
+
+    def setUp(self):
+        self.mock_fusion = MockFusion()
+        import fusion_host
+        fusion_host.bmd = sys.modules["bmd"]
+        self.fusion_host = fusion_host
+        self.host = FusionHost(self.mock_fusion)
+
+    def _project(self, export_path=EXPORT):
+        project = MagicMock()
+        project.exportPath.return_value = export_path
+        return project
+
+    def _patch_project(self, project):
+        return patch.object(
+            self.fusion_host.RAMSES, "project", return_value=project
+        )
+
+    # --- _is_delivery_path ----------------------------------------------------
+
+    def test_render_in_export_folder_is_a_delivery(self):
+        with self._patch_project(self._project()):
+            self.assertTrue(
+                self.fusion_host._is_delivery_path(self.host, self.RENDER)
+            )
+
+    def test_backup_in_step_tree_is_not_a_delivery(self):
+        with self._patch_project(self._project()):
+            self.assertFalse(
+                self.fusion_host._is_delivery_path(self.host, self.BACKUP)
+            )
+
+    def test_sibling_folder_does_not_match_prefix(self):
+        """'06-EXPORTS_OLD' must not be treated as inside '06-EXPORT'."""
+        stray = "D:/proj/06-EXPORTS_OLD/thing.exr"
+        with self._patch_project(self._project()):
+            self.assertFalse(
+                self.fusion_host._is_delivery_path(self.host, stray)
+            )
+
+    def test_no_export_path_configured_keeps_old_behaviour(self):
+        with self._patch_project(self._project(export_path="")):
+            self.assertFalse(
+                self.fusion_host._is_delivery_path(self.host, self.RENDER)
+            )
+
+    def test_export_path_failure_keeps_old_behaviour(self):
+        """Any error must fall back to writing metadata, never break publish."""
+        project = MagicMock()
+        project.exportPath.side_effect = RuntimeError("daemon down")
+        with self._patch_project(project):
+            self.assertFalse(
+                self.fusion_host._is_delivery_path(self.host, self.RENDER)
+            )
+
+    def test_no_project_keeps_old_behaviour(self):
+        with self._patch_project(None):
+            self.assertFalse(
+                self.fusion_host._is_delivery_path(self.host, self.RENDER)
+            )
+
+    # --- the publish loop -----------------------------------------------------
+
+    def test_publish_writes_metadata_for_backup_but_not_delivery(self):
+        """The regression, through the real publish path: the export render
+        got a sidecar written next to it in the client delivery folder."""
+        step = MagicMock()
+        step.publishSettings.return_value = {}
+
+        meta = MagicMock()
+        with patch.object(self.host, "currentItem", return_value=MagicMock()), \
+             patch.object(self.host, "currentStep", return_value=step), \
+             patch.object(self.host, "publishInfo", return_value=MagicMock()), \
+             patch.object(self.host, "currentStatus", return_value=MagicMock()), \
+             patch.object(self.host, "closeTempWorkingFile"), \
+             patch.object(self.host, "_RamHost__save", return_value=True, create=True), \
+             patch.object(self.host, "_RamHost__runUserScripts", return_value=True, create=True), \
+             patch.object(self.host, "_prePublish", side_effect=lambda i, o: o), \
+             patch.object(self.host, "_publish", return_value=[self.RENDER, self.BACKUP]), \
+             patch.object(self.host, "_RamHost__setPublishMetadata", meta, create=True), \
+             self._patch_project(self._project()):
+
+            ok = self.host.publish(
+                publishOptions={"ramsesPublishOptions": {}},
+                incrementVersion=False,
+            )
+
+        self.assertTrue(ok)
+        written = [call.args[0] for call in meta.call_args_list]
+        self.assertEqual(written, [self.BACKUP], "delivery render must be skipped")
+        self.assertNotIn(self.RENDER, written)
+
+
 if __name__ == "__main__":
     unittest.main()
