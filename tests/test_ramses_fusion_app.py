@@ -597,6 +597,40 @@ class TestRamsesFusionApp(unittest.TestCase):
                 self.assertIn("#FFF", html)
                 self.assertIn("SH010", html)
 
+    def test_context_is_single_line_in_horizontal_layout(self):
+        """The slim horizontal bar renders the context on one compact line;
+        the vertical layout keeps the 3-line block."""
+        mock_item = MagicMock()
+        mock_item.shortName.return_value = "SH010"
+        mock_item.projectShortName.return_value = "PROJ"
+        mock_step = MagicMock()
+        mock_step.name.return_value = "Compositing"
+        mock_step.colorName.return_value = "#ff00ff"
+        self.app.ramses.host.currentStatus = MagicMock(return_value=None)
+        self.app._project_cache = MagicMock()
+        self.app._project_cache.name.return_value = "My Project"
+
+        with patch.object(
+            RamsesFusionApp, "current_item", new_callable=PropertyMock
+        ) as mock_item_prop:
+            mock_item_prop.return_value = mock_item
+            with patch.object(
+                RamsesFusionApp, "current_step", new_callable=PropertyMock
+            ) as mock_step_prop:
+                mock_step_prop.return_value = mock_step
+
+                self.app._horizontal = False
+                vertical = self.app._get_context_text()
+                self.app._horizontal = True
+                horizontal = self.app._get_context_text()
+
+        # Vertical stacks lines with <br>; horizontal is one line.
+        self.assertIn("<br>", vertical)
+        self.assertNotIn("<br>", horizontal)
+        # Same content is present, just laid out on one line.
+        self.assertIn("SH010", horizontal)
+        self.assertIn("Compositing", horizontal)
+
     def test_validation_passes_when_anchors_connected(self):
         """Verify validation succeeds when anchors exist, are connected, and settings match."""
         mock_item = MagicMock()
@@ -1000,6 +1034,108 @@ class TestFusionFileFormats(unittest.TestCase):
         with patch.object(self.fusion_host, "RAMSES") as R:
             R.daemonInterface.return_value.getData.side_effect = RuntimeError("boom")
             self.assertEqual(self.host.fusionFileFormats(), {".comp"})
+
+
+class TestPanelLayout(unittest.TestCase):
+    """The panel layouts must expose exactly the widgets their bindings expect.
+    Every event binding and the enable/disable logic address widgets by ID, so
+    a layout missing a widget it binds - or, worse, the horizontal bar keeping
+    a Settings widget it no longer binds - is a silent regression to catch as
+    the bar iterates."""
+
+    # Widgets present in BOTH layouts (workflow actions + context + the layout
+    # toggle). Their handlers are bound unconditionally.
+    SHARED_IDS = frozenset({
+        "ContextButton", "RamsesButton", "SwitchShotButton", "ImportButton",
+        "ReplaceButton", "SaveButton", "SaveAsButton", "CommentButton",
+        "IncrementalSaveButton", "UpdateStatusButton", "PreviewButton",
+        "OpenPreviewButton", "TemplateButton", "SetupSceneButton",
+        "RetrieveButton", "LayoutToggleButton",
+    })
+    # The Settings category lives only in the vertical layout; the slim bar
+    # drops it (reached by toggling back to vertical).
+    VERTICAL_ONLY_IDS = frozenset({
+        "PubSettingsButton", "CheckUpdateButton", "SettingsButton",
+        "AboutButton",
+    })
+
+    def setUp(self):
+        self.mock_fusion = MockFusion()
+        ram_fusion_mod.fusion = self.mock_fusion
+        ram_fusion_mod.fu = self.mock_fusion
+        ram_fusion_mod.bmd = sys.modules["bmd"]
+        import fusion_host
+        fusion_host.bmd = sys.modules["bmd"]
+        self.app = RamsesFusionApp()
+
+    def _collect_ids(self, build):
+        """Runs a layout builder and returns the set of widget IDs it declares.
+
+        Button/Label are patched to record each ``ID`` without needing a real
+        Fusion tree; the header/footer/icon helpers are stubbed so the build
+        never reaches the daemon or the filesystem.
+        """
+        ids = []
+
+        def rec(attrs):
+            if isinstance(attrs, dict) and attrs.get("ID"):
+                ids.append(attrs["ID"])
+            return MagicMock()
+
+        with patch.object(self.app.ui, "Button", side_effect=rec), \
+             patch.object(self.app.ui, "Label", side_effect=rec), \
+             patch.object(self.app, "_get_context_text", return_value=""), \
+             patch.object(self.app, "_get_footer_text", return_value=""), \
+             patch.object(self.app, "_get_icon", return_value=None):
+            build()
+        return set(ids)
+
+    def test_vertical_has_shared_and_settings_widgets(self):
+        ids = self._collect_ids(self.app._build_vertical_content)
+        missing = (self.SHARED_IDS | self.VERTICAL_ONLY_IDS) - ids
+        self.assertFalse(missing, f"vertical layout missing widgets: {missing}")
+
+    def test_horizontal_has_shared_widgets(self):
+        missing = self.SHARED_IDS - self._collect_ids(
+            self.app._build_horizontal_content
+        )
+        self.assertFalse(missing, f"horizontal layout missing widgets: {missing}")
+
+    def test_horizontal_drops_the_settings_group(self):
+        """The slim bar must NOT keep the Settings widgets - they are no longer
+        bound there, so leaving them would be dead, unclickable buttons."""
+        ids = self._collect_ids(self.app._build_horizontal_content)
+        leftover = self.VERTICAL_ONLY_IDS & ids
+        self.assertFalse(leftover, f"horizontal bar still has Settings widgets: {leftover}")
+
+    def test_both_layouts_have_the_layout_toggle(self):
+        self.assertIn(
+            "LayoutToggleButton", self._collect_ids(self.app._build_vertical_content)
+        )
+        self.assertIn(
+            "LayoutToggleButton", self._collect_ids(self.app._build_horizontal_content)
+        )
+
+    def test_toggle_layout_flips_and_persists(self):
+        self.app.settings.userSettings["panelLayout"] = "vertical"
+        self.app.settings.save = MagicMock()
+        self.app.disp.ExitLoop = MagicMock()
+
+        self.app.on_toggle_layout()
+        self.assertEqual(self.app.settings.userSettings["panelLayout"], "horizontal")
+        self.assertTrue(self.app._relaunch_layout)
+        self.app.settings.save.assert_called()
+        self.app.disp.ExitLoop.assert_called()
+
+        self.app.on_toggle_layout()
+        self.assertEqual(self.app.settings.userSettings["panelLayout"], "vertical")
+
+    def test_default_layout_is_vertical(self):
+        self.app.settings.userSettings.pop("panelLayout", None)
+        self.assertEqual(
+            self.app.settings.userSettings.get("panelLayout", "vertical"),
+            "vertical",
+        )
 
 
 if __name__ == "__main__":

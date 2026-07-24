@@ -260,6 +260,7 @@ class MockUIManager:
     def AddWindow(self, *args): return MagicMock(name="Dialog")
     def HGroup(self, *args): return MagicMock(name="HGroup")
     def VGroup(self, *args): return MagicMock(name="VGroup")
+    def Stack(self, *args): return MagicMock(name="Stack")
     def HGap(self, *args): return MagicMock(name="HGap")
     def VGap(self, *args): return MagicMock(name="VGap")
     def LineEdit(self, attrs): return MagicMock(name="LineEdit")
