@@ -1301,6 +1301,17 @@ class TestSourceNumbering(unittest.TestCase):
         self.assertIsNone(FusionHost.parse_frame_number(".ramses_complete"))
         self.assertIsNone(FusionHost.parse_frame_number(None))
 
+    # --- parse_frame_token ---------------------------------------------------
+
+    def test_parse_frame_token_reports_digit_width(self):
+        """The width is what lets a render be padded like its plate."""
+        self.assertEqual(FusionHost.parse_frame_token("plate.00000567.exr"), (567, 8))
+        self.assertEqual(FusionHost.parse_frame_token("plate.1001.exr"), (1001, 4))
+
+    def test_parse_frame_token_no_frame(self):
+        self.assertIsNone(FusionHost.parse_frame_token("shot_v001.exr"))
+        self.assertIsNone(FusionHost.parse_frame_token(None))
+
     # --- resolveSourceStartFrame ---------------------------------------------
 
     def _add_loader(self, clip_path):
@@ -1365,6 +1376,91 @@ class TestSourceNumbering(unittest.TestCase):
     def test_resolve_returns_none_when_nothing_found(self):
         with patch.object(self.host, "currentItem", return_value=None):
             self.assertIsNone(self.host.resolveSourceStartFrame())
+
+    # --- resolveSourcePadding -------------------------------------------------
+
+    def _plate_step_patch(self):
+        plate_step = MagicMock()
+        plate_step.shortName.return_value = "Plate"
+        return patch.object(
+            self.fusion_host.RamStep, "fromPath", return_value=plate_step
+        )
+
+    def test_resolve_padding_from_plate_loader(self):
+        """The live DrNiceXmas plate is 8-digit padded."""
+        self._add_loader(self.PLATE_CLIP.replace("86400", "00000567"))
+        with self._plate_step_patch():
+            self.assertEqual(self.host.resolveSourcePadding(), 8)
+            self.assertEqual(self.host.resolveSourceStartFrame(), 567)
+
+    def test_resolve_padding_uses_widest_token(self):
+        """An unpadded sequence (.99., .100.) needs a width holding every frame."""
+        self._add_loader(self.PLATE_CLIP.replace(".86400.", ".99."))
+        self._add_loader(self.PLATE_CLIP.replace(".86400.", ".100."))
+        with self._plate_step_patch():
+            self.assertEqual(self.host.resolveSourcePadding(), 3)
+
+    def test_resolve_padding_falls_back_to_disk(self):
+        plate_step = MagicMock()
+        plate_step.shortName.return_value = "Ingest"
+        project = MagicMock()
+        project.steps.return_value = [plate_step]
+
+        item = MagicMock()
+        item.latestPublishedVersionFilePaths.return_value = [
+            "D:/pub/001/.ramses_complete",
+            "D:/pub/001/TEST_S_SH010_PLATE.00000567.exr",
+            "D:/pub/001/TEST_S_SH010_PLATE.00000568.exr",
+        ]
+
+        with patch.object(self.host, "currentItem", return_value=item), \
+             patch.object(self.fusion_host.RAMSES, "project", return_value=project):
+            self.assertEqual(self.host.resolveSourcePadding(), 8)
+
+    def test_resolve_padding_none_when_nothing_found(self):
+        with patch.object(self.host, "currentItem", return_value=None):
+            self.assertIsNone(self.host.resolveSourcePadding())
+
+    # --- padding follows the plate --------------------------------------------
+
+    def _source_numbering_cfg(self, enabled=True, preset="final"):
+        return patch.object(
+            self.host,
+            "_get_fusion_settings",
+            return_value={preset: {"source_numbering": enabled}},
+        )
+
+    def test_padding_matches_plate_when_source_numbering(self):
+        """Regression: an 8-digit plate rendered 4-digit (DNX_0515 delivery)."""
+        self._add_loader(self.PLATE_CLIP.replace("86400", "00000567"))
+        with self._plate_step_patch(), \
+             patch.object(self.host, "currentStep", return_value=MagicMock()), \
+             patch.object(self.host, "currentItem", return_value=MagicMock()), \
+             patch.object(self.host, "collectItemSettings", return_value={"frames": 64}), \
+             self._source_numbering_cfg():
+            self.assertEqual(self.host._calculate_padding_str("final"), "0" * 8)
+
+    def test_padding_ignores_plate_without_source_numbering(self):
+        """Unmanaged presets keep deriving padding from the comp's own range."""
+        self._add_loader(self.PLATE_CLIP.replace("86400", "00000567"))
+        self.fusion_host.RAM_SETTINGS.userSettings = {"compStartFrame": 1001}
+        with self._plate_step_patch(), \
+             patch.object(self.host, "currentStep", return_value=MagicMock()), \
+             patch.object(self.host, "currentItem", return_value=MagicMock()), \
+             patch.object(self.host, "collectItemSettings", return_value={"frames": 64}), \
+             self._source_numbering_cfg(enabled=False):
+            self.assertEqual(self.host._calculate_padding_str("final"), "0000")
+
+    def test_padding_widens_past_narrow_plate_padding(self):
+        """A 3-digit plate rendered past frame 999 must not truncate."""
+        self._add_loader(self.PLATE_CLIP.replace(".86400.", ".998."))
+        with self._plate_step_patch(), \
+             patch.object(self.host, "currentStep", return_value=MagicMock()), \
+             patch.object(self.host, "currentItem", return_value=MagicMock()), \
+             patch.object(self.host, "collectItemSettings", return_value={"frames": 10}), \
+             self._source_numbering_cfg():
+            # 998 + 9 = 1007 needs 4 digits even though the plate uses 3
+            self.assertEqual(self.host._calculate_padding_str("final"), "0000")
 
     # --- _apply_source_numbering ----------------------------------------------
 
