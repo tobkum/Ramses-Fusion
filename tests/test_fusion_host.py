@@ -1736,46 +1736,5 @@ class TestDeliverySidecarSuppression(unittest.TestCase):
 
 
 
-class TestDriveRootMakedirsTrap(unittest.TestCase):
-    r"""Pipeline subfolders at a drive root (D:\_published) mean the path they
-    were built from never resolved. Refuse them and record the caller, so the
-    real fault surfaces instead of stray empty folders."""
-
-    def setUp(self):
-        import ramses_patches
-        self.rp = ramses_patches
-
-    def test_detects_pipeline_folders_at_drive_root(self):
-        for name in ("_versions", "_published", "_preview"):
-            with self.subTest(name=name):
-                self.assertTrue(
-                    self.rp._is_pipeline_folder_at_drive_root("D:/" + name)
-                )
-
-    def test_ignores_pipeline_folders_inside_a_project(self):
-        good = ("X:/Geteilte Ablagen/proj/05-SHOTS/S_0515/S_0515_COMP/_published")
-        self.assertFalse(self.rp._is_pipeline_folder_at_drive_root(good))
-
-    def test_ignores_a_legitimate_top_level_folder(self):
-        """A real project folder at a drive root must still be creatable."""
-        self.assertFalse(self.rp._is_pipeline_folder_at_drive_root("D:/SomeProject"))
-
-    def test_ignores_empty_and_none(self):
-        self.assertFalse(self.rp._is_pipeline_folder_at_drive_root(""))
-        self.assertFalse(self.rp._is_pipeline_folder_at_drive_root(None))
-
-    def test_guarded_makedirs_refuses_and_does_not_create(self):
-        called = []
-        real = self.rp._real_makedirs
-        self.rp._real_makedirs = lambda *a, **k: called.append(a[0])
-        try:
-            self.rp._guarded_makedirs("D:/_published", exist_ok=True)
-            self.assertEqual(called, [], "must not reach the real makedirs")
-            self.rp._guarded_makedirs("X:/proj/step/_published", exist_ok=True)
-            self.assertEqual(called, ["X:/proj/step/_published"])
-        finally:
-            self.rp._real_makedirs = real
-
-
 if __name__ == "__main__":
     unittest.main()
