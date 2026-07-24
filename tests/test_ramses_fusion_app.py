@@ -1137,6 +1137,29 @@ class TestPanelLayout(unittest.TestCase):
             "vertical",
         )
 
+    def test_button_registry_is_consistent(self):
+        """Every registry spec must have a valid section and the fields both
+        builders read - a bad section or missing icon/label would break a
+        button silently in whichever layout consumes that field."""
+        for bid, spec in RamsesFusionApp._BUTTON_SPECS.items():
+            self.assertIn(
+                spec.get("section"), RamsesFusionApp._SECTION_COLORS,
+                f"{bid}: section not in _SECTION_COLORS",
+            )
+            self.assertTrue(spec.get("icon"), f"{bid}: missing icon")
+            self.assertIn("v_label", spec, f"{bid}: missing v_label")
+            self.assertTrue(spec.get("v_tip"), f"{bid}: missing v_tip")
+
+    def test_registry_covers_horizontal_buttons(self):
+        """Every action widget the horizontal bar builds must have h_label +
+        h_tip in the registry (else the builder KeyErrors). Context/toggle are
+        built inline, not from the registry."""
+        inline = {"ContextButton", "LayoutToggleButton"}
+        for bid in self.SHARED_IDS - inline:
+            spec = RamsesFusionApp._BUTTON_SPECS[bid]
+            self.assertIn("h_label", spec, f"{bid}: missing h_label")
+            self.assertTrue(spec.get("h_tip"), f"{bid}: missing h_tip")
+
 
 if __name__ == "__main__":
     unittest.main()
