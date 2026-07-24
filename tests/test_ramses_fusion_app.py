@@ -597,6 +597,40 @@ class TestRamsesFusionApp(unittest.TestCase):
                 self.assertIn("#FFF", html)
                 self.assertIn("SH010", html)
 
+    def test_context_is_single_line_in_horizontal_layout(self):
+        """The slim horizontal bar renders the context on one compact line;
+        the vertical layout keeps the 3-line block."""
+        mock_item = MagicMock()
+        mock_item.shortName.return_value = "SH010"
+        mock_item.projectShortName.return_value = "PROJ"
+        mock_step = MagicMock()
+        mock_step.name.return_value = "Compositing"
+        mock_step.colorName.return_value = "#ff00ff"
+        self.app.ramses.host.currentStatus = MagicMock(return_value=None)
+        self.app._project_cache = MagicMock()
+        self.app._project_cache.name.return_value = "My Project"
+
+        with patch.object(
+            RamsesFusionApp, "current_item", new_callable=PropertyMock
+        ) as mock_item_prop:
+            mock_item_prop.return_value = mock_item
+            with patch.object(
+                RamsesFusionApp, "current_step", new_callable=PropertyMock
+            ) as mock_step_prop:
+                mock_step_prop.return_value = mock_step
+
+                self.app._horizontal = False
+                vertical = self.app._get_context_text()
+                self.app._horizontal = True
+                horizontal = self.app._get_context_text()
+
+        # Vertical stacks lines with <br>; horizontal is one line.
+        self.assertIn("<br>", vertical)
+        self.assertNotIn("<br>", horizontal)
+        # Same content is present, just laid out on one line.
+        self.assertIn("SH010", horizontal)
+        self.assertIn("Compositing", horizontal)
+
     def test_validation_passes_when_anchors_connected(self):
         """Verify validation succeeds when anchors exist, are connected, and settings match."""
         mock_item = MagicMock()

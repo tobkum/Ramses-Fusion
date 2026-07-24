@@ -194,6 +194,10 @@ class RamsesFusionApp:
         # show_main_window's loop tears the window down and rebuilds it in the
         # new layout without the user reopening the panel.
         self._relaunch_layout = False
+        # True while the slim horizontal bar is active. The context readout
+        # renders as a single compact line (not the vertical 3-line block) so
+        # it lines up with the button row's height.
+        self._horizontal = False
 
         # PySide Initialization
         self.qt_app = None
@@ -594,7 +598,22 @@ class RamsesFusionApp:
         except Exception:
             pass
 
-        # HERO ID Layout
+        # Slim horizontal bar: one compact line so the readout matches the
+        # button-row height (the vertical 3-line block towers over it).
+        if self._horizontal:
+            dot = " <font color='#555'>·</font> "
+            compact = (
+                f"<font color='#777'>{project_name.upper()}</font>{dot}"
+                f"{seq_prefix}<font color='#FFF'><b>{item_name}</b>{priority_suffix}</font>{dot}"
+                f"<font>{step_name}{state_label}</font>"
+            )
+            if self._outdated_count > 0:
+                compact += (
+                    f"{dot}<font color='#ff8800'><b>⚠️ {self._outdated_count}</b></font>"
+                )
+            return compact
+
+        # HERO ID Layout (vertical): three stacked lines.
         html = (
             f"<font color='#777' size='3'>{project_name.upper()}</font><br>"
             f"{seq_prefix}<font color='#FFF' size='5'><b>{item_name}</b>{priority_suffix}</font><br>"
@@ -1181,7 +1200,8 @@ class RamsesFusionApp:
         horizontal = (
             self.settings.userSettings.get("panelLayout", "vertical") == "horizontal"
         )
-        geometry = [200, 200, 1500, 92] if horizontal else [200, 200, 212, 825]
+        self._horizontal = horizontal
+        geometry = [200, 200, 1600, 64] if horizontal else [200, 200, 212, 825]
         content = (
             self._build_horizontal_content()
             if horizontal
@@ -1363,6 +1383,7 @@ class RamsesFusionApp:
                 min_size=[width, 32],
                 max_size=[width, 32],
                 tooltip=tooltip,
+                center_text=True,
             )
 
         def icon_btn(id_name, icon, tooltip, accent):
@@ -1423,7 +1444,7 @@ class RamsesFusionApp:
                                                 "Alignment": {"AlignVCenter": True},
                                                 "WordWrap": False,
                                                 "Weight": 1,
-                                                "MinimumSize": [188, 60],
+                                                "MinimumSize": [240, 34],
                                                 "StyleSheet": "QLabel { padding: 0 8px; }",
                                             }
                                         ),
@@ -1455,7 +1476,7 @@ class RamsesFusionApp:
                                         "Text": "",
                                         "Flat": True,
                                         "ToolTip": "Click to refresh",
-                                        "MinimumSize": [188, 60],
+                                        "MinimumSize": [240, 34],
                                         "StyleSheet": "QPushButton { background-color: transparent; border: none; } QPushButton:hover { background-color: rgba(255, 255, 255, 12); border: 1px solid #4a5562; border-radius: 4px; } QPushButton:pressed { background-color: rgba(0, 0, 0, 25); }",
                                     }
                                 ),
@@ -1463,26 +1484,26 @@ class RamsesFusionApp:
                         ),
                         sep(),
                         # --- Project & Scene ---------------------------------
-                        txt_btn("SwitchShotButton", "Switch", "ramshot.png", "Switch Shot", self._H_SCENE, 84),
-                        txt_btn("SetupSceneButton", "Setup", "ramsetupscene.png", "Sync Project Settings", self._H_SCENE, 78),
-                        txt_btn("RamsesButton", "Ramses", "ramses.png", "Open Ramses Client", self._H_SCENE, 90),
+                        txt_btn("SwitchShotButton", "Switch", "ramshot.png", "Switch Shot", self._H_SCENE, 78),
+                        txt_btn("SetupSceneButton", "Setup", "ramsetupscene.png", "Sync Project Settings", self._H_SCENE, 72),
+                        txt_btn("RamsesButton", "Ramses", "ramses.png", "Open Ramses Client", self._H_SCENE, 82),
                         sep(),
                         # --- Assets & Tools ----------------------------------
-                        txt_btn("ImportButton", "Import", "ramimport.png", "Import Published", self._H_ASSET, 84),
-                        txt_btn("ReplaceButton", "Replace", "ramreplace.png", "Replace Loader", self._H_ASSET, 90),
-                        txt_btn("TemplateButton", "Template", "ramtemplate.png", "Save as Template", self._H_ASSET, 98),
+                        txt_btn("ImportButton", "Import", "ramimport.png", "Import Published", self._H_ASSET, 78),
+                        txt_btn("ReplaceButton", "Replace", "ramreplace.png", "Replace Loader", self._H_ASSET, 84),
+                        txt_btn("TemplateButton", "Template", "ramtemplate.png", "Save as Template", self._H_ASSET, 92),
                         sep(),
                         # --- Saving & Iteration ------------------------------
-                        txt_btn("SaveButton", "Save", "ramsave.png", "Save", self._H_WORK, 74),
-                        txt_btn("SaveAsButton", "Save As", "ramsave.png", "Save As / Create...", self._H_WORK, 88),
-                        txt_btn("IncrementalSaveButton", "Incr", "ramsaveincremental.png", "Save Incremental", self._H_WORK, 68),
-                        txt_btn("CommentButton", "Note", "ramcomment.png", "Save with Note", self._H_WORK, 70),
-                        txt_btn("RetrieveButton", "History", "ramretrieve.png", "Version History / Restore", self._H_WORK, 86),
+                        txt_btn("SaveButton", "Save", "ramsave.png", "Save", self._H_WORK, 66),
+                        txt_btn("SaveAsButton", "Save As", "ramsave.png", "Save As / Create...", self._H_WORK, 82),
+                        txt_btn("IncrementalSaveButton", "Incr", "ramsaveincremental.png", "Save Incremental", self._H_WORK, 62),
+                        txt_btn("CommentButton", "Note", "ramcomment.png", "Save with Note", self._H_WORK, 64),
+                        txt_btn("RetrieveButton", "History", "ramretrieve.png", "Version History / Restore", self._H_WORK, 80),
                         sep(),
                         # --- Review & Publish --------------------------------
-                        txt_btn("PreviewButton", "Preview", "rampreview.png", "Create Preview", self._H_REVIEW, 90),
+                        txt_btn("PreviewButton", "Preview", "rampreview.png", "Create Preview", self._H_REVIEW, 84),
                         icon_btn("OpenPreviewButton", "ramopen.png", "Open Preview in media player", self._H_REVIEW),
-                        txt_btn("UpdateStatusButton", "Publish", "ramstatus.png", "Renders the final master, archives the comp, and advances the shot status in the database.", self._H_PUBLISH, 100),
+                        txt_btn("UpdateStatusButton", "Publish", "ramstatus.png", "Renders the final master, archives the comp, and advances the shot status in the database.", self._H_PUBLISH, 94),
                         sep(),
                         # --- Settings & Info (icon-only: secondary) ----------
                         icon_btn("PubSettingsButton", "rampublishsettings.png", "Step Configuration", self._H_SETTINGS),
@@ -1872,6 +1893,7 @@ class RamsesFusionApp:
         accent_color: Optional[str] = None,
         icon_only: bool = False,
         prominent: bool = False,
+        center_text: bool = False,
     ) -> Any:
         """Creates a standardized UI Button with optional styling.
 
@@ -1901,9 +1923,13 @@ class RamsesFusionApp:
         default_h = 36 if prominent else 30
         weight_css = "font-weight: 600;" if prominent else ""
 
-        # Base Style: Reverted to the original flat 1px solid #222 border
+        # Base Style: Reverted to the original flat 1px solid #222 border.
+        # icon_only and center_text both center the icon+label (toolbar look);
+        # the default is left-aligned for the vertical menu-style column.
         if icon_only:
             ss = "QPushButton { text-align: center; padding: 0; border: 1px solid #222; border-radius: 3px;" + weight_css
+        elif center_text:
+            ss = "QPushButton { text-align: center; padding: 0 4px; border: 1px solid #222; border-radius: 3px;" + weight_css
         else:
             ss = "QPushButton { text-align: left; padding-left: 6px; border: 1px solid #222; border-radius: 3px;" + weight_css
 
