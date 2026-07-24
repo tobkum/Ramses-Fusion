@@ -1231,8 +1231,8 @@ class RamsesFusionApp:
     def on_toggle_layout(self, ev: object = None) -> None:
         """Flips the panel between vertical and horizontal in one click.
 
-        Writes the same persisted ``panelLayout`` setting the Plugin Settings
-        dropdown uses, then breaks the main event loop so show_main_window's
+        Persists the ``panelLayout`` user setting (so the choice survives
+        restarts), then breaks the main event loop so show_main_window's
         rebuild loop reopens the panel in the other layout.
         """
         current = self.settings.userSettings.get("panelLayout", "vertical")
@@ -1384,14 +1384,154 @@ class RamsesFusionApp:
                     ],
                 )
 
-    # Section accent colours, shared with the vertical layout's group headers
-    # so the horizontal bar keeps the same visual grouping.
-    _H_SCENE = "#2c4468"   # Project & Scene (blue)
-    _H_ASSET = "#463063"   # Assets & Tools (purple)
-    _H_WORK = "#2b5a4c"    # Saving & Iteration (teal)
-    _H_REVIEW = "#2f5a32"  # Review & Publish (green)
-    _H_PUBLISH = "#6e4a12"  # Update / Publish (amber - the transactional action)
-    _H_SETTINGS = "#333333"  # Settings & Info (grey)
+    # ------------------------------------------------------------------
+    # Button registry - single source of truth for each action button's
+    # presentation. Handlers are bound by ID in _bind_main_events; the icon,
+    # section (accent colour), and per-layout label + tooltip live here so the
+    # vertical and horizontal builders don't each re-declare them. Labels and
+    # tooltips differ per layout by design (vertical is descriptive, horizontal
+    # is abbreviated), so both are stored. Structure, sizing, and emphasis stay
+    # in the builders. Settings-group buttons have no h_* fields (vertical only).
+    # ------------------------------------------------------------------
+    _SECTION_COLORS = {
+        "scene": "#2c4468",     # Project & Scene (blue)
+        "assets": "#463063",    # Assets & Tools (purple)
+        "work": "#2b5a4c",      # Saving & Iteration (teal)
+        "review": "#2f5a32",    # Review & Publish (green)
+        "publish": "#6e4a12",   # Update / Publish (amber - the transactional action)
+        "settings": "#333333",  # Settings & Info (grey)
+    }
+
+    _BUTTON_SPECS = {
+        "SwitchShotButton": {
+            "icon": "ramshot.png", "section": "scene",
+            "v_label": "Switch Shot", "h_label": "Switch",
+            "v_tip": "Jump to another shot in this project, or create a new one from a template.",
+            "h_tip": "Switch Shot",
+        },
+        "SetupSceneButton": {
+            "icon": "ramsetupscene.png", "section": "scene",
+            "v_label": "Sync Project Settings", "h_label": "Sync",
+            "v_tip": "Automatically set the resolution, FPS, and frame range based on Ramses project settings.",
+            "h_tip": "Sync Project Settings",
+        },
+        "RamsesButton": {
+            "icon": "ramses.png", "section": "scene",
+            "v_label": "Open Ramses Client", "h_label": "Ramses",
+            "v_tip": "Launch the main Ramses Client application.",
+            "h_tip": "Open Ramses Client",
+        },
+        "ImportButton": {
+            "icon": "ramimport.png", "section": "assets",
+            "v_label": "Import Published", "h_label": "Import",
+            "v_tip": "Import a published asset or render into the current composition.",
+            "h_tip": "Import Published",
+        },
+        "ReplaceButton": {
+            "icon": "ramreplace.png", "section": "assets",
+            "v_label": "Replace Loader", "h_label": "Replace",
+            "v_tip": "Replace the selected Loader node with a different version or asset.",
+            "h_tip": "Replace Loader",
+        },
+        "TemplateButton": {
+            "icon": "ramtemplate.png", "section": "assets",
+            "v_label": "Save as Template", "h_label": "Template",
+            "v_tip": "Save the current composition as a template for other shots in this step.",
+            "h_tip": "Save as Template",
+        },
+        "SaveButton": {
+            "icon": "ramsave.png", "section": "work",
+            "v_label": "Save", "h_label": "Save",
+            "v_tip": "Overwrite the current working file version.",
+            "h_tip": "Overwrite the current working version.",
+        },
+        "SaveAsButton": {
+            "icon": "ramsave.png", "section": "work",
+            "v_label": "Save As / Create...", "h_label": "Save As",
+            "v_tip": "Save as a new item or step in the pipeline.",
+            "h_tip": "Save As / Create...",
+        },
+        "IncrementalSaveButton": {
+            "icon": "ramsaveincremental.png", "section": "work",
+            "v_label": "Save Incremental", "h_label": "Incr",
+            "v_tip": "Save a new version of the current file (e.g., v001 -> v002).",
+            "h_tip": "Save Incremental",
+        },
+        "CommentButton": {
+            "icon": "ramcomment.png", "section": "work",
+            "v_label": "Save with Note", "h_label": "Note",
+            "v_tip": "Save the current composition and add a descriptive note to the Ramses database.",
+            "h_tip": "Save with Note",
+        },
+        "RetrieveButton": {
+            "icon": "ramretrieve.png", "section": "work",
+            "v_label": "Version History / Restore", "h_label": "History",
+            "v_tip": "Browse and restore a previous version of this composition.",
+            "h_tip": "Version History / Restore",
+        },
+        "PreviewButton": {
+            "icon": "rampreview.png", "section": "review",
+            "v_label": "Create Preview", "h_label": "Preview",
+            "v_tip": "Generate a preview render for supervisor review. Saved to the shot's _preview folder, where review tools (Ramses Client, Ramses-Out) pick it up.",
+            "h_tip": "Create Preview",
+        },
+        "OpenPreviewButton": {
+            # Icon-only in both layouts; film-strip ("media") glyph, not
+            # ramopen.png (a copy-documents glyph).
+            "icon": "ramshot.png", "section": "review",
+            "v_label": "", "h_label": "",
+            "v_tip": "Open the current preview in your default media player.",
+            "h_tip": "Open Preview in media player",
+        },
+        "UpdateStatusButton": {
+            # The one transactional action: amber section, bolded in both.
+            "icon": "ramstatus.png", "section": "publish",
+            "v_label": "Update / Publish", "h_label": "Publish",
+            "v_tip": "Renders the final master, archives the comp, and advances the shot status in the database.",
+            "h_tip": "Renders the final master, archives the comp, and advances the shot status in the database.",
+        },
+        "PubSettingsButton": {
+            "icon": "rampublishsettings.png", "section": "settings",
+            "v_label": "Step Configuration",
+            "v_tip": "Configure global YAML automation rules for this pipeline step.",
+        },
+        "CheckUpdateButton": {
+            "icon": "ramupdate.png", "section": "settings",
+            "v_label": "Check for Update...",
+            "v_tip": "Check if a new version of the Ramses plugin is available.",
+        },
+        "SettingsButton": {
+            "icon": "ramsettings.png", "section": "settings",
+            "v_label": "Plugin Settings",
+            "v_tip": "Configure Ramses executable paths, ports, and default frame ranges.",
+        },
+        "AboutButton": {
+            "icon": "ramses.png", "section": "settings",
+            "v_label": "About",
+            "v_tip": "Information about Ramses-Fusion and Overmind Studios.",
+        },
+    }
+
+    def _v_btn(self, button_id, weight=0, prominent=False, icon_only=False,
+               min_size=None, max_size=None):
+        """Builds a vertical-layout button from its registry spec.
+
+        Structure/sizing/emphasis are passed by the caller; icon, section
+        colour, label, and tooltip come from _BUTTON_SPECS.
+        """
+        spec = self._BUTTON_SPECS[button_id]
+        return self.create_button(
+            button_id,
+            spec["v_label"],
+            spec["icon"],
+            accent_color=self._SECTION_COLORS[spec["section"]],
+            weight=weight,
+            tooltip=spec["v_tip"],
+            prominent=prominent,
+            icon_only=icon_only,
+            min_size=min_size,
+            max_size=max_size,
+        )
 
     def _build_horizontal_content(self):
         """Builds the slim horizontal toolbar: one vertically-centred action row.
@@ -1416,30 +1556,36 @@ class RamsesFusionApp:
         status line.
         """
 
-        def txt_btn(id_name, label, icon, tooltip, accent, width):
+        specs = self._BUTTON_SPECS
+        colors = self._SECTION_COLORS
+
+        def txt_btn(button_id, width, prominent=False):
+            spec = specs[button_id]
             return self.create_button(
-                id_name,
-                label,
-                icon,
-                accent_color=accent,
+                button_id,
+                spec["h_label"],
+                spec["icon"],
+                accent_color=colors[spec["section"]],
                 weight=0,
                 min_size=[width, 32],
                 max_size=[width, 32],
-                tooltip=tooltip,
                 center_text=True,
+                prominent=prominent,
+                tooltip=spec["h_tip"],
             )
 
-        def icon_btn(id_name, icon, tooltip, accent):
+        def icon_btn(button_id):
+            spec = specs[button_id]
             return self.create_button(
-                id_name,
+                button_id,
                 "",
-                icon,
-                accent_color=accent,
+                spec["icon"],
+                accent_color=colors[spec["section"]],
                 weight=0,
                 min_size=[32, 32],
                 max_size=[32, 32],
                 icon_only=True,
-                tooltip=tooltip,
+                tooltip=spec["h_tip"],
             )
 
         # Thin vertical divider between groups. Stretchy gaps above and below
@@ -1552,61 +1698,35 @@ class RamsesFusionApp:
                         ),
                         sep(),
                         # --- Project & Scene ---------------------------------
-                        txt_btn("SwitchShotButton", "Switch", "ramshot.png", "Switch Shot", self._H_SCENE, 74),
-                        txt_btn("SetupSceneButton", "Sync", "ramsetupscene.png", "Sync Project Settings", self._H_SCENE, 68),
+                        txt_btn("SwitchShotButton", 74),
+                        txt_btn("SetupSceneButton", 68),
                         # Icon-only: the magenta Ramses logo is self-explanatory,
                         # and "open the client" is a rare, session-level action.
                         # The reclaimed width goes to the status line.
-                        icon_btn("RamsesButton", "ramses.png", "Open Ramses Client", self._H_SCENE),
+                        icon_btn("RamsesButton"),
                         sep(),
                         # --- Assets & Tools ----------------------------------
-                        txt_btn("ImportButton", "Import", "ramimport.png", "Import Published", self._H_ASSET, 74),
-                        txt_btn("ReplaceButton", "Replace", "ramreplace.png", "Replace Loader", self._H_ASSET, 80),
-                        txt_btn("TemplateButton", "Template", "ramtemplate.png", "Save as Template", self._H_ASSET, 86),
+                        txt_btn("ImportButton", 74),
+                        txt_btn("ReplaceButton", 80),
+                        txt_btn("TemplateButton", 86),
                         sep(),
                         # --- Saving & Iteration ------------------------------
-                        # Save is bolded (prominent) as the most-frequent action,
-                        # matching the vertical layout's emphasis - same 32px
-                        # height as its neighbours, just heavier text.
-                        self.create_button(
-                            "SaveButton",
-                            "Save",
-                            "ramsave.png",
-                            accent_color=self._H_WORK,
-                            weight=0,
-                            min_size=[62, 32],
-                            max_size=[62, 32],
-                            center_text=True,
-                            prominent=True,
-                            tooltip="Overwrite the current working version.",
-                        ),
-                        txt_btn("SaveAsButton", "Save As", "ramsave.png", "Save As / Create...", self._H_WORK, 78),
-                        txt_btn("IncrementalSaveButton", "Incr", "ramsaveincremental.png", "Save Incremental", self._H_WORK, 58),
-                        txt_btn("CommentButton", "Note", "ramcomment.png", "Save with Note", self._H_WORK, 60),
-                        txt_btn("RetrieveButton", "History", "ramretrieve.png", "Version History / Restore", self._H_WORK, 74),
+                        # Save is bolded as the most-frequent action, matching
+                        # the vertical layout's emphasis - same 32px height as
+                        # its neighbours, just heavier text.
+                        txt_btn("SaveButton", 62, prominent=True),
+                        txt_btn("SaveAsButton", 78),
+                        txt_btn("IncrementalSaveButton", 58),
+                        txt_btn("CommentButton", 60),
+                        txt_btn("RetrieveButton", 74),
                         sep(),
                         # --- Review & Publish --------------------------------
-                        txt_btn("PreviewButton", "Preview", "rampreview.png", "Create Preview", self._H_REVIEW, 80),
-                        # Same film-strip ("media") icon the vertical layout
-                        # uses for this button - ramopen.png was a copy-documents
-                        # glyph, wrong for "play the preview".
-                        icon_btn("OpenPreviewButton", "ramshot.png", "Open Preview in media player", self._H_REVIEW),
-                        # Publish is bolded (prominent), mirroring the vertical
-                        # layout - it is the one transactional action (final
-                        # render + comp archive + DB status), reinforced by both
-                        # the amber accent and the heavier text.
-                        self.create_button(
-                            "UpdateStatusButton",
-                            "Publish",
-                            "ramstatus.png",
-                            accent_color=self._H_PUBLISH,
-                            weight=0,
-                            min_size=[96, 32],
-                            max_size=[96, 32],
-                            center_text=True,
-                            prominent=True,
-                            tooltip="Renders the final master, archives the comp, and advances the shot status in the database.",
-                        ),
+                        txt_btn("PreviewButton", 80),
+                        icon_btn("OpenPreviewButton"),
+                        # Publish is bolded, mirroring the vertical layout - the
+                        # one transactional action, reinforced by both the amber
+                        # accent and the heavier text.
+                        txt_btn("UpdateStatusButton", 96, prominent=True),
                         # No divider before the status line - it is already set
                         # apart by its stretch, and a trailing divider dangles
                         # when there is no message.
@@ -1764,220 +1884,85 @@ class RamsesFusionApp:
         )
 
     def _build_project_group(self):
-        """Builds the 'Project & Scene' UI section."""
-        bg_color = "#2c4468"  # PROJECT & SCENE (blue)
-        content_id = "ProjectContent"
+        """Builds the 'Project & Scene' UI section (buttons from the registry)."""
         return self.ui.VGroup(
             [
                 self._create_section_header(
-                    "ProjectHeader", "PROJECT && SCENE", content_id
+                    "ProjectHeader", "PROJECT && SCENE", "ProjectContent"
                 ),
-                self.create_button(
-                    "SwitchShotButton",
-                    "Switch Shot",
-                    "ramshot.png",
-                    accent_color=bg_color,
-                    weight=0,
-                    tooltip="Jump to another shot in this project, or create a new one from a template.",
-                ),
-                self.create_button(
-                    "SetupSceneButton",
-                    "Sync Project Settings",
-                    "ramsetupscene.png",
-                    accent_color=bg_color,
-                    weight=0,
-                    tooltip="Automatically set the resolution, FPS, and frame range based on Ramses project settings.",
-                ),
-                self.create_button(
-                    "RamsesButton",
-                    "Open Ramses Client",
-                    "ramses.png",
-                    accent_color=bg_color,
-                    weight=0,
-                    tooltip="Launch the main Ramses Client application.",
-                ),
+                self._v_btn("SwitchShotButton"),
+                self._v_btn("SetupSceneButton"),
+                self._v_btn("RamsesButton"),
             ]
         )
 
     def _build_pipeline_group(self):
-        """Builds the 'Assets & Tools' UI section."""
-        bg_color = "#463063"  # ASSETS & TOOLS (purple)
-        content_id = "PipelineContent"
+        """Builds the 'Assets & Tools' UI section (buttons from the registry)."""
         return self.ui.VGroup(
             [
                 self._create_section_header(
-                    "PipelineHeader", "ASSETS && TOOLS", content_id
+                    "PipelineHeader", "ASSETS && TOOLS", "PipelineContent"
                 ),
-                self.create_button(
-                    "ImportButton",
-                    "Import Published",
-                    "ramimport.png",
-                    accent_color=bg_color,
-                    weight=0,
-                    tooltip="Import a published asset or render into the current composition.",
-                ),
-                self.create_button(
-                    "ReplaceButton",
-                    "Replace Loader",
-                    "ramreplace.png",
-                    accent_color=bg_color,
-                    weight=0,
-                    tooltip="Replace the selected Loader node with a different version or asset.",
-                ),
-                self.create_button(
-                    "TemplateButton",
-                    "Save as Template",
-                    "ramtemplate.png",
-                    accent_color=bg_color,
-                    weight=0,
-                    tooltip="Save the current composition as a template for other shots in this step.",
-                ),
+                self._v_btn("ImportButton"),
+                self._v_btn("ReplaceButton"),
+                self._v_btn("TemplateButton"),
             ]
         )
 
     def _build_working_group(self):
-        """Builds the 'Saving & Iteration' UI section."""
-        bg_color = "#2b5a4c"  # SAVING & ITERATION (teal)
-        content_id = "WorkingContent"
+        """Builds the 'Saving & Iteration' UI section (buttons from the registry)."""
         return self.ui.VGroup(
             [
                 self._create_section_header(
-                    "WorkingHeader", "SAVING && ITERATION", content_id
+                    "WorkingHeader", "SAVING && ITERATION", "WorkingContent"
                 ),
-                self.create_button(
-                    "SaveButton",
-                    "Save",
-                    "ramsave.png",
-                    accent_color=bg_color,
-                    weight=0,
-                    tooltip="Overwrite the current working file version.",
-                    prominent=True,  # highest-frequency action - taller & bold
-                ),
-                self.create_button(
-                    "SaveAsButton",
-                    "Save As / Create...",
-                    "ramsave.png",
-                    accent_color=bg_color,
-                    weight=0,
-                    tooltip="Save as a new item or step in the pipeline.",
-                ),
-                self.create_button(
-                    "IncrementalSaveButton",
-                    "Save Incremental",
-                    "ramsaveincremental.png",
-                    accent_color=bg_color,
-                    weight=0,
-                    tooltip="Save a new version of the current file (e.g., v001 -> v002).",
-                ),
-                self.create_button(
-                    "CommentButton",
-                    "Save with Note",
-                    "ramcomment.png",
-                    accent_color=bg_color,
-                    weight=0,
-                    tooltip="Save the current composition and add a descriptive note to the Ramses database.",
-                ),
-                self.create_button(
-                    "RetrieveButton",
-                    "Version History / Restore",
-                    "ramretrieve.png",
-                    accent_color=bg_color,
-                    weight=0,
-                    tooltip="Browse and restore a previous version of this composition.",
-                ),
+                # Save is the highest-frequency action - taller & bold.
+                self._v_btn("SaveButton", prominent=True),
+                self._v_btn("SaveAsButton"),
+                self._v_btn("IncrementalSaveButton"),
+                self._v_btn("CommentButton"),
+                self._v_btn("RetrieveButton"),
             ]
         )
 
     def _build_publish_group(self):
-        """Builds the 'Review & Publish' UI section."""
-        bg_color = "#2f5a32"  # REVIEW & PUBLISH (green)
-        content_id = "PublishContent"
+        """Builds the 'Review & Publish' UI section (buttons from the registry)."""
         return self.ui.VGroup(
             [
                 self._create_section_header(
-                    "PublishHeader", "REVIEW && PUBLISH", content_id
+                    "PublishHeader", "REVIEW && PUBLISH", "PublishContent"
                 ),
                 self.ui.HGroup(
                     {"Weight": 0},
                     [
-                        self.create_button(
-                            "PreviewButton",
-                            "Create Preview",
-                            "rampreview.png",
-                            accent_color=bg_color,
-                            weight=1,
-                            tooltip="Generate a preview render for supervisor review. Saved to the shot's _preview folder, where review tools (Ramses Client, Ramses-Out) pick it up.",
-                        ),
-                        self.create_button(
+                        self._v_btn("PreviewButton", weight=1),
+                        self._v_btn(
                             "OpenPreviewButton",
-                            "",
-                            "ramshot.png",
-                            accent_color=bg_color,
-                            weight=0,
+                            icon_only=True,
                             min_size=[30, 30],
                             max_size=[30, 30],
-                            icon_only=True,
-                            tooltip="Open the current preview in your default media player.",
                         ),
                     ],
                 ),
-                self.create_button(
-                    "UpdateStatusButton",
-                    "Update / Publish",
-                    "ramstatus.png",
-                    # Amber, taller, bold, and alone in its colour: this is the
-                    # one transactional action on the panel (renders the final
-                    # master, archives the comp, writes the database) and must
-                    # not read like "Create Preview" one row above it.
-                    tooltip="Renders the final master, archives the comp, and advances the shot status in the database.",
-                    accent_color="#6e4a12",
-                    weight=0,
-                    prominent=True,
-                ),
+                # Update / Publish is the one transactional action (final
+                # master render + comp archive + DB write): amber (via its
+                # "publish" section) and prominent so it never reads like the
+                # "Create Preview" row above it.
+                self._v_btn("UpdateStatusButton", prominent=True),
             ]
         )
 
     def _build_settings_group(self):
-        """Builds the 'Settings & Info' UI section."""
-        bg_color = "#333333"
-        content_id = "SettingsContent"
+        """Builds the 'Settings & Info' UI section (buttons from the registry)."""
         return self.ui.VGroup(
             [
                 self._create_section_header(
-                    "SettingsHeader", "SETTINGS && INFO", content_id
+                    "SettingsHeader", "SETTINGS && INFO", "SettingsContent"
                 ),
-                self.create_button(
-                    "PubSettingsButton",
-                    "Step Configuration",
-                    "rampublishsettings.png",
-                    accent_color=bg_color,
-                    weight=0,
-                    tooltip="Configure global YAML automation rules for this pipeline step.",
-                ),
-                self.create_button(
-                    "CheckUpdateButton",
-                    "Check for Update...",
-                    "ramupdate.png",
-                    accent_color=bg_color,
-                    weight=0,
-                    tooltip="Check if a new version of the Ramses plugin is available.",
-                ),
-                self.create_button(
-                    "SettingsButton",
-                    "Plugin Settings",
-                    "ramsettings.png",
-                    accent_color=bg_color,
-                    weight=0,
-                    tooltip="Configure Ramses executable paths, ports, and default frame ranges.",
-                ),
-                self.create_button(
-                    "AboutButton",
-                    "About",
-                    "ramses.png",
-                    accent_color=bg_color,
-                    weight=0,
-                    tooltip="Information about Ramses-Fusion and Overmind Studios.",
-                ),
+                self._v_btn("PubSettingsButton"),
+                self._v_btn("CheckUpdateButton"),
+                self._v_btn("SettingsButton"),
+                self._v_btn("AboutButton"),
             ]
         )
 
@@ -2087,7 +2072,7 @@ class RamsesFusionApp:
             {
                 "WindowTitle": "Ramses Settings",
                 "ID": win_id,
-                "Geometry": [200, 200, 550, 185],
+                "Geometry": [200, 200, 550, 150],
             },
             [
                 self.ui.VGroup(
@@ -2140,16 +2125,6 @@ class RamsesFusionApp:
                             ]
                         ),
                         self.ui.HGroup(
-                            [
-                                self.ui.Label(
-                                    {"Text": "Panel layout:", "Weight": 1}
-                                ),
-                                self.ui.ComboBox(
-                                    {"ID": "LayoutCombo", "Weight": 2}
-                                ),
-                            ]
-                        ),
-                        self.ui.HGroup(
                             {"Weight": 0},
                             [
                                 self.ui.HGap(0, 1),
@@ -2178,19 +2153,10 @@ class RamsesFusionApp:
 
         itm = dlg.GetItems()
 
-        # Populate the panel-layout selector. Index order is fixed so save
-        # reads it back reliably; the stored value is a stable string, not the
-        # index, so reordering the list later can't corrupt a saved preference.
-        _LAYOUT_ORDER = ["vertical", "horizontal"]
-        layout_combo = itm["LayoutCombo"]
-        layout_combo.AddItem("Vertical (stacked panel)")
-        layout_combo.AddItem("Horizontal (slim toolbar)")
-        current_layout = self.settings.userSettings.get("panelLayout", "vertical")
-        try:
-            layout_combo.CurrentIndex = _LAYOUT_ORDER.index(current_layout)
-        except ValueError:
-            layout_combo.CurrentIndex = 0
-
+        # Note: the panel layout (vertical/horizontal) is NOT set here - it is
+        # switched with the one-click layout toggle in the panel itself, which
+        # persists the same ``panelLayout`` user setting. Keeping it out of this
+        # dialog avoids a second, redundant place to change it.
         def save_settings(ev):
             try:
                 self.settings.ramsesClientPort = int(itm["RamsesPortTxt"].Text)
@@ -2203,15 +2169,7 @@ class RamsesFusionApp:
                 )
             except ValueError:
                 self.settings.userSettings["compStartFrame"] = 1001
-            # Panel layout: persist, and flag a live rebuild if it changed so
-            # the panel flips without the user reopening it.
-            old_layout = self.settings.userSettings.get("panelLayout", "vertical")
-            idx = int(itm["LayoutCombo"].CurrentIndex)
-            new_layout = _LAYOUT_ORDER[idx] if 0 <= idx < len(_LAYOUT_ORDER) else "vertical"
-            self.settings.userSettings["panelLayout"] = new_layout
             self.settings.save()
-            if new_layout != old_layout and self.dlg:
-                self._relaunch_layout = True
             self.log("Settings Saved.", ram.LogLevel.Info)
 
         def close_settings(ev):
@@ -2231,13 +2189,6 @@ class RamsesFusionApp:
         finally:
             dlg.Hide()
             self.dlg.Enabled = True
-
-        # If the layout changed, break the main window's event loop so
-        # _run_main_window returns and the rebuild loop reopens it in the new
-        # layout. The settings dialog's own loop has already exited by here, so
-        # this ExitLoop targets the main window loop.
-        if self._relaunch_layout:
-            self.disp.ExitLoop()
 
     def show_about_window(self, ev) -> None:
         """Opens the About dialog with plugin version and credits.
