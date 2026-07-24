@@ -1403,8 +1403,8 @@ class RamsesFusionApp:
             [⇄ toggle] [context + ↻]  Scene | Assets | Work | Review  … status →
 
         Workflow actions carry a short label beside their icon and are grouped
-        by a wider gap plus their section colour tint (Scene blue, Assets
-        purple, Work teal, Review green) - no divider lines. Save and Publish
+        by a thin vertical divider plus their section colour tint (Scene blue,
+        Assets purple, Work teal, Review green). Save and Publish
         are bolded, mirroring the vertical layout's emphasis on the most-
         frequent and the transactional actions; Publish also carries the amber
         accent. The self-explanatory Open-Ramses button and the small
@@ -1442,11 +1442,27 @@ class RamsesFusionApp:
                 tooltip=tooltip,
             )
 
-        # Groups are separated by a wider gap and read by their colour tint
-        # (now clearly visible). Explicit divider lines were removed - they sat
-        # at a different height than the buttons and looked misaligned.
-        def gap():
-            return self.ui.HGap(14)
+        # Thin vertical divider between groups. Stretchy gaps above and below
+        # centre the line on the row (the earlier version used fixed gaps and
+        # so sat too high when the row itself wasn't centred). A divider plus a
+        # small gap groups as clearly as a wide gap did, in ~12px less space
+        # per boundary - width that goes to the status line.
+        def sep():
+            return self.ui.VGroup(
+                {"Weight": 0},
+                [
+                    self.ui.VGap(0, 1),
+                    self.ui.Label(
+                        {
+                            "Weight": 0,
+                            "MinimumSize": [2, 24],
+                            "MaximumSize": [2, 24],
+                            "StyleSheet": "QLabel { background-color: #454b52; }",
+                        }
+                    ),
+                    self.ui.VGap(0, 1),
+                ],
+            )
 
         return self.ui.VGroup(
             {"Spacing": 0, "Weight": 1},
@@ -1534,7 +1550,7 @@ class RamsesFusionApp:
                                 ),
                             ],
                         ),
-                        gap(),
+                        sep(),
                         # --- Project & Scene ---------------------------------
                         txt_btn("SwitchShotButton", "Switch", "ramshot.png", "Switch Shot", self._H_SCENE, 74),
                         txt_btn("SetupSceneButton", "Sync", "ramsetupscene.png", "Sync Project Settings", self._H_SCENE, 68),
@@ -1542,12 +1558,12 @@ class RamsesFusionApp:
                         # and "open the client" is a rare, session-level action.
                         # The reclaimed width goes to the status line.
                         icon_btn("RamsesButton", "ramses.png", "Open Ramses Client", self._H_SCENE),
-                        gap(),
+                        sep(),
                         # --- Assets & Tools ----------------------------------
                         txt_btn("ImportButton", "Import", "ramimport.png", "Import Published", self._H_ASSET, 74),
                         txt_btn("ReplaceButton", "Replace", "ramreplace.png", "Replace Loader", self._H_ASSET, 80),
                         txt_btn("TemplateButton", "Template", "ramtemplate.png", "Save as Template", self._H_ASSET, 86),
-                        gap(),
+                        sep(),
                         # --- Saving & Iteration ------------------------------
                         # Save is bolded (prominent) as the most-frequent action,
                         # matching the vertical layout's emphasis - same 32px
@@ -1568,7 +1584,7 @@ class RamsesFusionApp:
                         txt_btn("IncrementalSaveButton", "Incr", "ramsaveincremental.png", "Save Incremental", self._H_WORK, 58),
                         txt_btn("CommentButton", "Note", "ramcomment.png", "Save with Note", self._H_WORK, 60),
                         txt_btn("RetrieveButton", "History", "ramretrieve.png", "Version History / Restore", self._H_WORK, 74),
-                        gap(),
+                        sep(),
                         # --- Review & Publish --------------------------------
                         txt_btn("PreviewButton", "Preview", "rampreview.png", "Create Preview", self._H_REVIEW, 80),
                         # Same film-strip ("media") icon the vertical layout
@@ -1591,7 +1607,7 @@ class RamsesFusionApp:
                             prominent=True,
                             tooltip="Renders the final master, archives the comp, and advances the shot status in the database.",
                         ),
-                        gap(),
+                        sep(),
                         # --- Status line (takes all remaining width) ---------
                         # The Settings group and the user/version footer are
                         # dropped from the slim bar: Settings is reached by
