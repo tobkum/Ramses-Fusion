@@ -599,12 +599,14 @@ class RamsesFusionApp:
             pass
 
         # Slim horizontal bar: one compact line so the readout matches the
-        # button-row height (the vertical 3-line block towers over it).
+        # button-row height (the vertical 3-line block towers over it). The
+        # sequence prefix is dropped here - the shot number already identifies
+        # it, and every character counts against the fixed-width readout.
         if self._horizontal:
             dot = " <font color='#555'>·</font> "
             compact = (
                 f"<font color='#777'>{project_name.upper()}</font>{dot}"
-                f"{seq_prefix}<font color='#FFF'><b>{item_name}</b>{priority_suffix}</font>{dot}"
+                f"<font color='#FFF'><b>{item_name}</b>{priority_suffix}</font>{dot}"
                 f"<font>{step_name}{state_label}</font>"
             )
             if self._outdated_count > 0:
@@ -1444,7 +1446,7 @@ class RamsesFusionApp:
                                                 "Alignment": {"AlignVCenter": True},
                                                 "WordWrap": False,
                                                 "Weight": 1,
-                                                "MinimumSize": [240, 34],
+                                                "MinimumSize": [300, 34],
                                                 "StyleSheet": "QLabel { padding: 0 8px; }",
                                             }
                                         ),
@@ -1476,7 +1478,7 @@ class RamsesFusionApp:
                                         "Text": "",
                                         "Flat": True,
                                         "ToolTip": "Click to refresh",
-                                        "MinimumSize": [240, 34],
+                                        "MinimumSize": [300, 34],
                                         "StyleSheet": "QPushButton { background-color: transparent; border: none; } QPushButton:hover { background-color: rgba(255, 255, 255, 12); border: 1px solid #4a5562; border-radius: 4px; } QPushButton:pressed { background-color: rgba(0, 0, 0, 25); }",
                                     }
                                 ),
@@ -1484,50 +1486,47 @@ class RamsesFusionApp:
                         ),
                         sep(),
                         # --- Project & Scene ---------------------------------
-                        txt_btn("SwitchShotButton", "Switch", "ramshot.png", "Switch Shot", self._H_SCENE, 78),
-                        txt_btn("SetupSceneButton", "Setup", "ramsetupscene.png", "Sync Project Settings", self._H_SCENE, 72),
-                        txt_btn("RamsesButton", "Ramses", "ramses.png", "Open Ramses Client", self._H_SCENE, 82),
+                        txt_btn("SwitchShotButton", "Switch", "ramshot.png", "Switch Shot", self._H_SCENE, 74),
+                        txt_btn("SetupSceneButton", "Setup", "ramsetupscene.png", "Sync Project Settings", self._H_SCENE, 68),
+                        txt_btn("RamsesButton", "Ramses", "ramses.png", "Open Ramses Client", self._H_SCENE, 78),
                         sep(),
                         # --- Assets & Tools ----------------------------------
-                        txt_btn("ImportButton", "Import", "ramimport.png", "Import Published", self._H_ASSET, 78),
-                        txt_btn("ReplaceButton", "Replace", "ramreplace.png", "Replace Loader", self._H_ASSET, 84),
-                        txt_btn("TemplateButton", "Template", "ramtemplate.png", "Save as Template", self._H_ASSET, 92),
+                        txt_btn("ImportButton", "Import", "ramimport.png", "Import Published", self._H_ASSET, 74),
+                        txt_btn("ReplaceButton", "Replace", "ramreplace.png", "Replace Loader", self._H_ASSET, 80),
+                        txt_btn("TemplateButton", "Template", "ramtemplate.png", "Save as Template", self._H_ASSET, 86),
                         sep(),
                         # --- Saving & Iteration ------------------------------
-                        txt_btn("SaveButton", "Save", "ramsave.png", "Save", self._H_WORK, 66),
-                        txt_btn("SaveAsButton", "Save As", "ramsave.png", "Save As / Create...", self._H_WORK, 82),
-                        txt_btn("IncrementalSaveButton", "Incr", "ramsaveincremental.png", "Save Incremental", self._H_WORK, 62),
-                        txt_btn("CommentButton", "Note", "ramcomment.png", "Save with Note", self._H_WORK, 64),
-                        txt_btn("RetrieveButton", "History", "ramretrieve.png", "Version History / Restore", self._H_WORK, 80),
+                        txt_btn("SaveButton", "Save", "ramsave.png", "Save", self._H_WORK, 62),
+                        txt_btn("SaveAsButton", "Save As", "ramsave.png", "Save As / Create...", self._H_WORK, 78),
+                        txt_btn("IncrementalSaveButton", "Incr", "ramsaveincremental.png", "Save Incremental", self._H_WORK, 58),
+                        txt_btn("CommentButton", "Note", "ramcomment.png", "Save with Note", self._H_WORK, 60),
+                        txt_btn("RetrieveButton", "History", "ramretrieve.png", "Version History / Restore", self._H_WORK, 74),
                         sep(),
                         # --- Review & Publish --------------------------------
-                        txt_btn("PreviewButton", "Preview", "rampreview.png", "Create Preview", self._H_REVIEW, 84),
+                        txt_btn("PreviewButton", "Preview", "rampreview.png", "Create Preview", self._H_REVIEW, 80),
                         icon_btn("OpenPreviewButton", "ramopen.png", "Open Preview in media player", self._H_REVIEW),
-                        txt_btn("UpdateStatusButton", "Publish", "ramstatus.png", "Renders the final master, archives the comp, and advances the shot status in the database.", self._H_PUBLISH, 94),
+                        txt_btn("UpdateStatusButton", "Publish", "ramstatus.png", "Renders the final master, archives the comp, and advances the shot status in the database.", self._H_PUBLISH, 90),
                         sep(),
                         # --- Settings & Info (icon-only: secondary) ----------
                         icon_btn("PubSettingsButton", "rampublishsettings.png", "Step Configuration", self._H_SETTINGS),
                         icon_btn("CheckUpdateButton", "ramupdate.png", "Check for Update...", self._H_SETTINGS),
                         icon_btn("SettingsButton", "ramsettings.png", "Plugin Settings", self._H_SETTINGS),
                         icon_btn("AboutButton", "overmind.png", "About", self._H_SETTINGS),
-                        # --- Status line (stretches) + version ---------------
+                        # --- Status line (takes all remaining width) ---------
+                        # The user/version footer is dropped in the slim bar -
+                        # it is minor and the space is better spent on action
+                        # feedback. refresh_header guards its widget lookups, so
+                        # RamsesVersion simply being absent here is fine; it
+                        # still shows in the vertical layout and in About.
                         self.ui.HGap(8),
                         self.ui.Label(
                             {
                                 "ID": "StatusLine",
                                 "Text": "",
                                 "Weight": 1,
-                                "Alignment": {"AlignVCenter": True},
-                                "StyleSheet": "QLabel { color: #7fbf8b; font-size: 11px; padding: 0 6px; }",
-                            }
-                        ),
-                        self.ui.Label(
-                            {
-                                "ID": "RamsesVersion",
-                                "Text": self._get_footer_text(),
-                                "Weight": 0,
-                                "Alignment": {"AlignVCenter": True},
-                                "StyleSheet": "QLabel { color: #666; font-size: 10px; padding: 0 6px; }",
+                                "Alignment": {"AlignVCenter": True, "AlignRight": True},
+                                "MinimumSize": [90, 34],
+                                "StyleSheet": "QLabel { color: #7fbf8b; font-size: 11px; padding: 0 8px; }",
                             }
                         ),
                         self.ui.HGap(2),
