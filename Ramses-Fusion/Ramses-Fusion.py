@@ -1607,7 +1607,9 @@ class RamsesFusionApp:
                             prominent=True,
                             tooltip="Renders the final master, archives the comp, and advances the shot status in the database.",
                         ),
-                        sep(),
+                        # No divider before the status line - it is already set
+                        # apart by its stretch, and a trailing divider dangles
+                        # when there is no message.
                         # --- Status line (takes all remaining width) ---------
                         # The Settings group and the user/version footer are
                         # dropped from the slim bar: Settings is reached by
