@@ -1002,5 +1002,79 @@ class TestFusionFileFormats(unittest.TestCase):
             self.assertEqual(self.host.fusionFileFormats(), {".comp"})
 
 
+class TestPanelLayout(unittest.TestCase):
+    """The vertical and horizontal panel layouts must expose the same widget
+    IDs. Every event binding and the enable/disable logic address widgets by
+    ID, so if one layout drops a widget, that action silently stops working in
+    that layout only - exactly the kind of regression to catch as the
+    horizontal bar iterates."""
+
+    # Every ID wired to a handler in _bind_main_events, minus the collapsible
+    # section headers, which are vertical-only by design.
+    HANDLER_IDS = frozenset({
+        "ContextButton", "RamsesButton", "SwitchShotButton", "ImportButton",
+        "ReplaceButton", "SaveButton", "SaveAsButton", "CommentButton",
+        "IncrementalSaveButton", "UpdateStatusButton", "PreviewButton",
+        "OpenPreviewButton", "TemplateButton", "SetupSceneButton",
+        "RetrieveButton", "PubSettingsButton", "CheckUpdateButton",
+        "SettingsButton", "AboutButton",
+    })
+
+    def setUp(self):
+        self.mock_fusion = MockFusion()
+        ram_fusion_mod.fusion = self.mock_fusion
+        ram_fusion_mod.fu = self.mock_fusion
+        ram_fusion_mod.bmd = sys.modules["bmd"]
+        import fusion_host
+        fusion_host.bmd = sys.modules["bmd"]
+        self.app = RamsesFusionApp()
+
+    def _collect_ids(self, build):
+        """Runs a layout builder and returns the set of widget IDs it declares.
+
+        Button/Label are patched to record each ``ID`` without needing a real
+        Fusion tree; the header/footer/icon helpers are stubbed so the build
+        never reaches the daemon or the filesystem.
+        """
+        ids = []
+
+        def rec(attrs):
+            if isinstance(attrs, dict) and attrs.get("ID"):
+                ids.append(attrs["ID"])
+            return MagicMock()
+
+        with patch.object(self.app.ui, "Button", side_effect=rec), \
+             patch.object(self.app.ui, "Label", side_effect=rec), \
+             patch.object(self.app, "_get_context_text", return_value=""), \
+             patch.object(self.app, "_get_footer_text", return_value=""), \
+             patch.object(self.app, "_get_icon", return_value=None):
+            build()
+        return set(ids)
+
+    def test_vertical_has_every_handler_widget(self):
+        missing = self.HANDLER_IDS - self._collect_ids(
+            self.app._build_vertical_content
+        )
+        self.assertFalse(missing, f"vertical layout missing widgets: {missing}")
+
+    def test_horizontal_has_every_handler_widget(self):
+        missing = self.HANDLER_IDS - self._collect_ids(
+            self.app._build_horizontal_content
+        )
+        self.assertFalse(missing, f"horizontal layout missing widgets: {missing}")
+
+    def test_layouts_expose_the_same_action_widgets(self):
+        v = self._collect_ids(self.app._build_vertical_content) & self.HANDLER_IDS
+        h = self._collect_ids(self.app._build_horizontal_content) & self.HANDLER_IDS
+        self.assertEqual(v, h)
+
+    def test_default_layout_is_vertical(self):
+        self.app.settings.userSettings.pop("panelLayout", None)
+        self.assertEqual(
+            self.app.settings.userSettings.get("panelLayout", "vertical"),
+            "vertical",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -190,6 +190,10 @@ class RamsesFusionApp:
         # UI State
         self._section_states = {}  # {content_id: is_collapsed}
         self._outdated_count = 0
+        # Set true by the settings dialog when the panel layout changes, so
+        # show_main_window's loop tears the window down and rebuilds it in the
+        # new layout without the user reopening the panel.
+        self._relaunch_layout = False
 
         # PySide Initialization
         self.qt_app = None
@@ -1157,19 +1161,59 @@ class RamsesFusionApp:
             existing.Raise()
             return
 
+        # Rebuild loop: changing the panel layout in Settings sets
+        # _relaunch_layout, which tears the window down and rebuilds it in the
+        # chosen layout in place - no manual reopen needed.
+        while True:
+            self._relaunch_layout = False
+            self._run_main_window()
+            if not self._relaunch_layout:
+                break
+
+    def _run_main_window(self) -> None:
+        """Builds, shows, and runs the main panel for one layout lifetime.
+
+        The layout (tall vertical stack vs. slim horizontal bar) comes from the
+        persisted ``panelLayout`` user setting. Both layouts reuse the same
+        widget IDs, so the event bindings, header refresh, status line, and
+        button enable/disable logic are all layout-agnostic.
+        """
+        horizontal = (
+            self.settings.userSettings.get("panelLayout", "vertical") == "horizontal"
+        )
+        geometry = [200, 200, 1120, 96] if horizontal else [200, 200, 212, 825]
+        content = (
+            self._build_horizontal_content()
+            if horizontal
+            else self._build_vertical_content()
+        )
+
         self.dlg = self.disp.AddWindow(
             {
                 "WindowTitle": "Ramses-Fusion",
                 "ID": "RamsesFusionMainWin",
-                "Geometry": [200, 200, 212, 825],
+                "Geometry": geometry,
             },
-            [
-                # Single top-level VGroup: the previous outer VGroup + HGroup
-                # (which existed only to add the 2px frame gaps) each added
-                # their own baseline layout margin on top of the gaps. Folding
-                # everything into one group removes two more layers of that
-                # additive inset; the 2px frame is kept via the VGaps below.
-                self.ui.VGroup(
+            [content],
+        )
+
+        self._bind_main_events(horizontal)
+
+        self.refresh_header()
+        self.dlg.Show()
+        self.resize_to_fit()  # Force initial sizing to show footer
+        self.disp.RunLoop()
+        self.dlg.Hide()
+        self.dlg = None  # Cleanup reference after exit
+
+    def _build_vertical_content(self):
+        """Builds the classic tall vertical stack (single top-level VGroup)."""
+        # Single top-level VGroup: the previous outer VGroup + HGroup (which
+        # existed only to add the 2px frame gaps) each added their own baseline
+        # layout margin on top of the gaps. Folding everything into one group
+        # removes two more layers of that additive inset; the 2px frame is kept
+        # via the VGaps below.
+        return self.ui.VGroup(
                     {"Spacing": 4, "Weight": 1},
                     [
                         self.ui.VGap(2),
@@ -1286,9 +1330,179 @@ class RamsesFusionApp:
                         self.ui.VGap(2),
                     ],
                 )
+
+    # Section accent colours, shared with the vertical layout's group headers
+    # so the horizontal bar keeps the same visual grouping.
+    _H_SCENE = "#2c4468"   # Project & Scene (blue)
+    _H_ASSET = "#463063"   # Assets & Tools (purple)
+    _H_WORK = "#2b5a4c"    # Saving & Iteration (teal)
+    _H_REVIEW = "#2f5a32"  # Review & Publish (green)
+    _H_PUBLISH = "#6e4a12"  # Update / Publish (amber - the transactional action)
+    _H_SETTINGS = "#333333"  # Settings & Info (grey)
+
+    def _build_horizontal_content(self):
+        """Builds the slim horizontal toolbar: one action row, no headers.
+
+        Reuses every widget ID from the vertical layout so all bindings, the
+        header refresh, and the status line work unchanged. To fit a single
+        slim row, the action buttons are icon-only with their names in
+        tooltips, tinted by their section colour for grouping; only
+        Update / Publish keeps a text label, as the primary action. The
+        context readout (left) and the status line (right, stretching) reuse
+        the same IDs the vertical header does.
+
+        This is the first iteration - labels-when-wide and an overflow menu
+        for narrow docks are follow-ups.
+        """
+
+        def icon_btn(id_name, icon, tooltip, accent):
+            return self.create_button(
+                id_name,
+                "",
+                icon,
+                accent_color=accent,
+                weight=0,
+                min_size=[32, 32],
+                max_size=[32, 32],
+                icon_only=True,
+                tooltip=tooltip,
+            )
+
+        return self.ui.VGroup(
+            {"Spacing": 0, "Weight": 1},
+            [
+                self.ui.VGap(2),
+                self.ui.HGroup(
+                    {"Weight": 0, "Spacing": 3},
+                    [
+                        self.ui.HGap(2),
+                        # --- Context readout (clickable, refreshes) ----------
+                        self.ui.Stack(
+                            {"Weight": 0},
+                            [
+                                self.ui.HGroup(
+                                    {
+                                        "ID": "ContextFrame",
+                                        "Weight": 0,
+                                        "StyleSheet": "QFrame { border: 1px solid #3a4048; background-color: #1e2228; border-radius: 4px; }",
+                                    },
+                                    [
+                                        self.ui.Label(
+                                            {
+                                                "ID": "ContextLabel",
+                                                "Text": self._get_context_text(),
+                                                "Alignment": {"AlignVCenter": True},
+                                                "WordWrap": False,
+                                                "Weight": 1,
+                                                "MinimumSize": [196, 66],
+                                                "StyleSheet": "QLabel { padding: 0 8px; }",
+                                            }
+                                        ),
+                                    ],
+                                ),
+                                self.ui.VGroup(
+                                    {"Spacing": 0},
+                                    [
+                                        self.ui.HGroup(
+                                            {"Weight": 0, "Spacing": 0},
+                                            [
+                                                self.ui.HGap(0, 1),
+                                                self.ui.Label(
+                                                    {
+                                                        "ID": "RefreshIcon",
+                                                        "Text": "↻",
+                                                        "Weight": 0,
+                                                        "StyleSheet": "QLabel { color: #9aa3ad; font-size: 12px; font-weight: bold; border: 1px solid #3a4048; border-radius: 3px; background-color: #23272d; padding: 0 3px; margin: 3px 3px 0 0; }",
+                                                    }
+                                                ),
+                                            ],
+                                        ),
+                                        self.ui.VGap(0, 1),
+                                    ],
+                                ),
+                                self.ui.Button(
+                                    {
+                                        "ID": "ContextButton",
+                                        "Text": "",
+                                        "Flat": True,
+                                        "ToolTip": "Click to refresh",
+                                        "MinimumSize": [196, 66],
+                                        "StyleSheet": "QPushButton { background-color: transparent; border: none; } QPushButton:hover { background-color: rgba(255, 255, 255, 12); border: 1px solid #4a5562; border-radius: 4px; } QPushButton:pressed { background-color: rgba(0, 0, 0, 25); }",
+                                    }
+                                ),
+                            ],
+                        ),
+                        self.ui.HGap(8),
+                        # --- Project & Scene ---------------------------------
+                        icon_btn("SwitchShotButton", "ramshot.png", "Switch Shot", self._H_SCENE),
+                        icon_btn("SetupSceneButton", "ramsetupscene.png", "Sync Project Settings", self._H_SCENE),
+                        icon_btn("RamsesButton", "ramses.png", "Open Ramses Client", self._H_SCENE),
+                        self.ui.HGap(8),
+                        # --- Assets & Tools ----------------------------------
+                        icon_btn("ImportButton", "ramimport.png", "Import Published", self._H_ASSET),
+                        icon_btn("ReplaceButton", "ramreplace.png", "Replace Loader", self._H_ASSET),
+                        icon_btn("TemplateButton", "ramtemplate.png", "Save as Template", self._H_ASSET),
+                        self.ui.HGap(8),
+                        # --- Saving & Iteration ------------------------------
+                        icon_btn("SaveButton", "ramsave.png", "Save", self._H_WORK),
+                        icon_btn("SaveAsButton", "ramsave.png", "Save As / Create...", self._H_WORK),
+                        icon_btn("IncrementalSaveButton", "ramsaveincremental.png", "Save Incremental", self._H_WORK),
+                        icon_btn("CommentButton", "ramcomment.png", "Save with Note", self._H_WORK),
+                        icon_btn("RetrieveButton", "ramretrieve.png", "Version History / Restore", self._H_WORK),
+                        self.ui.HGap(8),
+                        # --- Review & Publish --------------------------------
+                        icon_btn("PreviewButton", "rampreview.png", "Create Preview", self._H_REVIEW),
+                        icon_btn("OpenPreviewButton", "ramshot.png", "Open Preview in media player", self._H_REVIEW),
+                        self.create_button(
+                            "UpdateStatusButton",
+                            "Publish",
+                            "ramstatus.png",
+                            accent_color=self._H_PUBLISH,
+                            weight=0,
+                            min_size=[92, 32],
+                            max_size=[124, 32],
+                            tooltip="Renders the final master, archives the comp, and advances the shot status in the database.",
+                        ),
+                        self.ui.HGap(8),
+                        # --- Settings & Info ---------------------------------
+                        icon_btn("PubSettingsButton", "rampublishsettings.png", "Step Configuration", self._H_SETTINGS),
+                        icon_btn("CheckUpdateButton", "ramupdate.png", "Check for Update...", self._H_SETTINGS),
+                        icon_btn("SettingsButton", "ramsettings.png", "Plugin Settings", self._H_SETTINGS),
+                        icon_btn("AboutButton", "ramses.png", "About", self._H_SETTINGS),
+                        # --- Status line (stretches) + version ---------------
+                        self.ui.HGap(8),
+                        self.ui.Label(
+                            {
+                                "ID": "StatusLine",
+                                "Text": "",
+                                "Weight": 1,
+                                "Alignment": {"AlignVCenter": True},
+                                "StyleSheet": "QLabel { color: #7fbf8b; font-size: 11px; padding: 0 6px; }",
+                            }
+                        ),
+                        self.ui.Label(
+                            {
+                                "ID": "RamsesVersion",
+                                "Text": self._get_footer_text(),
+                                "Weight": 0,
+                                "Alignment": {"AlignVCenter": True},
+                                "StyleSheet": "QLabel { color: #666; font-size: 10px; padding: 0 6px; }",
+                            }
+                        ),
+                        self.ui.HGap(2),
+                    ],
+                ),
+                self.ui.VGap(2),
             ],
         )
 
+    def _bind_main_events(self, horizontal: bool) -> None:
+        """Wires every button and window event.
+
+        Widget IDs are identical across both layouts, so this runs unchanged
+        for either. The collapsible section toggles exist only in the vertical
+        layout and are skipped when ``horizontal`` is True.
+        """
         # Bind Events
         self.dlg.On.ContextButton.Clicked = lambda ev: self.refresh_header(
             force_full=True
@@ -1312,6 +1526,11 @@ class RamsesFusionApp:
         self.dlg.On.SettingsButton.Clicked = self.show_settings_window
         self.dlg.On.AboutButton.Clicked = self.show_about_window
         self.dlg.On.RamsesFusionMainWin.Close = self.on_close
+
+        # Collapsible sections exist only in the vertical layout; the slim
+        # horizontal bar lays every action out in one row with no headers.
+        if horizontal:
+            return
 
         # Section Button Mapping
         section_map = {
@@ -1370,13 +1589,6 @@ class RamsesFusionApp:
         bind_toggle("WorkingHeader", "WorkingContent", "SAVING && ITERATION")
         bind_toggle("PublishHeader", "PublishContent", "REVIEW && PUBLISH")
         bind_toggle("SettingsHeader", "SettingsContent", "SETTINGS && INFO")
-
-        self.refresh_header()
-        self.dlg.Show()
-        self.resize_to_fit()  # Force initial sizing to show footer
-        self.disp.RunLoop()
-        self.dlg.Hide()
-        self.dlg = None  # Cleanup reference after exit
 
     def _create_section_header(self, id_name: str, title: str, content_id: str) -> Any:
         """Creates a clickable section header that toggles a content group.
@@ -1729,7 +1941,7 @@ class RamsesFusionApp:
             {
                 "WindowTitle": "Ramses Settings",
                 "ID": win_id,
-                "Geometry": [200, 200, 550, 150],
+                "Geometry": [200, 200, 550, 185],
             },
             [
                 self.ui.VGroup(
@@ -1782,6 +1994,16 @@ class RamsesFusionApp:
                             ]
                         ),
                         self.ui.HGroup(
+                            [
+                                self.ui.Label(
+                                    {"Text": "Panel layout:", "Weight": 1}
+                                ),
+                                self.ui.ComboBox(
+                                    {"ID": "LayoutCombo", "Weight": 2}
+                                ),
+                            ]
+                        ),
+                        self.ui.HGroup(
                             {"Weight": 0},
                             [
                                 self.ui.HGap(0, 1),
@@ -1810,6 +2032,19 @@ class RamsesFusionApp:
 
         itm = dlg.GetItems()
 
+        # Populate the panel-layout selector. Index order is fixed so save
+        # reads it back reliably; the stored value is a stable string, not the
+        # index, so reordering the list later can't corrupt a saved preference.
+        _LAYOUT_ORDER = ["vertical", "horizontal"]
+        layout_combo = itm["LayoutCombo"]
+        layout_combo.AddItem("Vertical (stacked panel)")
+        layout_combo.AddItem("Horizontal (slim toolbar)")
+        current_layout = self.settings.userSettings.get("panelLayout", "vertical")
+        try:
+            layout_combo.CurrentIndex = _LAYOUT_ORDER.index(current_layout)
+        except ValueError:
+            layout_combo.CurrentIndex = 0
+
         def save_settings(ev):
             try:
                 self.settings.ramsesClientPort = int(itm["RamsesPortTxt"].Text)
@@ -1822,7 +2057,15 @@ class RamsesFusionApp:
                 )
             except ValueError:
                 self.settings.userSettings["compStartFrame"] = 1001
+            # Panel layout: persist, and flag a live rebuild if it changed so
+            # the panel flips without the user reopening it.
+            old_layout = self.settings.userSettings.get("panelLayout", "vertical")
+            idx = int(itm["LayoutCombo"].CurrentIndex)
+            new_layout = _LAYOUT_ORDER[idx] if 0 <= idx < len(_LAYOUT_ORDER) else "vertical"
+            self.settings.userSettings["panelLayout"] = new_layout
             self.settings.save()
+            if new_layout != old_layout and self.dlg:
+                self._relaunch_layout = True
             self.log("Settings Saved.", ram.LogLevel.Info)
 
         def close_settings(ev):
@@ -1842,6 +2085,13 @@ class RamsesFusionApp:
         finally:
             dlg.Hide()
             self.dlg.Enabled = True
+
+        # If the layout changed, break the main window's event loop so
+        # _run_main_window returns and the rebuild loop reopens it in the new
+        # layout. The settings dialog's own loop has already exited by here, so
+        # this ExitLoop targets the main window loop.
+        if self._relaunch_layout:
+            self.disp.ExitLoop()
 
     def show_about_window(self, ev) -> None:
         """Opens the About dialog with plugin version and credits.
