@@ -756,15 +756,43 @@ class FusionHost(RamHost):
 
         return ext, is_sequence
 
-    def _calculate_padding_str(self) -> str:
-        """Calculates the sequence padding string (zeroes) based on the shot range."""
-        start = RAM_SETTINGS.userSettings.get("compStartFrame", 1001)
+    def _usesSourceNumbering(self, preset_name: str) -> bool:
+        """Whether a render preset numbers its frames like the source plate."""
+        if not preset_name:
+            return False
+        try:
+            fusion_cfg = self._get_fusion_settings(self.currentStep())
+            preset_cfg = fusion_cfg.get(preset_name, {}) or {}
+            return bool(preset_cfg.get("source_numbering"))
+        except Exception:
+            return False
+
+    def _calculate_padding_str(self, preset_name: str = None) -> str:
+        """Calculates the sequence padding string (zeroes) for rendered files.
+
+        When the preset renders with source numbering, the padding matches the
+        source plate's own frame-token width, so a delivery lines up with the
+        plate it came from (``plate.00000567.exr`` -> ``render.00000567.exr``)
+        instead of falling back to the comp's own range. Without source
+        numbering — or when no plate numbering can be resolved — the padding is
+        derived from the comp's frame range as before.
+        """
         item = self.currentItem()
         frames = 0
         if item:
             settings = self.collectItemSettings(item)
             frames = settings.get("frames", 0)
 
+        if self._usesSourceNumbering(preset_name):
+            source = self._resolveSourceFrameInfo()
+            if source:
+                source_start, width = source
+                # Guard a plate padded too narrowly for the frames actually
+                # written (e.g. a 3-digit plate rendered past frame 999).
+                source_end = source_start + max(0, frames - 1)
+                return "0" * max(width, len(str(source_end)))
+
+        start = RAM_SETTINGS.userSettings.get("compStartFrame", 1001)
         end = start + max(0, frames - 1)
         padding = max(4, len(str(end)))
         return "0" * padding
@@ -816,7 +844,7 @@ class FusionHost(RamHost):
                 base_filename = preview_info.fileName().rstrip(".")
 
             if is_sequence:
-                padding_str = self._calculate_padding_str()
+                padding_str = self._calculate_padding_str("preview")
                 # Fusion sequence format: name.0000.ext
                 filename = f"{base_filename}.{padding_str}.{ext}"
                 # Sequence subfolder logic
@@ -909,7 +937,7 @@ class FusionHost(RamHost):
 
             # 2. Handle Sequence Logic
             if is_sequence:
-                padding_str = self._calculate_padding_str()
+                padding_str = self._calculate_padding_str("final")
                 # Fusion sequence format: name.0000.ext
                 filename = f"{base_filename}.{padding_str}.{ext}"
                 # Sequence subfolder
@@ -924,6 +952,23 @@ class FusionHost(RamHost):
             return ""
 
     @staticmethod
+    def parse_frame_token(path):
+        """Extracts the trailing frame token from a sequence file path.
+
+        Same matching rules as :meth:`parse_frame_number`, but also reports
+        how many digits the token is written with, so renders can be padded
+        like their source plate.
+
+        Returns:
+            tuple or None: ``(frame number, digit width)``, e.g.
+            ``("plate.00000567.exr")`` -> ``(567, 8)``. None if the name
+            carries no frame token.
+        """
+        name = os.path.basename(str(path or ""))
+        m = _FRAME_TOKEN_RE.search(name)
+        return (int(m.group(1)), len(m.group(1))) if m else None
+
+    @staticmethod
     def parse_frame_number(path):
         """Extracts the trailing frame number from a sequence file path.
 
@@ -934,15 +979,15 @@ class FusionHost(RamHost):
         Returns:
             int or None: The frame number, or None if the name carries none.
         """
-        name = os.path.basename(str(path or ""))
-        m = _FRAME_TOKEN_RE.search(name)
-        return int(m.group(1)) if m else None
+        token = FusionHost.parse_frame_token(path)
+        return token[0] if token else None
 
-    def resolveSourceStartFrame(self):
-        """Resolves the first frame number of the shot's source plate.
+    def _resolveSourceFrameInfo(self):
+        """Resolves the shot's source plate numbering: start frame and padding.
 
-        Used to number rendered files like the delivered plate while the comp
-        timeline keeps the studio start-frame convention.
+        Both halves come from the same scan so a render can be numbered *and*
+        padded like the delivered plate (``plate.00000567.exr`` ->
+        ``render.00000567.exr``).
 
         Priority:
         1. Plate Loaders in the comp (Clip path inside a plate step's
@@ -953,7 +998,10 @@ class FusionHost(RamHost):
         ``plateStepNames`` user setting (shared with Ramses-Syntheyes).
 
         Returns:
-            int or None: The plate's first frame number, or None if unknown.
+            tuple or None: ``(first frame number, frame-token digit width)``,
+            or None if no plate numbering was found. The width is the widest
+            token seen, so a sequence numbered without padding (``.99.``,
+            ``.100.``) still yields a width that holds every frame.
         """
         plate_names = {
             str(n).lower()
@@ -962,8 +1010,11 @@ class FusionHost(RamHost):
             )
         }
 
+        def _info(tokens):
+            return (min(f for f, _ in tokens), max(w for _, w in tokens))
+
         # 1) Plate Loaders in the comp
-        frames = []
+        tokens = []
         if self.comp:
             try:
                 loaders = self.comp.GetToolList(False, "Loader") or {}
@@ -974,19 +1025,19 @@ class FusionHost(RamHost):
                         continue
                     if "/_published/" not in path:
                         continue
-                    frame = self.parse_frame_number(path)
-                    if frame is None:
+                    token = self.parse_frame_token(path)
+                    if token is None:
                         continue
                     step = RamStep.fromPath(path)
                     if step and str(step.shortName()).lower() in plate_names:
-                        frames.append(frame)
+                        tokens.append(token)
             except Exception as e:
                 self.log(
                     f"Loader scan for source numbering failed: {e}",
                     LogLevel.Debug,
                 )
-        if frames:
-            return min(frames)
+        if tokens:
+            return _info(tokens)
 
         # 2) Latest published plate version on disk
         item = self.currentItem()
@@ -1008,17 +1059,40 @@ class FusionHost(RamHost):
                     files = item.latestPublishedVersionFilePaths(step=step)
             except Exception:
                 continue
-            frames = []
+            tokens = []
             for f in files:
                 # Skip sidecars (.ramses_complete, _ramses_data.json, ...)
                 if os.path.splitext(f)[1].lower() not in _FOOTAGE_SEQ_EXTENSIONS:
                     continue
-                frame = self.parse_frame_number(f)
-                if frame is not None:
-                    frames.append(frame)
-            if frames:
-                return min(frames)
+                token = self.parse_frame_token(f)
+                if token is not None:
+                    tokens.append(token)
+            if tokens:
+                return _info(tokens)
         return None
+
+    def resolveSourceStartFrame(self):
+        """Resolves the first frame number of the shot's source plate.
+
+        Used to number rendered files like the delivered plate while the comp
+        timeline keeps the studio start-frame convention.
+
+        Returns:
+            int or None: The plate's first frame number, or None if unknown.
+        """
+        info = self._resolveSourceFrameInfo()
+        return info[0] if info else None
+
+    def resolveSourcePadding(self):
+        """Resolves how many digits the source plate numbers its frames with.
+
+        Used to pad rendered files like the delivered plate.
+
+        Returns:
+            int or None: The frame-token digit width, or None if unknown.
+        """
+        info = self._resolveSourceFrameInfo()
+        return info[1] if info else None
 
     def _saveAs(
         self,
