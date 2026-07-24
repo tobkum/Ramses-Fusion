@@ -1082,9 +1082,21 @@ class TestFusionCompImport(unittest.TestCase):
         self.host._open = MagicMock(return_value=True)
         self.host.log = MagicMock()
         self.host.app = MagicMock()
-        self.host.app._resolve_shot_path.return_value = ("D:/test.comp", False)
-        
-        res = self.host._createNewComp(MagicMock(), MagicMock())
+        # Must be a realistic step-folder path. "D:/test.comp" has a DRIVE ROOT
+        # as its parent, which ensureCompFolders now refuses - the test would
+        # pass without ever reaching Save. It also used to create real
+        # D:\_versions and D:\_published directories on the developer's disk.
+        self.host.app._resolve_shot_path.return_value = (
+            "D:/proj/05-SHOTS/TEST_S_SH010/TEST_S_SH010_COMP/TEST_S_SH010_COMP.comp",
+            False,
+        )
+
+        # Never touch the real filesystem from a unit test.
+        with patch.object(fusion_host.os, "makedirs") as mock_makedirs:
+            res = self.host._createNewComp(MagicMock(), MagicMock())
+
+        self.assertTrue(mock_makedirs.called, "folder creation must be reached")
+        comp.Save.assert_called()  # the failure under test actually happened
         self.assertEqual(res, "")
         self.host.log.assert_called_with(ANY, LogLevel.Critical)
 
