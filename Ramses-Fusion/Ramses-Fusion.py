@@ -2193,9 +2193,12 @@ class RamsesFusionApp:
                     # Create new logic
                     host.fusion.NewComp()
                     selected_path = host.normalizePath(selected_path)
-                    os.makedirs(os.path.dirname(selected_path), exist_ok=True)
-                    os.makedirs(os.path.join(os.path.dirname(selected_path), "_versions"), exist_ok=True)
-                    os.makedirs(os.path.join(os.path.dirname(selected_path), "_published"), exist_ok=True)
+                    if not host.ensureCompFolders(selected_path):
+                        self._set_status(
+                            f"Could not resolve a folder for {shot.shortName()}.",
+                            "error",
+                        )
+                        return
 
                     if host.comp.Save(selected_path):
                         host._store_ramses_metadata(shot, selected_step)

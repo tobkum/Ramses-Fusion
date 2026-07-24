@@ -1908,6 +1908,53 @@ class FusionHost(RamHost):
         path = self.fusion.RequestFile()
         return {"filePath": path} if path else {}
 
+    def ensureCompFolders(self, compPath: str) -> bool:
+        """Creates a composition's step folder plus its ``_versions`` and
+        ``_published`` siblings.
+
+        Refuses to create anything when the composition path's parent is empty
+        or is a drive root. That only happens when the path was built from an
+        unresolved folder — ``os.path.join`` silently drops its left operand if
+        the file name is absolute, and ``os.path.abspath`` then resolves the
+        remainder against the current working directory. The result is
+        ``_versions``/``_published`` created at a drive root (e.g.
+        ``D:\\_published``) instead of inside the project.
+
+        The offending values are logged rather than swallowed, so an
+        unresolvable path surfaces as a message instead of stray folders.
+
+        Returns:
+            bool: True when the folders exist (or were created), False when the
+            path was rejected as unresolvable.
+        """
+        raw = str(compPath or "")
+        # Check the raw path first: normalizePath() ends in os.path.abspath(),
+        # which resolves a dirless name against the current working directory
+        # and would hide the fact that no folder was ever resolved.
+        parent = os.path.dirname(self.normalizePath(raw)) if raw else ""
+        # A drive root is its own parent ("D:/" -> "D:/").
+        if (
+            not raw
+            or not os.path.dirname(raw)
+            or not parent
+            or parent == os.path.dirname(parent)
+        ):
+            self.log(
+                "Refusing to create pipeline folders outside the project: "
+                f"composition path {compPath!r} resolved to parent {parent!r}. "
+                "The step folder could not be resolved.",
+                LogLevel.Critical,
+            )
+            return False
+
+        for folder in (
+            parent,
+            os.path.join(parent, "_versions"),
+            os.path.join(parent, "_published"),
+        ):
+            os.makedirs(folder, exist_ok=True)
+        return True
+
     def _createNewComp(self, item: RamItem, step: RamStep) -> str:
         """Creates a new Fusion composition for item/step and saves it to the pipeline path.
 
@@ -1924,9 +1971,8 @@ class FusionHost(RamHost):
             return ""
         selected_path = self.normalizePath(expected_path)
 
-        os.makedirs(os.path.dirname(selected_path), exist_ok=True)
-        os.makedirs(os.path.join(os.path.dirname(selected_path), "_versions"), exist_ok=True)
-        os.makedirs(os.path.join(os.path.dirname(selected_path), "_published"), exist_ok=True)
+        if not self.ensureCompFolders(selected_path):
+            return ""
 
         use_template = None
         tpl_folder = step.templatesFolderPath()
