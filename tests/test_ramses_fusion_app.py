@@ -1037,21 +1037,26 @@ class TestFusionFileFormats(unittest.TestCase):
 
 
 class TestPanelLayout(unittest.TestCase):
-    """The vertical and horizontal panel layouts must expose the same widget
-    IDs. Every event binding and the enable/disable logic address widgets by
-    ID, so if one layout drops a widget, that action silently stops working in
-    that layout only - exactly the kind of regression to catch as the
-    horizontal bar iterates."""
+    """The panel layouts must expose exactly the widgets their bindings expect.
+    Every event binding and the enable/disable logic address widgets by ID, so
+    a layout missing a widget it binds - or, worse, the horizontal bar keeping
+    a Settings widget it no longer binds - is a silent regression to catch as
+    the bar iterates."""
 
-    # Every ID wired to a handler in _bind_main_events, minus the collapsible
-    # section headers, which are vertical-only by design.
-    HANDLER_IDS = frozenset({
+    # Widgets present in BOTH layouts (workflow actions + context + the layout
+    # toggle). Their handlers are bound unconditionally.
+    SHARED_IDS = frozenset({
         "ContextButton", "RamsesButton", "SwitchShotButton", "ImportButton",
         "ReplaceButton", "SaveButton", "SaveAsButton", "CommentButton",
         "IncrementalSaveButton", "UpdateStatusButton", "PreviewButton",
         "OpenPreviewButton", "TemplateButton", "SetupSceneButton",
-        "RetrieveButton", "PubSettingsButton", "CheckUpdateButton",
-        "SettingsButton", "AboutButton",
+        "RetrieveButton", "LayoutToggleButton",
+    })
+    # The Settings category lives only in the vertical layout; the slim bar
+    # drops it (reached by toggling back to vertical).
+    VERTICAL_ONLY_IDS = frozenset({
+        "PubSettingsButton", "CheckUpdateButton", "SettingsButton",
+        "AboutButton",
     })
 
     def setUp(self):
@@ -1085,22 +1090,45 @@ class TestPanelLayout(unittest.TestCase):
             build()
         return set(ids)
 
-    def test_vertical_has_every_handler_widget(self):
-        missing = self.HANDLER_IDS - self._collect_ids(
-            self.app._build_vertical_content
-        )
+    def test_vertical_has_shared_and_settings_widgets(self):
+        ids = self._collect_ids(self.app._build_vertical_content)
+        missing = (self.SHARED_IDS | self.VERTICAL_ONLY_IDS) - ids
         self.assertFalse(missing, f"vertical layout missing widgets: {missing}")
 
-    def test_horizontal_has_every_handler_widget(self):
-        missing = self.HANDLER_IDS - self._collect_ids(
+    def test_horizontal_has_shared_widgets(self):
+        missing = self.SHARED_IDS - self._collect_ids(
             self.app._build_horizontal_content
         )
         self.assertFalse(missing, f"horizontal layout missing widgets: {missing}")
 
-    def test_layouts_expose_the_same_action_widgets(self):
-        v = self._collect_ids(self.app._build_vertical_content) & self.HANDLER_IDS
-        h = self._collect_ids(self.app._build_horizontal_content) & self.HANDLER_IDS
-        self.assertEqual(v, h)
+    def test_horizontal_drops_the_settings_group(self):
+        """The slim bar must NOT keep the Settings widgets - they are no longer
+        bound there, so leaving them would be dead, unclickable buttons."""
+        ids = self._collect_ids(self.app._build_horizontal_content)
+        leftover = self.VERTICAL_ONLY_IDS & ids
+        self.assertFalse(leftover, f"horizontal bar still has Settings widgets: {leftover}")
+
+    def test_both_layouts_have_the_layout_toggle(self):
+        self.assertIn(
+            "LayoutToggleButton", self._collect_ids(self.app._build_vertical_content)
+        )
+        self.assertIn(
+            "LayoutToggleButton", self._collect_ids(self.app._build_horizontal_content)
+        )
+
+    def test_toggle_layout_flips_and_persists(self):
+        self.app.settings.userSettings["panelLayout"] = "vertical"
+        self.app.settings.save = MagicMock()
+        self.app.disp.ExitLoop = MagicMock()
+
+        self.app.on_toggle_layout()
+        self.assertEqual(self.app.settings.userSettings["panelLayout"], "horizontal")
+        self.assertTrue(self.app._relaunch_layout)
+        self.app.settings.save.assert_called()
+        self.app.disp.ExitLoop.assert_called()
+
+        self.app.on_toggle_layout()
+        self.assertEqual(self.app.settings.userSettings["panelLayout"], "vertical")
 
     def test_default_layout_is_vertical(self):
         self.app.settings.userSettings.pop("panelLayout", None)

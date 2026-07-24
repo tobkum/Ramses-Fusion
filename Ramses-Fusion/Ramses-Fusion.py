@@ -1228,6 +1228,21 @@ class RamsesFusionApp:
         self.dlg.Hide()
         self.dlg = None  # Cleanup reference after exit
 
+    def on_toggle_layout(self, ev: object = None) -> None:
+        """Flips the panel between vertical and horizontal in one click.
+
+        Writes the same persisted ``panelLayout`` setting the Plugin Settings
+        dropdown uses, then breaks the main event loop so show_main_window's
+        rebuild loop reopens the panel in the other layout.
+        """
+        current = self.settings.userSettings.get("panelLayout", "vertical")
+        self.settings.userSettings["panelLayout"] = (
+            "vertical" if current == "horizontal" else "horizontal"
+        )
+        self.settings.save()
+        self._relaunch_layout = True
+        self.disp.ExitLoop()
+
     def _build_vertical_content(self):
         """Builds the classic tall vertical stack (single top-level VGroup)."""
         # Single top-level VGroup: the previous outer VGroup + HGroup (which
@@ -1340,6 +1355,22 @@ class RamsesFusionApp:
                                         self._build_settings_group(),
                                         # Spacer to push everything up (Takes all remaining weight)
                                         self.ui.VGap(0, 1),
+                                        # One-click switch to the slim horizontal
+                                        # layout - the symmetric partner of the
+                                        # "▤ Vertical" button on the horizontal bar,
+                                        # so switching never needs the Settings
+                                        # dialog. Same LayoutToggleButton ID/handler.
+                                        self.ui.Button(
+                                            {
+                                                "ID": "LayoutToggleButton",
+                                                "Text": "▤  Horizontal Layout",
+                                                "Weight": 0,
+                                                "MinimumSize": [16, 24],
+                                                "MaximumSize": [2000, 24],
+                                                "ToolTip": "Switch to the slim horizontal toolbar layout.",
+                                                "StyleSheet": "QPushButton { text-align: center; border: 1px solid #3a4048; border-radius: 3px; background-color: #23272d; color: #9aa3ad; } QPushButton:hover { background-color: #2e353b; color: #d7dbe1; border-color: #4a5562; }",
+                                            }
+                                        ),
                                         # Footer Version
                                         self.ui.Label(
                                             {
@@ -1507,18 +1538,12 @@ class RamsesFusionApp:
                         icon_btn("OpenPreviewButton", "ramopen.png", "Open Preview in media player", self._H_REVIEW),
                         txt_btn("UpdateStatusButton", "Publish", "ramstatus.png", "Renders the final master, archives the comp, and advances the shot status in the database.", self._H_PUBLISH, 90),
                         sep(),
-                        # --- Settings & Info (icon-only: secondary) ----------
-                        icon_btn("PubSettingsButton", "rampublishsettings.png", "Step Configuration", self._H_SETTINGS),
-                        icon_btn("CheckUpdateButton", "ramupdate.png", "Check for Update...", self._H_SETTINGS),
-                        icon_btn("SettingsButton", "ramsettings.png", "Plugin Settings", self._H_SETTINGS),
-                        icon_btn("AboutButton", "overmind.png", "About", self._H_SETTINGS),
                         # --- Status line (takes all remaining width) ---------
-                        # The user/version footer is dropped in the slim bar -
-                        # it is minor and the space is better spent on action
-                        # feedback. refresh_header guards its widget lookups, so
-                        # RamsesVersion simply being absent here is fine; it
-                        # still shows in the vertical layout and in About.
-                        self.ui.HGap(8),
+                        # The Settings group and the user/version footer are
+                        # dropped from the slim bar: Settings is reached by
+                        # toggling back to vertical, and the footer is minor.
+                        # refresh_header guards the RamsesVersion lookup, so its
+                        # absence here is safe.
                         self.ui.Label(
                             {
                                 "ID": "StatusLine",
@@ -1527,6 +1552,21 @@ class RamsesFusionApp:
                                 "Alignment": {"AlignVCenter": True, "AlignRight": True},
                                 "MinimumSize": [90, 34],
                                 "StyleSheet": "QLabel { color: #7fbf8b; font-size: 11px; padding: 0 8px; }",
+                            }
+                        ),
+                        # --- Back to the vertical layout, one click ----------
+                        # Styled as an outlined "view mode" control, distinct
+                        # from the filled action buttons.
+                        self.ui.HGap(8),
+                        self.ui.Button(
+                            {
+                                "ID": "LayoutToggleButton",
+                                "Text": "▤  Vertical",
+                                "Weight": 0,
+                                "MinimumSize": [96, 32],
+                                "MaximumSize": [96, 32],
+                                "ToolTip": "Switch back to the vertical (stacked) panel layout.",
+                                "StyleSheet": "QPushButton { text-align: center; border: 1px solid #3a4048; border-radius: 3px; background-color: #23272d; color: #c5ccd2; } QPushButton:hover { background-color: #2e353b; border-color: #4a5562; } QPushButton:pressed { background-color: #1c2023; }",
                             }
                         ),
                         self.ui.HGap(2),
@@ -1561,16 +1601,20 @@ class RamsesFusionApp:
         self.dlg.On.TemplateButton.Clicked = self.on_save_template
         self.dlg.On.SetupSceneButton.Clicked = self.on_sync
         self.dlg.On.RetrieveButton.Clicked = self.on_retrieve
+        # Layout toggle exists in both layouts (one-click switch either way).
+        self.dlg.On.LayoutToggleButton.Clicked = self.on_toggle_layout
+        self.dlg.On.RamsesFusionMainWin.Close = self.on_close
+
+        # The Settings-category actions and the collapsible section headers
+        # exist only in the vertical layout. The slim horizontal bar drops the
+        # whole Settings group - it is reached by toggling back to vertical.
+        if horizontal:
+            return
+
         self.dlg.On.PubSettingsButton.Clicked = self.on_step_configuration
         self.dlg.On.CheckUpdateButton.Clicked = self.on_check_update
         self.dlg.On.SettingsButton.Clicked = self.show_settings_window
         self.dlg.On.AboutButton.Clicked = self.show_about_window
-        self.dlg.On.RamsesFusionMainWin.Close = self.on_close
-
-        # Collapsible sections exist only in the vertical layout; the slim
-        # horizontal bar lays every action out in one row with no headers.
-        if horizontal:
-            return
 
         # Section Button Mapping
         section_map = {
