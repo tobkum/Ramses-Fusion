@@ -1181,7 +1181,7 @@ class RamsesFusionApp:
         horizontal = (
             self.settings.userSettings.get("panelLayout", "vertical") == "horizontal"
         )
-        geometry = [200, 200, 1120, 96] if horizontal else [200, 200, 212, 825]
+        geometry = [200, 200, 1500, 92] if horizontal else [200, 200, 212, 825]
         content = (
             self._build_horizontal_content()
             if horizontal
@@ -1341,19 +1341,29 @@ class RamsesFusionApp:
     _H_SETTINGS = "#333333"  # Settings & Info (grey)
 
     def _build_horizontal_content(self):
-        """Builds the slim horizontal toolbar: one action row, no headers.
+        """Builds the slim horizontal toolbar: one labelled action row.
 
         Reuses every widget ID from the vertical layout so all bindings, the
-        header refresh, and the status line work unchanged. To fit a single
-        slim row, the action buttons are icon-only with their names in
-        tooltips, tinted by their section colour for grouping; only
-        Update / Publish keeps a text label, as the primary action. The
-        context readout (left) and the status line (right, stretching) reuse
-        the same IDs the vertical header does.
-
-        This is the first iteration - labels-when-wide and an overflow menu
-        for narrow docks are follow-ups.
+        header refresh, and the status line work unchanged. The workflow
+        actions carry a short label next to their icon (the colour tints alone
+        read poorly against Fusion's dark chrome, so thin separators do the
+        grouping); the secondary Settings actions and the small "open preview"
+        side button stay icon-only. Update / Publish is the one accented action.
+        The context readout (left) and the status line (right, stretching)
+        reuse the same IDs the vertical header does.
         """
+
+        def txt_btn(id_name, label, icon, tooltip, accent, width):
+            return self.create_button(
+                id_name,
+                label,
+                icon,
+                accent_color=accent,
+                weight=0,
+                min_size=[width, 32],
+                max_size=[width, 32],
+                tooltip=tooltip,
+            )
 
         def icon_btn(id_name, icon, tooltip, accent):
             return self.create_button(
@@ -1368,12 +1378,31 @@ class RamsesFusionApp:
                 tooltip=tooltip,
             )
 
+        def sep():
+            # Thin vertical divider between groups - the visible grouping the
+            # dark colour tints failed to provide.
+            return self.ui.VGroup(
+                {"Weight": 0},
+                [
+                    self.ui.VGap(3),
+                    self.ui.Label(
+                        {
+                            "Weight": 0,
+                            "MinimumSize": [2, 26],
+                            "MaximumSize": [2, 26],
+                            "StyleSheet": "QLabel { background-color: #3a4048; }",
+                        }
+                    ),
+                    self.ui.VGap(3),
+                ],
+            )
+
         return self.ui.VGroup(
             {"Spacing": 0, "Weight": 1},
             [
                 self.ui.VGap(2),
                 self.ui.HGroup(
-                    {"Weight": 0, "Spacing": 3},
+                    {"Weight": 0, "Spacing": 4},
                     [
                         self.ui.HGap(2),
                         # --- Context readout (clickable, refreshes) ----------
@@ -1394,7 +1423,7 @@ class RamsesFusionApp:
                                                 "Alignment": {"AlignVCenter": True},
                                                 "WordWrap": False,
                                                 "Weight": 1,
-                                                "MinimumSize": [196, 66],
+                                                "MinimumSize": [188, 60],
                                                 "StyleSheet": "QLabel { padding: 0 8px; }",
                                             }
                                         ),
@@ -1426,49 +1455,40 @@ class RamsesFusionApp:
                                         "Text": "",
                                         "Flat": True,
                                         "ToolTip": "Click to refresh",
-                                        "MinimumSize": [196, 66],
+                                        "MinimumSize": [188, 60],
                                         "StyleSheet": "QPushButton { background-color: transparent; border: none; } QPushButton:hover { background-color: rgba(255, 255, 255, 12); border: 1px solid #4a5562; border-radius: 4px; } QPushButton:pressed { background-color: rgba(0, 0, 0, 25); }",
                                     }
                                 ),
                             ],
                         ),
-                        self.ui.HGap(8),
+                        sep(),
                         # --- Project & Scene ---------------------------------
-                        icon_btn("SwitchShotButton", "ramshot.png", "Switch Shot", self._H_SCENE),
-                        icon_btn("SetupSceneButton", "ramsetupscene.png", "Sync Project Settings", self._H_SCENE),
-                        icon_btn("RamsesButton", "ramses.png", "Open Ramses Client", self._H_SCENE),
-                        self.ui.HGap(8),
+                        txt_btn("SwitchShotButton", "Switch", "ramshot.png", "Switch Shot", self._H_SCENE, 84),
+                        txt_btn("SetupSceneButton", "Setup", "ramsetupscene.png", "Sync Project Settings", self._H_SCENE, 78),
+                        txt_btn("RamsesButton", "Ramses", "ramses.png", "Open Ramses Client", self._H_SCENE, 90),
+                        sep(),
                         # --- Assets & Tools ----------------------------------
-                        icon_btn("ImportButton", "ramimport.png", "Import Published", self._H_ASSET),
-                        icon_btn("ReplaceButton", "ramreplace.png", "Replace Loader", self._H_ASSET),
-                        icon_btn("TemplateButton", "ramtemplate.png", "Save as Template", self._H_ASSET),
-                        self.ui.HGap(8),
+                        txt_btn("ImportButton", "Import", "ramimport.png", "Import Published", self._H_ASSET, 84),
+                        txt_btn("ReplaceButton", "Replace", "ramreplace.png", "Replace Loader", self._H_ASSET, 90),
+                        txt_btn("TemplateButton", "Template", "ramtemplate.png", "Save as Template", self._H_ASSET, 98),
+                        sep(),
                         # --- Saving & Iteration ------------------------------
-                        icon_btn("SaveButton", "ramsave.png", "Save", self._H_WORK),
-                        icon_btn("SaveAsButton", "ramsave.png", "Save As / Create...", self._H_WORK),
-                        icon_btn("IncrementalSaveButton", "ramsaveincremental.png", "Save Incremental", self._H_WORK),
-                        icon_btn("CommentButton", "ramcomment.png", "Save with Note", self._H_WORK),
-                        icon_btn("RetrieveButton", "ramretrieve.png", "Version History / Restore", self._H_WORK),
-                        self.ui.HGap(8),
+                        txt_btn("SaveButton", "Save", "ramsave.png", "Save", self._H_WORK, 74),
+                        txt_btn("SaveAsButton", "Save As", "ramsave.png", "Save As / Create...", self._H_WORK, 88),
+                        txt_btn("IncrementalSaveButton", "Incr", "ramsaveincremental.png", "Save Incremental", self._H_WORK, 68),
+                        txt_btn("CommentButton", "Note", "ramcomment.png", "Save with Note", self._H_WORK, 70),
+                        txt_btn("RetrieveButton", "History", "ramretrieve.png", "Version History / Restore", self._H_WORK, 86),
+                        sep(),
                         # --- Review & Publish --------------------------------
-                        icon_btn("PreviewButton", "rampreview.png", "Create Preview", self._H_REVIEW),
-                        icon_btn("OpenPreviewButton", "ramshot.png", "Open Preview in media player", self._H_REVIEW),
-                        self.create_button(
-                            "UpdateStatusButton",
-                            "Publish",
-                            "ramstatus.png",
-                            accent_color=self._H_PUBLISH,
-                            weight=0,
-                            min_size=[92, 32],
-                            max_size=[124, 32],
-                            tooltip="Renders the final master, archives the comp, and advances the shot status in the database.",
-                        ),
-                        self.ui.HGap(8),
-                        # --- Settings & Info ---------------------------------
+                        txt_btn("PreviewButton", "Preview", "rampreview.png", "Create Preview", self._H_REVIEW, 90),
+                        icon_btn("OpenPreviewButton", "ramopen.png", "Open Preview in media player", self._H_REVIEW),
+                        txt_btn("UpdateStatusButton", "Publish", "ramstatus.png", "Renders the final master, archives the comp, and advances the shot status in the database.", self._H_PUBLISH, 100),
+                        sep(),
+                        # --- Settings & Info (icon-only: secondary) ----------
                         icon_btn("PubSettingsButton", "rampublishsettings.png", "Step Configuration", self._H_SETTINGS),
                         icon_btn("CheckUpdateButton", "ramupdate.png", "Check for Update...", self._H_SETTINGS),
                         icon_btn("SettingsButton", "ramsettings.png", "Plugin Settings", self._H_SETTINGS),
-                        icon_btn("AboutButton", "ramses.png", "About", self._H_SETTINGS),
+                        icon_btn("AboutButton", "overmind.png", "About", self._H_SETTINGS),
                         # --- Status line (stretches) + version ---------------
                         self.ui.HGap(8),
                         self.ui.Label(
