@@ -1363,7 +1363,7 @@ class RamsesFusionApp:
                                         self.ui.Button(
                                             {
                                                 "ID": "LayoutToggleButton",
-                                                "Text": "▤  Horizontal Layout",
+                                                "Text": "⇄  Horizontal Layout",
                                                 "Weight": 0,
                                                 "MinimumSize": [16, 24],
                                                 "MaximumSize": [2000, 24],
@@ -1448,6 +1448,22 @@ class RamsesFusionApp:
                     {"Weight": 0, "Spacing": 4},
                     [
                         self.ui.HGap(2),
+                        # --- Layout flip (back to vertical), far left --------
+                        # Icon-only "view mode" control; ⇄ = switch layout.
+                        # Outlined, distinct from the filled action buttons.
+                        self.ui.Button(
+                            {
+                                "ID": "LayoutToggleButton",
+                                "Text": "⇄",
+                                "Weight": 0,
+                                "MinimumSize": [34, 32],
+                                "MaximumSize": [34, 32],
+                                "Font": self.ui.Font({"PixelSize": 16}),
+                                "ToolTip": "Switch back to the vertical (stacked) panel layout.",
+                                "StyleSheet": "QPushButton { text-align: center; border: 1px solid #3a4048; border-radius: 3px; background-color: #23272d; color: #c5ccd2; } QPushButton:hover { background-color: #2e353b; border-color: #4a5562; } QPushButton:pressed { background-color: #1c2023; }",
+                            }
+                        ),
+                        self.ui.HGap(6),
                         # --- Context readout (clickable, refreshes) ----------
                         self.ui.Stack(
                             {"Weight": 0},
@@ -1544,23 +1560,6 @@ class RamsesFusionApp:
                                 "Alignment": {"AlignVCenter": True, "AlignRight": True},
                                 "MinimumSize": [90, 34],
                                 "StyleSheet": "QLabel { color: #7fbf8b; font-size: 11px; padding: 0 8px; }",
-                            }
-                        ),
-                        # --- Back to the vertical layout, one click ----------
-                        # Icon-only "view mode" control (the glyph suggests a
-                        # stacked layout); outlined, distinct from the filled
-                        # action buttons. Name is in the tooltip.
-                        self.ui.HGap(8),
-                        self.ui.Button(
-                            {
-                                "ID": "LayoutToggleButton",
-                                "Text": "▤",
-                                "Weight": 0,
-                                "MinimumSize": [34, 32],
-                                "MaximumSize": [34, 32],
-                                "Font": self.ui.Font({"PixelSize": 15}),
-                                "ToolTip": "Switch back to the vertical (stacked) panel layout.",
-                                "StyleSheet": "QPushButton { text-align: center; border: 1px solid #3a4048; border-radius: 3px; background-color: #23272d; color: #c5ccd2; } QPushButton:hover { background-color: #2e353b; border-color: #4a5562; } QPushButton:pressed { background-color: #1c2023; }",
                             }
                         ),
                         self.ui.HGap(2),
