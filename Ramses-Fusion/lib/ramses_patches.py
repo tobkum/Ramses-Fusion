@@ -37,6 +37,7 @@ import os
 import sys
 import threading
 import time
+import traceback
 from ramses.constants import LogLevel
 from ramses.logger import log
 
@@ -175,8 +176,47 @@ _makedirs_suppressed = threading.local()
 _real_makedirs = os.makedirs
 
 
+# Pipeline subfolders are always created *inside* a step folder. If one is
+# ever about to be created with a DRIVE ROOT as its parent (D:\_published,
+# D:\_versions), the path it was built from did not resolve: os.path.abspath()
+# fell back to the process working directory. Creating it would litter the
+# drive root, and the real fault - an unresolved path - would stay invisible.
+#
+# Refuse it and record the caller. Deliberately narrow: only these names, only
+# at a drive root. A top-level project folder (D:\SomeProject) is legitimate
+# and unaffected, so this stays silent in normal use.
+_PIPELINE_FOLDER_NAMES = ("_versions", "_published", "_preview")
+
+
+def _is_pipeline_folder_at_drive_root(target):
+    """True when target is a pipeline subfolder directly under a drive root."""
+    try:
+        if not target:
+            return False
+        full = os.path.abspath(str(target))
+        if os.path.basename(full) not in _PIPELINE_FOLDER_NAMES:
+            return False
+        parent = os.path.dirname(full)
+        # A drive root is its own parent ("D:\\" -> "D:\\").
+        return parent == os.path.dirname(parent)
+    except Exception:
+        return False
+
+
 def _guarded_makedirs(*args, **kwargs):
     if getattr(_makedirs_suppressed, "active", False):
+        return None
+    target = args[0] if args else kwargs.get("name")
+    if _is_pipeline_folder_at_drive_root(target):
+        try:
+            stack = "".join(traceback.format_stack()[:-1])
+        except Exception:
+            stack = "<stack unavailable>"
+        log(
+            "Refused to create '%s' at a drive root - the path it was built "
+            "from did not resolve. Called from:\n%s" % (target, stack),
+            LogLevel.Critical,
+        )
         return None
     return _real_makedirs(*args, **kwargs)
 
