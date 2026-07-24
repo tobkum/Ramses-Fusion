@@ -1394,16 +1394,24 @@ class RamsesFusionApp:
     _H_SETTINGS = "#333333"  # Settings & Info (grey)
 
     def _build_horizontal_content(self):
-        """Builds the slim horizontal toolbar: one labelled action row.
+        """Builds the slim horizontal toolbar: one vertically-centred action row.
 
-        Reuses every widget ID from the vertical layout so all bindings, the
-        header refresh, and the status line work unchanged. The workflow
-        actions carry a short label next to their icon (the colour tints alone
-        read poorly against Fusion's dark chrome, so thin separators do the
-        grouping); the secondary Settings actions and the small "open preview"
-        side button stay icon-only. Update / Publish is the one accented action.
-        The context readout (left) and the status line (right, stretching)
-        reuse the same IDs the vertical header does.
+        Reuses every widget ID from the vertical layout, so the bindings, the
+        header refresh, the status line, and the enable/disable logic all run
+        unchanged. Layout, left to right:
+
+            [⇄ toggle] [context + ↻]  Scene | Assets | Work | Review  … status →
+
+        Workflow actions carry a short label beside their icon and are grouped
+        by a wider gap plus their section colour tint (Scene blue, Assets
+        purple, Work teal, Review green) - no divider lines. Save is bolded as
+        the highest-frequency action; Update / Publish is the single accented
+        button (amber - the one transactional action). The small Open-Preview
+        side button is icon-only, mirroring the vertical layout.
+
+        The Settings category is dropped from the slim bar (reached by toggling
+        back to vertical), as is the user/version footer; that space goes to the
+        status line.
         """
 
         def txt_btn(id_name, label, icon, tooltip, accent, width):
@@ -1491,6 +1499,10 @@ class RamsesFusionApp:
                                 self.ui.VGroup(
                                     {"Spacing": 0},
                                     [
+                                        # Centre the ↻ chip vertically on the
+                                        # single-line context (it used to hug the
+                                        # top, which suited the 3-line block).
+                                        self.ui.VGap(0, 1),
                                         self.ui.HGroup(
                                             {"Weight": 0, "Spacing": 0},
                                             [
@@ -1500,7 +1512,7 @@ class RamsesFusionApp:
                                                         "ID": "RefreshIcon",
                                                         "Text": "↻",
                                                         "Weight": 0,
-                                                        "StyleSheet": "QLabel { color: #9aa3ad; font-size: 12px; font-weight: bold; border: 1px solid #3a4048; border-radius: 3px; background-color: #23272d; padding: 0 3px; margin: 3px 3px 0 0; }",
+                                                        "StyleSheet": "QLabel { color: #9aa3ad; font-size: 12px; font-weight: bold; border: 1px solid #3a4048; border-radius: 3px; background-color: #23272d; padding: 0 3px; margin: 0 5px 0 0; }",
                                                     }
                                                 ),
                                             ],
@@ -1532,7 +1544,21 @@ class RamsesFusionApp:
                         txt_btn("TemplateButton", "Template", "ramtemplate.png", "Save as Template", self._H_ASSET, 86),
                         gap(),
                         # --- Saving & Iteration ------------------------------
-                        txt_btn("SaveButton", "Save", "ramsave.png", "Save", self._H_WORK, 62),
+                        # Save is bolded (prominent) as the most-frequent action,
+                        # matching the vertical layout's emphasis - same 32px
+                        # height as its neighbours, just heavier text.
+                        self.create_button(
+                            "SaveButton",
+                            "Save",
+                            "ramsave.png",
+                            accent_color=self._H_WORK,
+                            weight=0,
+                            min_size=[62, 32],
+                            max_size=[62, 32],
+                            center_text=True,
+                            prominent=True,
+                            tooltip="Overwrite the current working version.",
+                        ),
                         txt_btn("SaveAsButton", "Save As", "ramsave.png", "Save As / Create...", self._H_WORK, 78),
                         txt_btn("IncrementalSaveButton", "Incr", "ramsaveincremental.png", "Save Incremental", self._H_WORK, 58),
                         txt_btn("CommentButton", "Note", "ramcomment.png", "Save with Note", self._H_WORK, 60),
