@@ -1573,6 +1573,54 @@ class TestSourceNumbering(unittest.TestCase):
         self.assertEqual(node.GetInput("SequenceStartFrame"), 86400)
 
 
+class TestEnsureCompFolders(unittest.TestCase):
+    """A composition path whose parent is a drive root means the path was built
+    from an unresolved folder — creating _versions/_published there litters the
+    drive root (observed: D:\\_published, D:\\_versions) instead of the project."""
+
+    def setUp(self):
+        self.mock_fusion = MockFusion()
+        import fusion_host
+        fusion_host.bmd = sys.modules["bmd"]
+        self.fusion_host = fusion_host
+        self.host = FusionHost(self.mock_fusion)
+
+    def test_refuses_drive_root_parent(self):
+        made = []
+        with patch.object(self.fusion_host.os, "makedirs", side_effect=lambda *a, **k: made.append(a[0])):
+            ok = self.host.ensureCompFolders("D:/DrNiceXmas_S_0515_COMP.comp")
+        self.assertFalse(ok)
+        self.assertEqual(made, [], "nothing may be created at a drive root")
+
+    def test_refuses_empty_path(self):
+        made = []
+        with patch.object(self.fusion_host.os, "makedirs", side_effect=lambda *a, **k: made.append(a[0])):
+            self.assertFalse(self.host.ensureCompFolders(""))
+            self.assertFalse(self.host.ensureCompFolders(None))
+        self.assertEqual(made, [])
+
+    def test_refuses_bare_filename(self):
+        """A dirless name would resolve _versions/_published against the CWD."""
+        made = []
+        with patch.object(self.fusion_host.os, "makedirs", side_effect=lambda *a, **k: made.append(a[0])):
+            ok = self.host.ensureCompFolders("DrNiceXmas_S_0515_COMP.comp")
+        self.assertFalse(ok)
+        self.assertEqual(made, [])
+
+    def test_creates_step_folder_and_siblings_for_a_real_path(self):
+        comp = ("X:/Geteilte Ablagen/proj/05-SHOTS/DrNiceXmas_S_0515/"
+                "DrNiceXmas_S_0515_COMP/DrNiceXmas_S_0515_COMP.comp")
+        parent = os.path.dirname(comp)
+        made = []
+        with patch.object(self.fusion_host.os, "makedirs", side_effect=lambda *a, **k: made.append(a[0])):
+            ok = self.host.ensureCompFolders(comp)
+        self.assertTrue(ok)
+        self.assertEqual(
+            [p.replace("\\", "/") for p in made],
+            [parent, parent + "/_versions", parent + "/_published"],
+        )
+
+
 class TestDeliverySidecarSuppression(unittest.TestCase):
     """Pipeline sidecars (_ramses_data.json) must not be written into the
     project export folder — that folder is a client delivery, not pipeline
