@@ -1523,7 +1523,7 @@ class RamsesFusionApp:
                         gap(),
                         # --- Project & Scene ---------------------------------
                         txt_btn("SwitchShotButton", "Switch", "ramshot.png", "Switch Shot", self._H_SCENE, 74),
-                        txt_btn("SetupSceneButton", "Setup", "ramsetupscene.png", "Sync Project Settings", self._H_SCENE, 68),
+                        txt_btn("SetupSceneButton", "Sync", "ramsetupscene.png", "Sync Project Settings", self._H_SCENE, 68),
                         txt_btn("RamsesButton", "Ramses", "ramses.png", "Open Ramses Client", self._H_SCENE, 78),
                         gap(),
                         # --- Assets & Tools ----------------------------------
