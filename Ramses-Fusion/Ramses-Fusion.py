@@ -1404,10 +1404,12 @@ class RamsesFusionApp:
 
         Workflow actions carry a short label beside their icon and are grouped
         by a wider gap plus their section colour tint (Scene blue, Assets
-        purple, Work teal, Review green) - no divider lines. Save is bolded as
-        the highest-frequency action; Update / Publish is the single accented
-        button (amber - the one transactional action). The small Open-Preview
-        side button is icon-only, mirroring the vertical layout.
+        purple, Work teal, Review green) - no divider lines. Save and Publish
+        are bolded, mirroring the vertical layout's emphasis on the most-
+        frequent and the transactional actions; Publish also carries the amber
+        accent. The self-explanatory Open-Ramses button and the small
+        Open-Preview side button are icon-only, keeping their width for the
+        status line.
 
         The Settings category is dropped from the slim bar (reached by toggling
         back to vertical), as is the user/version footer; that space goes to the
@@ -1536,7 +1538,10 @@ class RamsesFusionApp:
                         # --- Project & Scene ---------------------------------
                         txt_btn("SwitchShotButton", "Switch", "ramshot.png", "Switch Shot", self._H_SCENE, 74),
                         txt_btn("SetupSceneButton", "Sync", "ramsetupscene.png", "Sync Project Settings", self._H_SCENE, 68),
-                        txt_btn("RamsesButton", "Ramses", "ramses.png", "Open Ramses Client", self._H_SCENE, 78),
+                        # Icon-only: the magenta Ramses logo is self-explanatory,
+                        # and "open the client" is a rare, session-level action.
+                        # The reclaimed width goes to the status line.
+                        icon_btn("RamsesButton", "ramses.png", "Open Ramses Client", self._H_SCENE),
                         gap(),
                         # --- Assets & Tools ----------------------------------
                         txt_btn("ImportButton", "Import", "ramimport.png", "Import Published", self._H_ASSET, 74),
@@ -1570,7 +1575,22 @@ class RamsesFusionApp:
                         # uses for this button - ramopen.png was a copy-documents
                         # glyph, wrong for "play the preview".
                         icon_btn("OpenPreviewButton", "ramshot.png", "Open Preview in media player", self._H_REVIEW),
-                        txt_btn("UpdateStatusButton", "Publish", "ramstatus.png", "Renders the final master, archives the comp, and advances the shot status in the database.", self._H_PUBLISH, 90),
+                        # Publish is bolded (prominent), mirroring the vertical
+                        # layout - it is the one transactional action (final
+                        # render + comp archive + DB status), reinforced by both
+                        # the amber accent and the heavier text.
+                        self.create_button(
+                            "UpdateStatusButton",
+                            "Publish",
+                            "ramstatus.png",
+                            accent_color=self._H_PUBLISH,
+                            weight=0,
+                            min_size=[96, 32],
+                            max_size=[96, 32],
+                            center_text=True,
+                            prominent=True,
+                            tooltip="Renders the final master, archives the comp, and advances the shot status in the database.",
+                        ),
                         gap(),
                         # --- Status line (takes all remaining width) ---------
                         # The Settings group and the user/version footer are
@@ -1584,7 +1604,7 @@ class RamsesFusionApp:
                                 "Text": "",
                                 "Weight": 1,
                                 "Alignment": {"AlignVCenter": True, "AlignRight": True},
-                                "MinimumSize": [90, 34],
+                                "MinimumSize": [130, 34],
                                 "StyleSheet": "QLabel { color: #7fbf8b; font-size: 11px; padding: 0 8px; }",
                             }
                         ),
