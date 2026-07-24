@@ -899,7 +899,10 @@ class FusionHost(RamHost):
 
             return self.normalizePath(os.path.join(preview_folder, filename))
         except Exception as e:
-            self._log(f"Failed to resolve preview path: {e}", LogLevel.Warning)
+            # Routine before the comp is saved (panel refresh with no comp
+            # open): currentFilePath() is empty, so the SDK cannot derive a
+            # publish path. Callers already handle the empty return.
+            self._log(f"Failed to resolve preview path: {e}", LogLevel.Debug)
             return ""
 
     def resolveFinalPath(self) -> str:
@@ -993,7 +996,8 @@ class FusionHost(RamHost):
             return self.normalizePath(os.path.join(target_dir, filename))
 
         except Exception as e:
-            self._log(f"Failed to resolve final path: {e}", LogLevel.Warning)
+            # Same as resolvePreviewPath: expected while the comp is unsaved.
+            self._log(f"Failed to resolve final path: {e}", LogLevel.Debug)
             return ""
 
     @staticmethod
