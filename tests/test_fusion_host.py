@@ -1,5 +1,6 @@
 import sys
 import os
+import shutil
 import unittest
 from unittest.mock import MagicMock, patch, ANY
 
@@ -175,15 +176,48 @@ class TestFusionHost(unittest.TestCase):
         self.assertEqual(attrs["COMPN_GlobalStart"], 1001.0)
         self.assertEqual(attrs["COMPN_GlobalEnd"], 1250.0) # 1001 + 250 - 1
 
+    def test_savePreview_returns_a_real_bool(self):
+        """savePreview() must be testable by its caller.
+
+        The vendored base returns False when the path cannot be resolved but
+        returns None on the success path, so a caller checking the result read
+        every successful render as a failure. The override must return True
+        only when a file was actually produced.
+        """
+        self.host.previewPath = MagicMock(return_value="")
+        self.assertIs(self.host.savePreview(), False, "unresolvable path -> False")
+
+        self.host.previewPath = MagicMock(return_value="X:/proj/_preview")
+        self.host.currentFilePath = MagicMock(
+            return_value="X:/proj/SHOTS/SH010/COMP/TEST_S_SH010_COMP.comp"
+        )
+        self.host.currentVersion = MagicMock(return_value=3)
+        self.host.currentVersionFilePath = MagicMock(return_value="X:/v003.comp")
+
+        with patch.object(self.host, "_preview", return_value=[]):
+            self.assertIs(self.host.savePreview(), False, "no file written -> False")
+
+        with patch.object(
+            self.host, "_preview", return_value=["X:/proj/_preview/SH010.mov"]
+        ), patch("fusion_host.RamMetaDataManager"):
+            self.assertIs(self.host.savePreview(), True, "file written -> True")
+
     def test_preview_logic(self):
         """Verify '_PREVIEW' anchor discovery and automatic ProRes preset application."""
         comp = self.mock_fusion.GetCurrentComp()
         preview_node = comp.AddTool("Saver", 0, 0)
         preview_node.SetAttrs({"TOOLS_Name": "_PREVIEW"})
         
-        # Mock paths
-        self.host.previewPath = MagicMock(return_value="D:/Previews")
-        self.host.publishFilePath = MagicMock(return_value="D:/Previews/fallback.mov")
+        # Mock paths. A real temp dir, not "D:/Previews": _preview() calls
+        # os.makedirs() on the resolved folder, so a made-up absolute path
+        # created a real directory at the drive root on every run.
+        import tempfile
+        preview_dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, preview_dir, True)
+        self.host.previewPath = MagicMock(return_value=preview_dir)
+        self.host.publishFilePath = MagicMock(
+            return_value=os.path.join(preview_dir, "fallback.mov")
+        )
         
         # Mock Step Settings to ensure fallback logic runs (empty settings)
         mock_step = MagicMock()
@@ -205,11 +239,14 @@ class TestFusionHost(unittest.TestCase):
         # We need to ensure the verify check passes
         self.host._verify_render_output = MagicMock(return_value=True)
         
-        results = self.host._preview("D:/Previews", "TEST_S_Shot01_COMP", None, None)
-        
+        results = self.host._preview(preview_dir, "TEST_S_Shot01_COMP", None, None)
+
+        expected = self.host.normalizePath(
+            os.path.join(preview_dir, "TEST_S_Shot01_COMP.mov")
+        )
         self.assertEqual(len(results), 1)
-        self.assertEqual(results[0], "D:/Previews/TEST_S_Shot01_COMP.mov")
-        self.assertEqual(preview_node.Clip[1], "D:/Previews/TEST_S_Shot01_COMP.mov")
+        self.assertEqual(results[0], expected)
+        self.assertEqual(preview_node.Clip[1], expected)
         # Verify ProRes preset was applied
         self.assertEqual(preview_node.GetInput(f"{FORMAT_QUICKTIME}.Compression"), CODEC_PRORES_422)
 
@@ -1033,8 +1070,63 @@ class TestFusionCompImport(unittest.TestCase):
         with patch.object(fusion_host.RamItem, "fromPath", return_value=mock_item), \
              patch.object(fusion_host.RamStep, "fromPath", return_value=mock_step):
             count = self.host.check_outdated_loaders()
-        
+
         self.assertEqual(count, 1)
+
+        # The visible half of the feature: the node must actually be coloured
+        # orange and carry the version hint. Asserting only `count` let a bug
+        # ship where GetToolList()'s integer keys were fed back to FindTool(),
+        # so Phase 3 never found a node and no tile was ever coloured.
+        self.assertEqual(
+            loader.TileColor, {"R": 1.0, "G": 0.5, "B": 0.0},
+            "Outdated loader must be coloured orange",
+        )
+        self.assertIn("v002", str(loader.Comments[1]))
+
+    def test_outdated_loader_visuals_cleared_when_up_to_date(self):
+        """A loader already on the latest version must be left un-coloured."""
+        comp = self.mock_fusion.GetCurrentComp()
+        loader = comp.AddTool("Loader", 0, 0)
+        loader.Clip[1] = "D:/Project/05-SHOTS/SH010/COMP/_published/v002/SH010.001.exr"
+        # Stale warning visuals from a previous scan
+        loader.TileColor = {"R": 1.0, "G": 0.5, "B": 0.0}
+        loader.Comments[1] = "New version available: v002"
+
+        import fusion_host
+
+        mock_item = MagicMock()
+        mock_item.shortName.return_value = "SH010"
+        mock_item.latestPublishedVersionFolderPath.return_value = (
+            "D:/Project/05-SHOTS/SH010/COMP/_published/v002"
+        )
+
+        with patch.object(fusion_host.RamItem, "fromPath", return_value=mock_item), \
+             patch.object(fusion_host.RamStep, "fromPath", return_value=MagicMock()):
+            count = self.host.check_outdated_loaders()
+
+        self.assertEqual(count, 0)
+        self.assertIsNone(loader.TileColor, "Up-to-date loader must lose its colour")
+        self.assertEqual(str(loader.Comments[1]), "")
+
+    def test_tool_name_resolves_from_node_not_gettoollist_key(self):
+        """GetToolList() is keyed by index; names must come from the node.
+
+        Pins the root cause directly: feeding a GetToolList() key back into
+        FindTool() finds nothing, which is what silently disabled the whole
+        outdated-loader colouring.
+        """
+        comp = self.mock_fusion.GetCurrentComp()
+        loader = comp.AddTool("Loader", 0, 0)
+        loader.SetAttrs({"TOOLS_Name": "PLATE_IN"})
+
+        keys = list(comp.GetToolList(False, "Loader").keys())
+        self.assertIsInstance(keys[0], int, "GetToolList is index-keyed")
+        self.assertIsNone(comp.FindTool(keys[0]), "an index is not a node name")
+
+        from fusion_host import FusionHost
+        name = FusionHost._toolName(loader)
+        self.assertEqual(name, "PLATE_IN")
+        self.assertIs(comp.FindTool(name), loader)
 
     def test_import_comp_failure_no_fallthrough(self):
         """Verify a failing .comp import does not create a Loader."""

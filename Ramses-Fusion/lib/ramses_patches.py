@@ -34,7 +34,6 @@ Usage:
 
 import json
 import os
-import sys
 import threading
 import time
 from ramses.constants import LogLevel
@@ -65,6 +64,15 @@ def _patch_metadata_manager():
        folder's whole history is not.
     """
     from ramses.metadata_manager import RamMetaDataManager
+
+    # getValue/setValue wrap whatever is currently installed, so re-running
+    # apply() would wrap the wrapper. Ramses-Fusion.py reloads fusion_host on
+    # every launch, which re-executes apply(), so without this guard the
+    # wrappers stacked one layer per launch: a whole comp day of opening the
+    # panel put dozens of nested frames on every metadata read, and leaked the
+    # closures of every previous fusion_host module.
+    if getattr(RamMetaDataManager, "_ramses_patched", False):
+        return
 
     def _patched_getMetaData(folderPath):
         """Reads the sidecar without pruning entries for missing files."""
@@ -125,6 +133,7 @@ def _patch_metadata_manager():
     RamMetaDataManager.setFileMetaData = staticmethod(_patched_setFileMetaData)
     RamMetaDataManager.getValue = staticmethod(_patched_getValue)
     RamMetaDataManager.setValue = staticmethod(_patched_setValue)
+    RamMetaDataManager._ramses_patched = True
 
 
 def _patch_daemon_interface():
@@ -138,6 +147,11 @@ def _patch_daemon_interface():
     """
     from ramses.daemon_interface import RamDaemonInterface
 
+    # Same re-entrancy hazard as the metadata patches: this wraps the current
+    # online(), so a second apply() would wrap the wrapper.
+    if getattr(RamDaemonInterface, "_ramses_patched", False):
+        return
+
     _original_online = RamDaemonInterface.online
 
     def _patched_online(self):
@@ -148,6 +162,7 @@ def _patch_daemon_interface():
             return False
 
     RamDaemonInterface.online = _patched_online
+    RamDaemonInterface._ramses_patched = True
 
 
 def apply():

@@ -68,7 +68,13 @@ class TestRamsesFusionApp(unittest.TestCase):
         fusion_host.bmd = sys.modules["bmd"]
 
         self.app = RamsesFusionApp()
-        
+
+        # Ramses.online() is `not self._offline` on a process-wide singleton, so
+        # a test that forces the daemon offline leaves every later test offline
+        # too - and every @requires_connection handler then returns early
+        # without running. Start each test from a known-online singleton.
+        self.app.ramses._offline = False
+
         # Standard UI Mocks to prevent dialogs during tests
         self.app.ramses.host._statusUI = MagicMock()
         self.app.ramses.host._openUI = MagicMock()
@@ -345,6 +351,82 @@ class TestRamsesFusionApp(unittest.TestCase):
         self.app._create_render_anchors.assert_called_once()
         self.app.refresh_header.assert_called_once()
 
+    def test_sync_anchors_never_wipes_a_saver_path(self):
+        """An unresolvable path must leave the Saver alone, not blank it.
+
+        resolvePreviewPath()/resolveFinalPath() return "" on any failure, and
+        the early-out only fires when BOTH are empty. With one resolving and
+        the other not, the empty string was written straight onto the Saver.
+        """
+        comp = self.mock_fusion.GetCurrentComp()
+        preview = comp.AddTool("Saver", 0, 0)
+        preview.SetAttrs({"TOOLS_Name": "_PREVIEW"})
+        preview.Clip[1] = "X:/proj/_preview/SH010_COMP.mov"
+        final = comp.AddTool("Saver", 1, 0)
+        final.SetAttrs({"TOOLS_Name": "_FINAL"})
+        final.Clip[1] = "X:/proj/06-EXPORT/old.mov"
+
+        host = self.app.ramses.host
+        host.resolvePreviewPath = MagicMock(return_value="")  # transient failure
+        host.resolveFinalPath = MagicMock(return_value="X:/proj/06-EXPORT/new.mov")
+        host.apply_render_preset = MagicMock()
+
+        self.app._sync_render_anchors()
+
+        self.assertEqual(
+            preview.Clip[1], "X:/proj/_preview/SH010_COMP.mov",
+            "an unresolved preview path must not blank the Saver",
+        )
+        self.assertEqual(final.Clip[1], "X:/proj/06-EXPORT/new.mov")
+
+    def test_on_sync_reports_failure_when_there_is_no_item(self):
+        """Sync must not claim success when it had nothing to sync.
+
+        The button is enabled for any online session, but setupCurrentFile()
+        needs a Ramses item. Without one it does nothing, and the handler used
+        to print the green "Project settings synced" confirmation anyway.
+        """
+        self.app.ramses.host.currentItem = MagicMock(return_value=None)
+        self.app.ramses.host._setupCurrentFile = MagicMock()
+        self.app._create_render_anchors = MagicMock()
+        self.app.refresh_header = MagicMock()
+        self.app._set_status = MagicMock()
+
+        self.app.on_sync(None)
+
+        self.app.ramses.host._setupCurrentFile.assert_not_called()
+        self.app._create_render_anchors.assert_not_called()
+        text, kind = self.app._set_status.call_args[0]
+        self.assertEqual(kind, "warn")
+        self.assertNotIn("✓", text)
+
+    def test_on_preview_reports_failure_when_no_file_was_written(self):
+        """A failed preview render must not be reported as created."""
+        self.app._handle_validation = MagicMock(return_value=True)
+        self.app.ramses.host.savePreview = MagicMock(return_value=False)
+        self.app.refresh_header = MagicMock()
+        self.app._set_status = MagicMock()
+        self.app._emit_action_status = MagicMock()
+
+        self.app.on_preview(None)
+
+        self.app._emit_action_status.assert_not_called()
+        text, kind = self.app._set_status.call_args[0]
+        self.assertEqual(kind, "error")
+        self.assertNotIn("✓", text)
+
+    def test_on_preview_reports_success_when_a_file_was_written(self):
+        """The success path must still confirm (savePreview returns a bool)."""
+        self.app._handle_validation = MagicMock(return_value=True)
+        self.app.ramses.host.savePreview = MagicMock(return_value=True)
+        self.app.refresh_header = MagicMock()
+        self.app._emit_action_status = MagicMock()
+
+        self.app.on_preview(None)
+
+        self.app._emit_action_status.assert_called_once()
+        self.assertIn("✓", self.app._emit_action_status.call_args[0][0])
+
     def test_on_import_handler_standard(self):
         """Verify on_import delegates to host.importItem()."""
         self.app.ramses.host.importItem = MagicMock(return_value=True)
@@ -484,7 +566,7 @@ class TestRamsesFusionApp(unittest.TestCase):
             with patch.object(
                 RamsesFusionApp, "current_step", new_callable=PropertyMock, return_value=step
             ), patch.object(
-                type(host), "comp", new_callable=PropertyMock, return_value=comp
+                host, "fusion", MagicMock(GetCurrentComp=lambda: comp)
             ), patch.object(
                 host, "currentFilePath", return_value=src
             ), patch.object(
@@ -534,7 +616,7 @@ class TestRamsesFusionApp(unittest.TestCase):
                 with patch.object(
                     RamsesFusionApp, "current_step", new_callable=PropertyMock, return_value=step
                 ), patch.object(
-                    type(host), "comp", new_callable=PropertyMock, return_value=comp
+                    host, "fusion", MagicMock(GetCurrentComp=lambda: comp)
                 ), patch.object(
                     host, "currentFilePath", return_value=src
                 ), patch.object(
@@ -829,7 +911,13 @@ class TestValidationEdgeCases(unittest.TestCase):
         fusion_host.bmd = sys.modules["bmd"]
 
         self.app = RamsesFusionApp()
-        
+
+        # Ramses.online() is `not self._offline` on a process-wide singleton, so
+        # a test that forces the daemon offline leaves every later test offline
+        # too - and every @requires_connection handler then returns early
+        # without running. Start each test from a known-online singleton.
+        self.app.ramses._offline = False
+
         # Standard UI Mocks to prevent dialogs during tests
         self.app.ramses.host._statusUI = MagicMock()
         self.app.ramses.host._openUI = MagicMock()

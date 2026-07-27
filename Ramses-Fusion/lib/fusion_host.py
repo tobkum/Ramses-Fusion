@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 import os
 import re
-import json
 import threading
 import glob
 from ramses import (
@@ -24,7 +23,6 @@ try:
 except ImportError:
     import yaml
 from fusion_config import FusionConfig
-from asset_browser import AssetBrowser
 
 # =============================================================================
 # APPLY RUNTIME PATCHES
@@ -290,31 +288,19 @@ with _DAEMON_INIT_LOCK:
     # Upstream API now includes _socket_lock in daemon_interface.py:87, 629
     # =========================================================================
 
-    # 3. Fix Metadata Deletion in RamMetaDataManager
-    # The API's auto-deletion logic is prone to race conditions and path mismatches.
-    def _patched_getMetaData(folderPath):
-        meta_file = RamMetaDataManager.getMetaDataFile(folderPath)
-        if not os.path.exists(meta_file):
-            return {}
-        try:
-            with open(meta_file, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except json.JSONDecodeError as exc:
-            print(
-                f"[Ramses] ERROR: Metadata file is corrupted and cannot be read "
-                f"({meta_file}): {exc}"
-            )
-            return {}
-        except OSError as exc:
-            print(f"[Ramses] ERROR: Could not read metadata file ({meta_file}): {exc}")
-            return {}
-
-    def _patched_getFileMetaData(filePath):
-        data = RamMetaDataManager.getMetaData(os.path.dirname(filePath))
-        return data.get(os.path.basename(filePath), {})
-
-    RamMetaDataManager.getMetaData = staticmethod(_patched_getMetaData)
-    RamMetaDataManager.getFileMetaData = staticmethod(_patched_getFileMetaData)
+    # 3. Metadata patches live in ramses_patches.py ONLY.
+    # This module used to install its own getMetaData/getFileMetaData here,
+    # after ramses_patches.apply() had already run, so it silently won on a
+    # plain import — but NOT after Ramses-Fusion.py's importlib.reload(), which
+    # re-runs apply() while the _fusion_patched guard skips this block. Which
+    # implementation was live therefore depended on how the module got loaded:
+    # the tests exercised this one, production ran the other.
+    #
+    # ramses_patches' version is also the better one (it keeps the SDK's
+    # retry-with-backoff for a sidecar being rewritten concurrently; this one
+    # gave up on the first JSONDecodeError). The SDK's own getFileMetaData is
+    # fine as-is: it passes the file path down and getMetaDataFile() resolves
+    # a file to its folder.
 
     # ============================================================================
     # OBSOLETE PATCHES REMOVED (Fixed in Upstream API RC10)
@@ -449,7 +435,6 @@ class FusionHost(RamHost):
         super().__init__()
         self.fusion = fusion_obj
         self.hostName = "Fusion"
-        self._status_cache = None  # Used for UI badge caching
         self._node_version_cache = {}  # {node_name: (last_path, is_outdated, latest_dir)}
         self._cache_lock = threading.Lock()  # Thread-safe cache access
 
@@ -546,6 +531,31 @@ class FusionHost(RamHost):
         if safe_name and safe_name[0].isdigit():
             safe_name = "R_" + safe_name
         return safe_name
+
+    @staticmethod
+    def _toolName(node) -> str:
+        """The Fusion node's own name, e.g. ``"PLATE_IN"``.
+
+        ``comp.GetToolList()`` returns a table keyed by a 1-based *index*, not
+        by name, so the keys cannot be fed back to ``comp.FindTool()``. Any
+        code that needs to look a node up again (or cache per node) has to ask
+        the node itself.
+
+        Returns an empty string when the name cannot be read, so callers can
+        skip the node instead of caching under a bogus key.
+        """
+        if not node:
+            return ""
+        try:
+            name = node.Name
+            if name:
+                return str(name)
+        except Exception:
+            pass
+        try:
+            return str(node.GetAttrs()["TOOLS_Name"])
+        except Exception:
+            return ""
 
     def currentStatus(self) -> RamStatus:
         """Gets the current status, with safety guards for non-pipeline files.
@@ -1229,20 +1239,74 @@ class FusionHost(RamHost):
             return False
         return self.comp.SetAttrs({"COMPS_FileName": self.normalizePath(fileName)})
 
-    def setupCurrentFile(self) -> None:
+    def savePreview(self) -> bool:
+        """Renders the preview and reports whether a file was actually written.
+
+        The base implementation returns False when the preview path cannot be
+        resolved but returns None on the success path, so its result cannot be
+        tested — a caller checking it would read every successful render as a
+        failure. This override keeps the same behaviour and returns a real
+        bool, so the UI can tell the artist the truth.
+
+        Returns:
+            bool: True when at least one preview file was produced.
+        """
+        path = self.previewPath()
+        if not path:
+            self.log(
+                "The current file is not saved, so there is nowhere to put "
+                "the preview.",
+                LogLevel.Critical,
+            )
+            return False
+
+        fileInfo = RamFileInfo()
+        fileInfo.setFilePath(self.currentFilePath())
+        previewInfo = fileInfo.copy()
+        previewInfo.version = -1
+        previewInfo.extension = ""
+        previewInfo.resource = ""
+        previewInfo.state = ""
+
+        previewFiles = self._preview(
+            path, previewInfo.fileName(), self.currentItem(), self.currentStep()
+        )
+        if not previewFiles:
+            return False
+
+        for file in previewFiles:
+            RamMetaDataManager.setVersion(file, self.currentVersion())
+            RamMetaDataManager.setVersionFilePath(file, self.currentVersionFilePath())
+        return True
+
+    def setupCurrentFile(self) -> bool:
         """Applies Ramses settings and creates render anchors.
-        
+
         This is the standard entry point for syncing a scene with the database.
+
+        Returns:
+            bool: True when the settings were applied. False when there is no
+            Ramses item to apply them from (an unsaved comp, or one saved
+            outside the pipeline) — the caller must not report success then.
         """
         item = self.currentItem()
         step = self.currentStep()
-        if item:
-            settings = self.collectItemSettings(item)
-            self._setupCurrentFile(item, step, settings)
-            
-            # Fusion specific: also ensure anchors exist and are synced
-            if hasattr(self, "app") and self.app:
-                self.app._create_render_anchors()
+        if not item:
+            self.log(
+                "No Ramses item for the current comp: nothing to sync. "
+                "Save the comp into the pipeline first.",
+                LogLevel.Warning,
+            )
+            return False
+
+        settings = self.collectItemSettings(item)
+        if not self._setupCurrentFile(item, step, settings):
+            return False
+
+        # Fusion specific: also ensure anchors exist and are synced
+        if hasattr(self, "app") and self.app:
+            self.app._create_render_anchors()
+        return True
 
     def save(
         self,
@@ -3120,9 +3184,18 @@ class FusionHost(RamHost):
                     self._node_version_cache = {}
                 return 0
 
+            # GetToolList() keys are 1-based indices, not names — resolve each
+            # node's own name so the cache stays keyed by something stable and
+            # Phase 3 can find the node again.
+            named_loaders = []
+            for node in loaders.values():
+                name = self._toolName(node)
+                if name:
+                    named_loaders.append((name, node))
+
             # Clean up cache for deleted nodes
             with self._cache_lock:
-                current_names = set(loaders.keys())
+                current_names = {name for name, _ in named_loaders}
                 cached_names = list(self._node_version_cache.keys())
                 for name in cached_names:
                     if name not in current_names:
@@ -3130,7 +3203,7 @@ class FusionHost(RamHost):
 
             # Build list of (name, path) tuples while lock is held
             loaders_data = []
-            for name, node in loaders.items():
+            for name, node in named_loaders:
                 try:
                     path = self.normalizePath(node.Clip[1])
                     if "/_published/" in path:
@@ -3199,6 +3272,7 @@ class FusionHost(RamHost):
                         v_name = os.path.basename(latest_dir)
                         msg = f"New version available: {v_name}"
                         updates[name] = {
+                            "node": node,
                             "color": {"R": 1.0, "G": 0.5, "B": 0.0},
                             "comment": msg,
                         }
@@ -3207,6 +3281,7 @@ class FusionHost(RamHost):
                         # UP TO DATE: Clear warning visuals (None restores the
                         # default tile color; {0,0,0} would paint the node black)
                         updates[name] = {
+                            "node": node,
                             "color": None,
                             "comment": "",
                         }
@@ -3233,7 +3308,10 @@ class FusionHost(RamHost):
             self.comp.Lock()
             try:
                 for name, data in updates.items():
-                    node = self.comp.FindTool(name)
+                    # Use the node collected in Phase 1 rather than looking it
+                    # up again: GetToolList() keys are indices, so the previous
+                    # FindTool(key) never matched and no tile was ever coloured.
+                    node = data["node"] or self.comp.FindTool(name)
                     if node:
                         # Only update if current color differs
                         color = node.TileColor
@@ -3250,7 +3328,10 @@ class FusionHost(RamHost):
                         ):
                             node.TileColor = target_color
                         # Only update comment if different
-                        current_comment = str(node.Comments[1])
+                        try:
+                            current_comment = str(node.Comments[1] or "")
+                        except Exception:
+                            current_comment = ""
                         if data["comment"] and data["comment"] not in current_comment:
                             node.Comments[1] = data["comment"]
                         elif not data["comment"] and current_comment:

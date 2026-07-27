@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 import os
 import re
-from ramses import RamItem, RamStep, RamFileInfo, ItemType, LogLevel
 from ramses_patches import DisableMakedirs
 
 # A trailing frame token, e.g. "...PLATE.01599116.exr" -> group(1) == "01599116".
@@ -230,8 +229,12 @@ class AssetBrowser:
         extra_exts = self.host.fusionFileFormats()
 
         rows_added = 0
-        # Reverse to show newest first
-        for folder in reversed(folders):
+        # Already newest-first: publishedVersionFolderPaths() defaults to
+        # sortDescending=True, which sorts ascending and then reverses (see
+        # latestPublishedVersionFolderPath(), which passes sortDescending=False
+        # and takes [-1]). Reversing again here put the OLDEST version at the
+        # top of the browser, so the obvious pick was a stale plate.
+        for folder in folders:
             v_folder = os.path.basename(folder)
             
             # Parse from the right: [RESOURCE_]VERSION_STATE

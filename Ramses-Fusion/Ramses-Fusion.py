@@ -3,7 +3,6 @@ import os
 import re
 import time
 import threading
-import concurrent.futures
 import functools
 import subprocess
 from typing import Optional, List, Any
@@ -89,13 +88,7 @@ from fusion_config import FusionConfig
 from ramses_patches import DisableMakedirs
 
 if qw:
-    from ramses_ui_pyside.open_dialog import RamOpenDialog
-    from ramses_ui_pyside.save_as_dialog import RamSaveAsDialog
-    from ramses_ui_pyside.status_dialog import RamStatusDialog
-    from ramses_ui_pyside.about_dialog import RamAboutDialog
     from ramses_ui_pyside.comment_dialog import RamCommentDialog
-    from ramses_ui_pyside.versions_dialog import RamVersionDialog
-    from ramses_ui_pyside.import_dialog import RamImportDialog
     from ramses_ui_pyside.update_dialog import RamUpdateDialog
 
 
@@ -994,8 +987,13 @@ class RamsesFusionApp:
 
             comp.Lock()
             try:
+                # Only write a path we actually resolved. resolvePreviewPath()
+                # and resolveFinalPath() return "" on any failure, and the
+                # guard above only returns early when BOTH are empty — so if
+                # one resolved and the other did not, the empty one used to be
+                # written straight onto the Saver, wiping its output path.
                 preview_node = comp.FindTool("_PREVIEW")
-                if preview_node:
+                if preview_node and preview_path:
                     # Explicit string conversion and normalization for robust comparison
                     curr_p = self.ramses.host.normalizePath(preview_node.Clip[1])
                     if curr_p != preview_path:
@@ -1003,7 +1001,7 @@ class RamsesFusionApp:
                         preview_needs_update = True
 
                 final_node = comp.FindTool("_FINAL")
-                if final_node:
+                if final_node and final_path:
                     curr_f = self.ramses.host.normalizePath(final_node.Clip[1])
                     if curr_f != final_path:
                         final_node.Clip[1] = final_path
@@ -1133,10 +1131,6 @@ class RamsesFusionApp:
                 self._item_cache = None
                 self._step_cache = None
                 self._context_path = ""
-
-                # Invalidate the host's status cache to ensure the badge updates
-                if hasattr(self.ramses.host, "_status_cache"):
-                    self.ramses.host._status_cache = None
 
                 # Sync Savers? Safe to do on every refresh because _sync_render_anchors
                 # only modifies them if the path actually changed (avoids dirtying the comp).
@@ -2747,12 +2741,24 @@ class RamsesFusionApp:
         if not self._handle_validation(check_preview=True, check_final=False):
             return
 
-        self.ramses.host.savePreview()
+        # savePreview() returns False when the preview path cannot be resolved
+        # (unsaved file) and the renderer returns no files when the render
+        # itself fails or is cancelled. Discarding that reported "Preview
+        # created" for a preview that was never written, and the artist only
+        # found out when the review came back empty.
+        created = self.ramses.host.savePreview()
         self.refresh_header()
-        self._emit_action_status(
-            f"✓ Preview created · {time.strftime('%H:%M')}",
-            self.ramses.host.currentStatus(),
-        )
+        if created:
+            self._emit_action_status(
+                f"✓ Preview created · {time.strftime('%H:%M')}",
+                self.ramses.host.currentStatus(),
+            )
+        else:
+            self._set_status(
+                "Preview was not created. Check the _PREVIEW anchor and the "
+                "Fusion console for the render error.",
+                "error",
+            )
 
     def on_open_preview(self, ev: object) -> None:
         """Handler for the 'Open Preview' side-button.
@@ -3308,9 +3314,20 @@ class RamsesFusionApp:
     @requires_connection
     def on_sync(self, ev: object) -> None:
         """Handler for 'Sync Settings' button."""
-        self.ramses.host.setupCurrentFile()
+        # The button is enabled for any online session, but the sync needs a
+        # Ramses item to read the specs from. Without one setupCurrentFile()
+        # does nothing, and reporting success told the artist their comp had
+        # been conformed to the database when it had not been touched.
+        synced = self.ramses.host.setupCurrentFile()
         self.refresh_header()
-        self._set_status("✓ Project settings synced (resolution, FPS, range).", "ok")
+        if synced:
+            self._set_status("✓ Project settings synced (resolution, FPS, range).", "ok")
+        else:
+            self._set_status(
+                "Nothing to sync: this comp is not a Ramses item yet. "
+                "Use Save As to register it.",
+                "warn",
+            )
 
     @requires_connection
     def on_retrieve(self, ev: object) -> None:

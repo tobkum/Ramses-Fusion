@@ -48,6 +48,48 @@ class TestListDeliverables(unittest.TestCase):
             out.setdefault(d["kind"], []).append(d)
         return out
 
+    def test_versions_are_listed_newest_first(self):
+        """The browser must not invert the SDK's ordering.
+
+        publishedVersionFolderPaths() already returns newest-first
+        (sortDescending defaults to True). populate_versions() reversed it
+        again, so the top row - the obvious pick - was the OLDEST published
+        version, and artists imported stale plates.
+        """
+        rows = []
+
+        class _Row:
+            def __init__(self):
+                self.Text = {}
+
+        tree = MagicMock()
+        tree.NewItem.side_effect = lambda: _Row()
+        tree.AddTopLevelItem.side_effect = lambda item: rows.append(item.Text[0])
+
+        self.browser.dlg = MagicMock()
+        self.browser.dlg.GetItems.return_value = {"VersionTree": tree}
+        self.browser.host = MagicMock()
+        self.browser.host.fusionFileFormats.return_value = {".comp"}
+
+        # Newest-first, exactly as the SDK hands them over.
+        folders = []
+        for v in ("003", "002", "001"):
+            folder = os.path.join(self.tmp, "SH010_%s_OK" % v)
+            os.makedirs(folder)
+            open(os.path.join(folder, "SH010.mov"), "w").close()
+            folders.append(folder)
+
+        self.browser.current_shot = MagicMock()
+        self.browser._published_version_folders = MagicMock(return_value=folders)
+
+        self.browser.populate_versions(MagicMock())
+
+        versions = [r.split(" ")[0] for r in rows]
+        self.assertEqual(
+            versions, ["v003", "v002", "v001"],
+            "newest published version must be the first row",
+        )
+
     def test_comp_only_folder_yields_one_comp_row(self):
         self._touch("DNX_0163_camera.comp", "_ramses_data.json", ".ramses_complete")
         res = self.browser._list_deliverables(self.tmp, {".comp"})

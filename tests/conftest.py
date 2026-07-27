@@ -19,10 +19,37 @@ own fixtures.
 
 import os
 import string
+import sys
 
 import pytest
 
-# Created inside a step folder in real use — never at the root of a drive.
+# --- import paths -----------------------------------------------------------
+# Set here rather than in each test module so every module is runnable on its
+# own. They used to do it individually and one of them (test_integration) got
+# it wrong, pointing at a directory that does not exist; it only passed in a
+# full run because an alphabetically earlier module had already appended the
+# correct path. Running that file alone gave 8 failures, and which SDK patches
+# were live depended on collection order.
+_TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
+_PROJECT_ROOT = os.path.dirname(_TESTS_DIR)
+_APP_DIR = os.path.join(_PROJECT_ROOT, "Ramses-Fusion")
+_LIB_DIR = os.path.join(_APP_DIR, "lib")
+
+for _path in (_LIB_DIR, _APP_DIR):
+    if _path not in sys.path:
+        sys.path.insert(0, _path)
+
+# NOTE: the SDK patches are deliberately NOT applied here. Several test
+# modules replace entries in sys.modules at import time, and importing the
+# ramses package from conftest (before they get the chance) changes what they
+# end up mocking. A module that depends on patched SDK behaviour applies the
+# patches itself; see test_integration.py.
+
+# Any directory created at a drive root is a test artefact. The check used to
+# look only for these three names, which is why a fixture rendering to
+# "D:/Previews/Shot_Preview.mov" quietly created D:\Previews on every run: the
+# folder simply wasn't on the list. Kept only to name the usual suspects in
+# the failure message.
 _PIPELINE_FOLDERS = ("_versions", "_published", "_preview")
 
 
@@ -36,25 +63,38 @@ def _drive_roots():
     ]
 
 
-def _pipeline_dirs_at(roots):
-    return {
-        os.path.join(root, name)
-        for root in roots
-        for name in _PIPELINE_FOLDERS
-        if os.path.isdir(os.path.join(root, name))
-    }
+def _dirs_at(roots):
+    """Every top-level directory at each drive root.
+
+    Deliberately name-agnostic: a test has no business creating *any*
+    directory at a drive root, and an allow-list only catches the names
+    somebody already thought of.
+    """
+    found = set()
+    for root in roots:
+        try:
+            with os.scandir(root) as entries:
+                for entry in entries:
+                    try:
+                        if entry.is_dir():
+                            found.add(entry.path)
+                    except OSError:
+                        continue  # vanished or permission-denied mid-scan
+        except OSError:
+            continue  # unreadable root (empty removable drive, etc.)
+    return found
 
 
 @pytest.fixture(autouse=True)
-def no_drive_root_pipeline_dirs(request, _drive_roots):
-    """Fails the individual test that creates a pipeline folder at a drive root.
+def no_drive_root_dirs(request, _drive_roots):
+    """Fails the individual test that creates any directory at a drive root.
 
     Cleans up what it finds (only if empty) so one offending test cannot cascade
     into failures for every test that follows it.
     """
-    before = _pipeline_dirs_at(_drive_roots)
+    before = _dirs_at(_drive_roots)
     yield
-    created = sorted(_pipeline_dirs_at(_drive_roots) - before)
+    created = sorted(_dirs_at(_drive_roots) - before)
 
     for path in created:
         try:
@@ -65,7 +105,10 @@ def no_drive_root_pipeline_dirs(request, _drive_roots):
     if created:
         pytest.fail(
             "%s created %s at a drive root.\n"
-            "A fixture path's parent is a drive root (e.g. 'D:/test.comp' -> "
-            "'D:/'). Use a realistic nested path and patch os.makedirs so the "
-            "test cannot touch the filesystem." % (request.node.nodeid, created)
+            "Either a fixture path's parent is a drive root (e.g. 'D:/test.comp'"
+            " -> 'D:/'), or a fixture renders to a made-up absolute path such as"
+            " 'D:/Previews/x.mov'. Use tmp_path/tempfile, or patch os.makedirs "
+            "so the test cannot touch the filesystem.\n"
+            "(Pipeline folders %s at a root are the classic case.)"
+            % (request.node.nodeid, created, list(_PIPELINE_FOLDERS))
         )

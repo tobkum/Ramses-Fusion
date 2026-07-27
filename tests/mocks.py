@@ -2,6 +2,19 @@
 import os
 from unittest.mock import MagicMock
 
+class FusionAttrTable(dict):
+    """A Fusion tool attribute table (``tool.Comments``, ``tool.Clip``, ...).
+
+    Fusion returns an empty string for an index that was never set, e.g.
+    ``tool.Comments[1]`` on a node the user never commented. A plain dict
+    raises KeyError there, which made the mock stricter than the real host
+    and hid a real code path from the tests.
+    """
+
+    def __missing__(self, key):
+        return ""
+
+
 class MockTool:
     def __init__(self, name, attrs=None):
         self.Name = name
@@ -11,11 +24,11 @@ class MockTool:
         self.Input = {}
         # Attributes are stored here
         self.TileColor = {}
-        self.Comments = {}
-        self.Clip = {}
+        self.Comments = FusionAttrTable()
+        self.Clip = FusionAttrTable()
         # GlobalIn/Out
-        self.GlobalIn = {}
-        self.GlobalOut = {}
+        self.GlobalIn = FusionAttrTable()
+        self.GlobalOut = FusionAttrTable()
         # Metadata storage
         self.metadata = {}
 
