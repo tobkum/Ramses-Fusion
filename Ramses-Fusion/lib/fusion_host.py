@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 import os
 import re
-import json
 import threading
 import glob
 from ramses import (
@@ -24,7 +23,6 @@ try:
 except ImportError:
     import yaml
 from fusion_config import FusionConfig
-from asset_browser import AssetBrowser
 
 # =============================================================================
 # APPLY RUNTIME PATCHES
@@ -437,7 +435,6 @@ class FusionHost(RamHost):
         super().__init__()
         self.fusion = fusion_obj
         self.hostName = "Fusion"
-        self._status_cache = None  # Used for UI badge caching
         self._node_version_cache = {}  # {node_name: (last_path, is_outdated, latest_dir)}
         self._cache_lock = threading.Lock()  # Thread-safe cache access
 

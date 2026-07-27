@@ -3,7 +3,6 @@ import os
 import re
 import time
 import threading
-import concurrent.futures
 import functools
 import subprocess
 from typing import Optional, List, Any
@@ -89,13 +88,7 @@ from fusion_config import FusionConfig
 from ramses_patches import DisableMakedirs
 
 if qw:
-    from ramses_ui_pyside.open_dialog import RamOpenDialog
-    from ramses_ui_pyside.save_as_dialog import RamSaveAsDialog
-    from ramses_ui_pyside.status_dialog import RamStatusDialog
-    from ramses_ui_pyside.about_dialog import RamAboutDialog
     from ramses_ui_pyside.comment_dialog import RamCommentDialog
-    from ramses_ui_pyside.versions_dialog import RamVersionDialog
-    from ramses_ui_pyside.import_dialog import RamImportDialog
     from ramses_ui_pyside.update_dialog import RamUpdateDialog
 
 
@@ -1138,10 +1131,6 @@ class RamsesFusionApp:
                 self._item_cache = None
                 self._step_cache = None
                 self._context_path = ""
-
-                # Invalidate the host's status cache to ensure the badge updates
-                if hasattr(self.ramses.host, "_status_cache"):
-                    self.ramses.host._status_cache = None
 
                 # Sync Savers? Safe to do on every refresh because _sync_render_anchors
                 # only modifies them if the path actually changed (avoids dirtying the comp).

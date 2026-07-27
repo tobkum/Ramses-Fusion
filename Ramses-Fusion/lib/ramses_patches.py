@@ -34,7 +34,6 @@ Usage:
 
 import json
 import os
-import sys
 import threading
 import time
 from ramses.constants import LogLevel

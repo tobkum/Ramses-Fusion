@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 import os
 import re
-from ramses import RamItem, RamStep, RamFileInfo, ItemType, LogLevel
 from ramses_patches import DisableMakedirs
 
 # A trailing frame token, e.g. "...PLATE.01599116.exr" -> group(1) == "01599116".
