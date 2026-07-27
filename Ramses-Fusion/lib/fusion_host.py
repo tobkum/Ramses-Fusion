@@ -547,6 +547,31 @@ class FusionHost(RamHost):
             safe_name = "R_" + safe_name
         return safe_name
 
+    @staticmethod
+    def _toolName(node) -> str:
+        """The Fusion node's own name, e.g. ``"PLATE_IN"``.
+
+        ``comp.GetToolList()`` returns a table keyed by a 1-based *index*, not
+        by name, so the keys cannot be fed back to ``comp.FindTool()``. Any
+        code that needs to look a node up again (or cache per node) has to ask
+        the node itself.
+
+        Returns an empty string when the name cannot be read, so callers can
+        skip the node instead of caching under a bogus key.
+        """
+        if not node:
+            return ""
+        try:
+            name = node.Name
+            if name:
+                return str(name)
+        except Exception:
+            pass
+        try:
+            return str(node.GetAttrs()["TOOLS_Name"])
+        except Exception:
+            return ""
+
     def currentStatus(self) -> RamStatus:
         """Gets the current status, with safety guards for non-pipeline files.
 
@@ -3120,9 +3145,18 @@ class FusionHost(RamHost):
                     self._node_version_cache = {}
                 return 0
 
+            # GetToolList() keys are 1-based indices, not names — resolve each
+            # node's own name so the cache stays keyed by something stable and
+            # Phase 3 can find the node again.
+            named_loaders = []
+            for node in loaders.values():
+                name = self._toolName(node)
+                if name:
+                    named_loaders.append((name, node))
+
             # Clean up cache for deleted nodes
             with self._cache_lock:
-                current_names = set(loaders.keys())
+                current_names = {name for name, _ in named_loaders}
                 cached_names = list(self._node_version_cache.keys())
                 for name in cached_names:
                     if name not in current_names:
@@ -3130,7 +3164,7 @@ class FusionHost(RamHost):
 
             # Build list of (name, path) tuples while lock is held
             loaders_data = []
-            for name, node in loaders.items():
+            for name, node in named_loaders:
                 try:
                     path = self.normalizePath(node.Clip[1])
                     if "/_published/" in path:
@@ -3199,6 +3233,7 @@ class FusionHost(RamHost):
                         v_name = os.path.basename(latest_dir)
                         msg = f"New version available: {v_name}"
                         updates[name] = {
+                            "node": node,
                             "color": {"R": 1.0, "G": 0.5, "B": 0.0},
                             "comment": msg,
                         }
@@ -3207,6 +3242,7 @@ class FusionHost(RamHost):
                         # UP TO DATE: Clear warning visuals (None restores the
                         # default tile color; {0,0,0} would paint the node black)
                         updates[name] = {
+                            "node": node,
                             "color": None,
                             "comment": "",
                         }
@@ -3233,7 +3269,10 @@ class FusionHost(RamHost):
             self.comp.Lock()
             try:
                 for name, data in updates.items():
-                    node = self.comp.FindTool(name)
+                    # Use the node collected in Phase 1 rather than looking it
+                    # up again: GetToolList() keys are indices, so the previous
+                    # FindTool(key) never matched and no tile was ever coloured.
+                    node = data["node"] or self.comp.FindTool(name)
                     if node:
                         # Only update if current color differs
                         color = node.TileColor
@@ -3250,7 +3289,10 @@ class FusionHost(RamHost):
                         ):
                             node.TileColor = target_color
                         # Only update comment if different
-                        current_comment = str(node.Comments[1])
+                        try:
+                            current_comment = str(node.Comments[1] or "")
+                        except Exception:
+                            current_comment = ""
                         if data["comment"] and data["comment"] not in current_comment:
                             node.Comments[1] = data["comment"]
                         elif not data["comment"] and current_comment:

@@ -1033,8 +1033,63 @@ class TestFusionCompImport(unittest.TestCase):
         with patch.object(fusion_host.RamItem, "fromPath", return_value=mock_item), \
              patch.object(fusion_host.RamStep, "fromPath", return_value=mock_step):
             count = self.host.check_outdated_loaders()
-        
+
         self.assertEqual(count, 1)
+
+        # The visible half of the feature: the node must actually be coloured
+        # orange and carry the version hint. Asserting only `count` let a bug
+        # ship where GetToolList()'s integer keys were fed back to FindTool(),
+        # so Phase 3 never found a node and no tile was ever coloured.
+        self.assertEqual(
+            loader.TileColor, {"R": 1.0, "G": 0.5, "B": 0.0},
+            "Outdated loader must be coloured orange",
+        )
+        self.assertIn("v002", str(loader.Comments[1]))
+
+    def test_outdated_loader_visuals_cleared_when_up_to_date(self):
+        """A loader already on the latest version must be left un-coloured."""
+        comp = self.mock_fusion.GetCurrentComp()
+        loader = comp.AddTool("Loader", 0, 0)
+        loader.Clip[1] = "D:/Project/05-SHOTS/SH010/COMP/_published/v002/SH010.001.exr"
+        # Stale warning visuals from a previous scan
+        loader.TileColor = {"R": 1.0, "G": 0.5, "B": 0.0}
+        loader.Comments[1] = "New version available: v002"
+
+        import fusion_host
+
+        mock_item = MagicMock()
+        mock_item.shortName.return_value = "SH010"
+        mock_item.latestPublishedVersionFolderPath.return_value = (
+            "D:/Project/05-SHOTS/SH010/COMP/_published/v002"
+        )
+
+        with patch.object(fusion_host.RamItem, "fromPath", return_value=mock_item), \
+             patch.object(fusion_host.RamStep, "fromPath", return_value=MagicMock()):
+            count = self.host.check_outdated_loaders()
+
+        self.assertEqual(count, 0)
+        self.assertIsNone(loader.TileColor, "Up-to-date loader must lose its colour")
+        self.assertEqual(str(loader.Comments[1]), "")
+
+    def test_tool_name_resolves_from_node_not_gettoollist_key(self):
+        """GetToolList() is keyed by index; names must come from the node.
+
+        Pins the root cause directly: feeding a GetToolList() key back into
+        FindTool() finds nothing, which is what silently disabled the whole
+        outdated-loader colouring.
+        """
+        comp = self.mock_fusion.GetCurrentComp()
+        loader = comp.AddTool("Loader", 0, 0)
+        loader.SetAttrs({"TOOLS_Name": "PLATE_IN"})
+
+        keys = list(comp.GetToolList(False, "Loader").keys())
+        self.assertIsInstance(keys[0], int, "GetToolList is index-keyed")
+        self.assertIsNone(comp.FindTool(keys[0]), "an index is not a node name")
+
+        from fusion_host import FusionHost
+        name = FusionHost._toolName(loader)
+        self.assertEqual(name, "PLATE_IN")
+        self.assertIs(comp.FindTool(name), loader)
 
     def test_import_comp_failure_no_fallthrough(self):
         """Verify a failing .comp import does not create a Loader."""
