@@ -290,31 +290,19 @@ with _DAEMON_INIT_LOCK:
     # Upstream API now includes _socket_lock in daemon_interface.py:87, 629
     # =========================================================================
 
-    # 3. Fix Metadata Deletion in RamMetaDataManager
-    # The API's auto-deletion logic is prone to race conditions and path mismatches.
-    def _patched_getMetaData(folderPath):
-        meta_file = RamMetaDataManager.getMetaDataFile(folderPath)
-        if not os.path.exists(meta_file):
-            return {}
-        try:
-            with open(meta_file, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except json.JSONDecodeError as exc:
-            print(
-                f"[Ramses] ERROR: Metadata file is corrupted and cannot be read "
-                f"({meta_file}): {exc}"
-            )
-            return {}
-        except OSError as exc:
-            print(f"[Ramses] ERROR: Could not read metadata file ({meta_file}): {exc}")
-            return {}
-
-    def _patched_getFileMetaData(filePath):
-        data = RamMetaDataManager.getMetaData(os.path.dirname(filePath))
-        return data.get(os.path.basename(filePath), {})
-
-    RamMetaDataManager.getMetaData = staticmethod(_patched_getMetaData)
-    RamMetaDataManager.getFileMetaData = staticmethod(_patched_getFileMetaData)
+    # 3. Metadata patches live in ramses_patches.py ONLY.
+    # This module used to install its own getMetaData/getFileMetaData here,
+    # after ramses_patches.apply() had already run, so it silently won on a
+    # plain import — but NOT after Ramses-Fusion.py's importlib.reload(), which
+    # re-runs apply() while the _fusion_patched guard skips this block. Which
+    # implementation was live therefore depended on how the module got loaded:
+    # the tests exercised this one, production ran the other.
+    #
+    # ramses_patches' version is also the better one (it keeps the SDK's
+    # retry-with-backoff for a sidecar being rewritten concurrently; this one
+    # gave up on the first JSONDecodeError). The SDK's own getFileMetaData is
+    # fine as-is: it passes the file path down and getMetaDataFile() resolves
+    # a file to its folder.
 
     # ============================================================================
     # OBSOLETE PATCHES REMOVED (Fixed in Upstream API RC10)
