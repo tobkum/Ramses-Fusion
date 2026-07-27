@@ -351,6 +351,34 @@ class TestRamsesFusionApp(unittest.TestCase):
         self.app._create_render_anchors.assert_called_once()
         self.app.refresh_header.assert_called_once()
 
+    def test_sync_anchors_never_wipes_a_saver_path(self):
+        """An unresolvable path must leave the Saver alone, not blank it.
+
+        resolvePreviewPath()/resolveFinalPath() return "" on any failure, and
+        the early-out only fires when BOTH are empty. With one resolving and
+        the other not, the empty string was written straight onto the Saver.
+        """
+        comp = self.mock_fusion.GetCurrentComp()
+        preview = comp.AddTool("Saver", 0, 0)
+        preview.SetAttrs({"TOOLS_Name": "_PREVIEW"})
+        preview.Clip[1] = "X:/proj/_preview/SH010_COMP.mov"
+        final = comp.AddTool("Saver", 1, 0)
+        final.SetAttrs({"TOOLS_Name": "_FINAL"})
+        final.Clip[1] = "X:/proj/06-EXPORT/old.mov"
+
+        host = self.app.ramses.host
+        host.resolvePreviewPath = MagicMock(return_value="")  # transient failure
+        host.resolveFinalPath = MagicMock(return_value="X:/proj/06-EXPORT/new.mov")
+        host.apply_render_preset = MagicMock()
+
+        self.app._sync_render_anchors()
+
+        self.assertEqual(
+            preview.Clip[1], "X:/proj/_preview/SH010_COMP.mov",
+            "an unresolved preview path must not blank the Saver",
+        )
+        self.assertEqual(final.Clip[1], "X:/proj/06-EXPORT/new.mov")
+
     def test_on_sync_reports_failure_when_there_is_no_item(self):
         """Sync must not claim success when it had nothing to sync.
 

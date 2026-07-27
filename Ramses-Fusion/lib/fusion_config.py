@@ -198,7 +198,24 @@ class FusionConfig:
                         if inner.startswith('"') and inner.endswith('"'): inner = inner[1:-1]
                         tokens.append(('KEY', inner)); i = j + 1; continue
                 j = i
-                while j < n and (s[j].isalnum() or s[j] in '._-'): j += 1
+                # '+' is only part of a token as an exponent sign ("1e+05"),
+                # which Fusion writes for large values. Without it the scan
+                # below stops dead on the '+'.
+                while j < n and (
+                    s[j].isalnum()
+                    or s[j] in '._-'
+                    or (s[j] == '+' and j > i and s[j - 1] in 'eE')
+                ):
+                    j += 1
+                if j == i:
+                    # Nothing can start a token here. The cursor MUST still
+                    # advance: this branch used to leave i unchanged, so any
+                    # unexpected character ('+', '(', ':', '/', ';', '%', ...)
+                    # span the tokenizer forever. That runs on Fusion's UI
+                    # thread inside the dispatcher loop, so the only way out
+                    # was killing Fusion and losing the comp.
+                    i += 1
+                    continue
                 val = s[i:j]
                 if val == 'true': tokens.append(('BOOL', True))
                 elif val == 'false': tokens.append(('BOOL', False))

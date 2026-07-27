@@ -1,5 +1,6 @@
 import sys
 import os
+import shutil
 import unittest
 from unittest.mock import MagicMock, patch, ANY
 
@@ -207,9 +208,16 @@ class TestFusionHost(unittest.TestCase):
         preview_node = comp.AddTool("Saver", 0, 0)
         preview_node.SetAttrs({"TOOLS_Name": "_PREVIEW"})
         
-        # Mock paths
-        self.host.previewPath = MagicMock(return_value="D:/Previews")
-        self.host.publishFilePath = MagicMock(return_value="D:/Previews/fallback.mov")
+        # Mock paths. A real temp dir, not "D:/Previews": _preview() calls
+        # os.makedirs() on the resolved folder, so a made-up absolute path
+        # created a real directory at the drive root on every run.
+        import tempfile
+        preview_dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, preview_dir, True)
+        self.host.previewPath = MagicMock(return_value=preview_dir)
+        self.host.publishFilePath = MagicMock(
+            return_value=os.path.join(preview_dir, "fallback.mov")
+        )
         
         # Mock Step Settings to ensure fallback logic runs (empty settings)
         mock_step = MagicMock()
@@ -231,11 +239,14 @@ class TestFusionHost(unittest.TestCase):
         # We need to ensure the verify check passes
         self.host._verify_render_output = MagicMock(return_value=True)
         
-        results = self.host._preview("D:/Previews", "TEST_S_Shot01_COMP", None, None)
-        
+        results = self.host._preview(preview_dir, "TEST_S_Shot01_COMP", None, None)
+
+        expected = self.host.normalizePath(
+            os.path.join(preview_dir, "TEST_S_Shot01_COMP.mov")
+        )
         self.assertEqual(len(results), 1)
-        self.assertEqual(results[0], "D:/Previews/TEST_S_Shot01_COMP.mov")
-        self.assertEqual(preview_node.Clip[1], "D:/Previews/TEST_S_Shot01_COMP.mov")
+        self.assertEqual(results[0], expected)
+        self.assertEqual(preview_node.Clip[1], expected)
         # Verify ProRes preset was applied
         self.assertEqual(preview_node.GetInput(f"{FORMAT_QUICKTIME}.Compression"), CODEC_PRORES_422)
 

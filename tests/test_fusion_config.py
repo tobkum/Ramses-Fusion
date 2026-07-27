@@ -169,5 +169,42 @@ class TestFusionConfig(unittest.TestCase):
         config = FusionConfig.parse_saver_node(text)
         self.assertNotIn("source_numbering", config)
 
+
+class TestTokenizerTerminates(unittest.TestCase):
+    """The tokenizer must always make progress.
+
+    Its fallback branch scanned only [alnum._-]; on anything else the cursor
+    never advanced and the parse span forever. parse_saver_node() runs on
+    Fusion's UI thread inside the dispatcher loop when the user pastes a Saver
+    into the Step Render Config dialog, so a hang meant killing Fusion and
+    losing the comp. These would all have hung indefinitely.
+    """
+
+    @staticmethod
+    def _saver(value_expr):
+        return (
+            'Saver1 = Saver { Inputs = { '
+            'OutputFormat = Input { Value = FuID { "OpenEXRFormat" } }, '
+            '["OpenEXRFormat.X"] = Input { Value = %s } } }' % value_expr
+        )
+
+    def test_unexpected_characters_do_not_hang(self):
+        for ch in "+():/;%@!*&$#?|<>^~`":
+            with self.subTest(char=ch):
+                config = FusionConfig.parse_saver_node(self._saver("1%s0" % ch))
+                # It must return, and still recognise the node.
+                self.assertIsNotNone(config)
+                self.assertEqual(config["format"], "OpenEXRFormat")
+
+    def test_positive_exponent_parses_as_a_number(self):
+        """The realistic trigger: Fusion writes 1e+05 for large values."""
+        config = FusionConfig.parse_saver_node(self._saver("1e+05"))
+        self.assertEqual(config["properties"]["OpenEXRFormat.X"], 100000.0)
+
+    def test_negative_exponent_still_parses(self):
+        config = FusionConfig.parse_saver_node(self._saver("1e-06"))
+        self.assertEqual(config["properties"]["OpenEXRFormat.X"], 1e-06)
+
+
 if __name__ == "__main__":
     unittest.main()

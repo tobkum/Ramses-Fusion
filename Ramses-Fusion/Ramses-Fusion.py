@@ -994,8 +994,13 @@ class RamsesFusionApp:
 
             comp.Lock()
             try:
+                # Only write a path we actually resolved. resolvePreviewPath()
+                # and resolveFinalPath() return "" on any failure, and the
+                # guard above only returns early when BOTH are empty — so if
+                # one resolved and the other did not, the empty one used to be
+                # written straight onto the Saver, wiping its output path.
                 preview_node = comp.FindTool("_PREVIEW")
-                if preview_node:
+                if preview_node and preview_path:
                     # Explicit string conversion and normalization for robust comparison
                     curr_p = self.ramses.host.normalizePath(preview_node.Clip[1])
                     if curr_p != preview_path:
@@ -1003,7 +1008,7 @@ class RamsesFusionApp:
                         preview_needs_update = True
 
                 final_node = comp.FindTool("_FINAL")
-                if final_node:
+                if final_node and final_path:
                     curr_f = self.ramses.host.normalizePath(final_node.Clip[1])
                     if curr_f != final_path:
                         final_node.Clip[1] = final_path
