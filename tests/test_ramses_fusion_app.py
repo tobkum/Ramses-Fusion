@@ -68,7 +68,13 @@ class TestRamsesFusionApp(unittest.TestCase):
         fusion_host.bmd = sys.modules["bmd"]
 
         self.app = RamsesFusionApp()
-        
+
+        # Ramses.online() is `not self._offline` on a process-wide singleton, so
+        # a test that forces the daemon offline leaves every later test offline
+        # too - and every @requires_connection handler then returns early
+        # without running. Start each test from a known-online singleton.
+        self.app.ramses._offline = False
+
         # Standard UI Mocks to prevent dialogs during tests
         self.app.ramses.host._statusUI = MagicMock()
         self.app.ramses.host._openUI = MagicMock()
@@ -484,7 +490,7 @@ class TestRamsesFusionApp(unittest.TestCase):
             with patch.object(
                 RamsesFusionApp, "current_step", new_callable=PropertyMock, return_value=step
             ), patch.object(
-                type(host), "comp", new_callable=PropertyMock, return_value=comp
+                host, "fusion", MagicMock(GetCurrentComp=lambda: comp)
             ), patch.object(
                 host, "currentFilePath", return_value=src
             ), patch.object(
@@ -534,7 +540,7 @@ class TestRamsesFusionApp(unittest.TestCase):
                 with patch.object(
                     RamsesFusionApp, "current_step", new_callable=PropertyMock, return_value=step
                 ), patch.object(
-                    type(host), "comp", new_callable=PropertyMock, return_value=comp
+                    host, "fusion", MagicMock(GetCurrentComp=lambda: comp)
                 ), patch.object(
                     host, "currentFilePath", return_value=src
                 ), patch.object(
@@ -829,7 +835,13 @@ class TestValidationEdgeCases(unittest.TestCase):
         fusion_host.bmd = sys.modules["bmd"]
 
         self.app = RamsesFusionApp()
-        
+
+        # Ramses.online() is `not self._offline` on a process-wide singleton, so
+        # a test that forces the daemon offline leaves every later test offline
+        # too - and every @requires_connection handler then returns early
+        # without running. Start each test from a known-online singleton.
+        self.app.ramses._offline = False
+
         # Standard UI Mocks to prevent dialogs during tests
         self.app.ramses.host._statusUI = MagicMock()
         self.app.ramses.host._openUI = MagicMock()

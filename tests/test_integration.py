@@ -18,7 +18,7 @@ sys.modules["fusionscript"] = MagicMock()
 # --- 2. Setup Path ---
 current_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(current_dir)
-lib_path = os.path.join(os.path.dirname(project_root), "lib")
+lib_path = os.path.join(project_root, "Ramses-Fusion", "lib")
 app_path = os.path.join(project_root, "Ramses-Fusion")
 
 if lib_path not in sys.path:
@@ -36,6 +36,15 @@ sys.modules["ramses.daemon_interface"] = MagicMock(
 
 import ramses.ramses
 ramses.ramses.Ramses.connect = MagicMock(return_value=True)
+
+# The metadata tests below assert the behaviour the artist actually gets, which
+# is the patched SDK (fusion_host applies these at import in the real add-on).
+# Applying them explicitly keeps this module honest on its own: unpatched, the
+# vendored getMetaData prunes every entry whose name is not a file on disk, so
+# the round-trip assertions would fail when this file runs in isolation.
+import ramses_patches
+
+ramses_patches.apply()
 
 # Import Ramses file utilities
 from ramses import RamFileManager, RamFileInfo
