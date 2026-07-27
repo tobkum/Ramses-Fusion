@@ -1242,20 +1242,74 @@ class FusionHost(RamHost):
             return False
         return self.comp.SetAttrs({"COMPS_FileName": self.normalizePath(fileName)})
 
-    def setupCurrentFile(self) -> None:
+    def savePreview(self) -> bool:
+        """Renders the preview and reports whether a file was actually written.
+
+        The base implementation returns False when the preview path cannot be
+        resolved but returns None on the success path, so its result cannot be
+        tested — a caller checking it would read every successful render as a
+        failure. This override keeps the same behaviour and returns a real
+        bool, so the UI can tell the artist the truth.
+
+        Returns:
+            bool: True when at least one preview file was produced.
+        """
+        path = self.previewPath()
+        if not path:
+            self.log(
+                "The current file is not saved, so there is nowhere to put "
+                "the preview.",
+                LogLevel.Critical,
+            )
+            return False
+
+        fileInfo = RamFileInfo()
+        fileInfo.setFilePath(self.currentFilePath())
+        previewInfo = fileInfo.copy()
+        previewInfo.version = -1
+        previewInfo.extension = ""
+        previewInfo.resource = ""
+        previewInfo.state = ""
+
+        previewFiles = self._preview(
+            path, previewInfo.fileName(), self.currentItem(), self.currentStep()
+        )
+        if not previewFiles:
+            return False
+
+        for file in previewFiles:
+            RamMetaDataManager.setVersion(file, self.currentVersion())
+            RamMetaDataManager.setVersionFilePath(file, self.currentVersionFilePath())
+        return True
+
+    def setupCurrentFile(self) -> bool:
         """Applies Ramses settings and creates render anchors.
-        
+
         This is the standard entry point for syncing a scene with the database.
+
+        Returns:
+            bool: True when the settings were applied. False when there is no
+            Ramses item to apply them from (an unsaved comp, or one saved
+            outside the pipeline) — the caller must not report success then.
         """
         item = self.currentItem()
         step = self.currentStep()
-        if item:
-            settings = self.collectItemSettings(item)
-            self._setupCurrentFile(item, step, settings)
-            
-            # Fusion specific: also ensure anchors exist and are synced
-            if hasattr(self, "app") and self.app:
-                self.app._create_render_anchors()
+        if not item:
+            self.log(
+                "No Ramses item for the current comp: nothing to sync. "
+                "Save the comp into the pipeline first.",
+                LogLevel.Warning,
+            )
+            return False
+
+        settings = self.collectItemSettings(item)
+        if not self._setupCurrentFile(item, step, settings):
+            return False
+
+        # Fusion specific: also ensure anchors exist and are synced
+        if hasattr(self, "app") and self.app:
+            self.app._create_render_anchors()
+        return True
 
     def save(
         self,

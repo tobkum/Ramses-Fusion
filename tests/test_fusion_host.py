@@ -175,6 +175,32 @@ class TestFusionHost(unittest.TestCase):
         self.assertEqual(attrs["COMPN_GlobalStart"], 1001.0)
         self.assertEqual(attrs["COMPN_GlobalEnd"], 1250.0) # 1001 + 250 - 1
 
+    def test_savePreview_returns_a_real_bool(self):
+        """savePreview() must be testable by its caller.
+
+        The vendored base returns False when the path cannot be resolved but
+        returns None on the success path, so a caller checking the result read
+        every successful render as a failure. The override must return True
+        only when a file was actually produced.
+        """
+        self.host.previewPath = MagicMock(return_value="")
+        self.assertIs(self.host.savePreview(), False, "unresolvable path -> False")
+
+        self.host.previewPath = MagicMock(return_value="X:/proj/_preview")
+        self.host.currentFilePath = MagicMock(
+            return_value="X:/proj/SHOTS/SH010/COMP/TEST_S_SH010_COMP.comp"
+        )
+        self.host.currentVersion = MagicMock(return_value=3)
+        self.host.currentVersionFilePath = MagicMock(return_value="X:/v003.comp")
+
+        with patch.object(self.host, "_preview", return_value=[]):
+            self.assertIs(self.host.savePreview(), False, "no file written -> False")
+
+        with patch.object(
+            self.host, "_preview", return_value=["X:/proj/_preview/SH010.mov"]
+        ), patch("fusion_host.RamMetaDataManager"):
+            self.assertIs(self.host.savePreview(), True, "file written -> True")
+
     def test_preview_logic(self):
         """Verify '_PREVIEW' anchor discovery and automatic ProRes preset application."""
         comp = self.mock_fusion.GetCurrentComp()

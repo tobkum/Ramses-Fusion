@@ -2747,12 +2747,24 @@ class RamsesFusionApp:
         if not self._handle_validation(check_preview=True, check_final=False):
             return
 
-        self.ramses.host.savePreview()
+        # savePreview() returns False when the preview path cannot be resolved
+        # (unsaved file) and the renderer returns no files when the render
+        # itself fails or is cancelled. Discarding that reported "Preview
+        # created" for a preview that was never written, and the artist only
+        # found out when the review came back empty.
+        created = self.ramses.host.savePreview()
         self.refresh_header()
-        self._emit_action_status(
-            f"✓ Preview created · {time.strftime('%H:%M')}",
-            self.ramses.host.currentStatus(),
-        )
+        if created:
+            self._emit_action_status(
+                f"✓ Preview created · {time.strftime('%H:%M')}",
+                self.ramses.host.currentStatus(),
+            )
+        else:
+            self._set_status(
+                "Preview was not created. Check the _PREVIEW anchor and the "
+                "Fusion console for the render error.",
+                "error",
+            )
 
     def on_open_preview(self, ev: object) -> None:
         """Handler for the 'Open Preview' side-button.
@@ -3308,9 +3320,20 @@ class RamsesFusionApp:
     @requires_connection
     def on_sync(self, ev: object) -> None:
         """Handler for 'Sync Settings' button."""
-        self.ramses.host.setupCurrentFile()
+        # The button is enabled for any online session, but the sync needs a
+        # Ramses item to read the specs from. Without one setupCurrentFile()
+        # does nothing, and reporting success told the artist their comp had
+        # been conformed to the database when it had not been touched.
+        synced = self.ramses.host.setupCurrentFile()
         self.refresh_header()
-        self._set_status("✓ Project settings synced (resolution, FPS, range).", "ok")
+        if synced:
+            self._set_status("✓ Project settings synced (resolution, FPS, range).", "ok")
+        else:
+            self._set_status(
+                "Nothing to sync: this comp is not a Ramses item yet. "
+                "Use Save As to register it.",
+                "warn",
+            )
 
     @requires_connection
     def on_retrieve(self, ev: object) -> None:

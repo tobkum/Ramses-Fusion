@@ -351,6 +351,54 @@ class TestRamsesFusionApp(unittest.TestCase):
         self.app._create_render_anchors.assert_called_once()
         self.app.refresh_header.assert_called_once()
 
+    def test_on_sync_reports_failure_when_there_is_no_item(self):
+        """Sync must not claim success when it had nothing to sync.
+
+        The button is enabled for any online session, but setupCurrentFile()
+        needs a Ramses item. Without one it does nothing, and the handler used
+        to print the green "Project settings synced" confirmation anyway.
+        """
+        self.app.ramses.host.currentItem = MagicMock(return_value=None)
+        self.app.ramses.host._setupCurrentFile = MagicMock()
+        self.app._create_render_anchors = MagicMock()
+        self.app.refresh_header = MagicMock()
+        self.app._set_status = MagicMock()
+
+        self.app.on_sync(None)
+
+        self.app.ramses.host._setupCurrentFile.assert_not_called()
+        self.app._create_render_anchors.assert_not_called()
+        text, kind = self.app._set_status.call_args[0]
+        self.assertEqual(kind, "warn")
+        self.assertNotIn("✓", text)
+
+    def test_on_preview_reports_failure_when_no_file_was_written(self):
+        """A failed preview render must not be reported as created."""
+        self.app._handle_validation = MagicMock(return_value=True)
+        self.app.ramses.host.savePreview = MagicMock(return_value=False)
+        self.app.refresh_header = MagicMock()
+        self.app._set_status = MagicMock()
+        self.app._emit_action_status = MagicMock()
+
+        self.app.on_preview(None)
+
+        self.app._emit_action_status.assert_not_called()
+        text, kind = self.app._set_status.call_args[0]
+        self.assertEqual(kind, "error")
+        self.assertNotIn("✓", text)
+
+    def test_on_preview_reports_success_when_a_file_was_written(self):
+        """The success path must still confirm (savePreview returns a bool)."""
+        self.app._handle_validation = MagicMock(return_value=True)
+        self.app.ramses.host.savePreview = MagicMock(return_value=True)
+        self.app.refresh_header = MagicMock()
+        self.app._emit_action_status = MagicMock()
+
+        self.app.on_preview(None)
+
+        self.app._emit_action_status.assert_called_once()
+        self.assertIn("✓", self.app._emit_action_status.call_args[0][0])
+
     def test_on_import_handler_standard(self):
         """Verify on_import delegates to host.importItem()."""
         self.app.ramses.host.importItem = MagicMock(return_value=True)
