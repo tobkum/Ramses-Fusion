@@ -41,27 +41,24 @@ class TestPatchIdempotence(unittest.TestCase):
             depth += 1
         return depth
 
-    def test_apply_does_not_stack_wrappers(self):
-        # Establish the patched baseline first: the question is whether
-        # *repeating* apply() adds layers, not whether the first one does.
-        ramses_patches.apply()
-        before = self._wrapper_depth(RamMetaDataManager.getValue)
+    def test_apply_is_a_no_op_and_stays_callable(self):
+        """apply() no longer patches anything, but both hosts still call it.
+
+        The fixes it used to install are in the vendored SDK as of
+        Ramses-Py 30582ce. Removing the function would break the call sites,
+        so it stays as the hook for the next one.
+        """
         for _ in range(5):
             ramses_patches.apply()
-        after = self._wrapper_depth(RamMetaDataManager.getValue)
-        self.assertEqual(
-            after, before,
-            "apply() wrapped an already-patched getValue; wrappers stack once "
-            "per Fusion panel launch",
+        self.assertFalse(
+            getattr(RamMetaDataManager, "_ramses_patched", False),
+            "the metadata patches are gone; only the daemon patch sets a "
+            "sentinel now, and it is on RamDaemonInterface",
         )
-
-    def test_apply_is_marked_on_the_patched_class(self):
-        ramses_patches.apply()
-        self.assertTrue(getattr(RamMetaDataManager, "_ramses_patched", False))
 
 
 class TestGetMetaDataOwnership(unittest.TestCase):
-    """The reader installed must be the same one production ends up with."""
+    """The reader in use must be the SDK's, in tests and in production alike."""
 
     def test_patched_reader_survives_a_fusion_host_reload(self):
         import fusion_host
@@ -69,10 +66,12 @@ class TestGetMetaDataOwnership(unittest.TestCase):
         # Exactly what Ramses-Fusion.py's __main__ does on every launch.
         importlib.reload(fusion_host)
         self.assertEqual(
-            RamMetaDataManager.getMetaData.__module__, "ramses_patches",
-            "fusion_host must not install a competing getMetaData: which one "
-            "won used to depend on whether the module had been reloaded, so "
-            "the tests and the shipped add-on ran different code",
+            RamMetaDataManager.getMetaData.__module__, "ramses.metadata_manager",
+            "getMetaData must come from the vendored SDK: the fix is upstream "
+            "now, so nothing should be reinstalling its own reader. fusion_host "
+            "used to install a competing one, and which won depended on whether "
+            "the module had been reloaded, so the tests and the shipped add-on "
+            "ran different code",
         )
 
 

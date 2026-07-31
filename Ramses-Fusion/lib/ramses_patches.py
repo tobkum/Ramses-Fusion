@@ -7,21 +7,31 @@ Runtime fixes for the vendored ramses-py SDK (lib/ramses/). The SDK files
 themselves are deliberately never edited so they stay cleanly replaceable
 from upstream — anything the SDK gets wrong is corrected here at runtime.
 
-Patches applied by apply() (this module):
- - RamMetaDataManager.getMetaData: no longer prunes entries for files that
-   are "missing" — pruning raced the (potentially threaded) version-copy
-   and destroyed metadata for files still being written.
- - RamMetaDataManager.setFileMetaData: refuses to rewrite the sidecar from
-   an empty merge base when the sidecar file exists non-empty (a transient
-   corrupt read would otherwise wipe the whole folder's metadata on the
-   very next write).
- - RamMetaDataManager.getValue/setValue: bail on a falsy filePath instead
-   of crashing in os.path functions (copyToVersion & co. can return None).
- - RamDaemonInterface.online: returns False on any error instead of
-   leaking KeyError/socket exceptions when the daemon dies mid-reply.
-
 Applied at import time (this module):
  - DisableMakedirs / guarded os.makedirs (see below).
+
+Applied by apply():
+ - RamDaemonInterface.online: returns False on any error instead of leaking
+   KeyError/socket exceptions when the daemon dies mid-reply.
+
+Removed, because they are fixed in the vendored SDK as of Ramses-Py 30582ce
+(PRs #12/#13):
+ - RamMetaDataManager.getMetaData no longer prunes entries for missing files
+ - RamMetaDataManager.setFileMetaData refuses to rewrite from an unreadable
+   sidecar
+ - RamMetaDataManager.getValue/setValue guard a falsy filePath
+
+The daemon patch is NOT redundant and stays. Upstream's fix is narrower: it
+made __testConnection() tolerate a malformed *reply*, but online() is still a
+bare `return self.__testConnection()`, so anything the socket layer raises
+(ConnectionResetError and friends from __post) still escapes a call that
+exists only to answer "is the daemon there?". Removing this patch was tried
+and the test caught it immediately.
+
+Those patches replaced the SDK's methods wholesale, so leaving them in place
+after the update would have silently overridden upstream's implementations
+and masked any later improvement to them. The behaviour is still covered by
+tests, which now assert it of the vendored SDK itself rather than of a patch.
 
 NOTE: several older patches (synchronous RamFileManager.copy, robust
 version file resolution, RamHost.publish state propagation) historically
@@ -32,123 +42,27 @@ Usage:
     ramses_patches.apply()
 """
 
-import json
 import os
 import threading
-import time
 from ramses.constants import LogLevel
 from ramses.logger import log
-
-
-def _patch_metadata_manager():
-    """Fixes data-loss bugs in the vendored RamMetaDataManager.
-
-    The sidecar (_ramses_data.json) holds the metadata of EVERY file in a
-    folder, and all setters are read-modify-write through getMetaData().
-    Two vendored behaviors could destroy it:
-
-    1. getMetaData() pruned entries whose file doesn't exist ON READ.
-       Version backups may be copied on a background thread; the metadata
-       write for the new file fires immediately, sees the in-flight file
-       as "missing", prunes its (or a sibling's) entry, and the prune is
-       persisted by the write. Stale entries are harmless bloat; the prune
-       race is not — so the patched getMetaData never prunes.
-
-    2. getMetaData() returns {} when the sidecar can't be parsed after
-       retries (e.g. the Ramses client is writing it non-atomically at
-       that moment). setFileMetaData() then merged one entry into that
-       empty dict and rewrote the file — wiping every other file's
-       metadata in the folder. The patched setFileMetaData refuses the
-       write when the merge base is empty but the sidecar file exists
-       non-empty: losing one metadata update is recoverable, losing the
-       folder's whole history is not.
-    """
-    from ramses.metadata_manager import RamMetaDataManager
-
-    # getValue/setValue wrap whatever is currently installed, so re-running
-    # apply() would wrap the wrapper. Ramses-Fusion.py reloads fusion_host on
-    # every launch, which re-executes apply(), so without this guard the
-    # wrappers stacked one layer per launch: a whole comp day of opening the
-    # panel put dozens of nested frames on every metadata read, and leaked the
-    # closures of every previous fusion_host module.
-    if getattr(RamMetaDataManager, "_ramses_patched", False):
-        return
-
-    def _patched_getMetaData(folderPath):
-        """Reads the sidecar without pruning entries for missing files."""
-        file = RamMetaDataManager.getMetaDataFile(folderPath)
-        if not os.path.exists(file):
-            return {}
-        data = {}
-        for _attempt in range(3):
-            try:
-                with open(file, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                break
-            except (json.JSONDecodeError, IOError):
-                if _attempt < 2:
-                    time.sleep(0.01 * (2 ** _attempt))
-                    continue
-                return {}
-        return data
-
-    def _patched_setFileMetaData(filePath, fileData):
-        """Sets one file's metadata; refuses to clobber an unreadable sidecar."""
-        if not filePath:
-            log("Metadata write skipped: no file path.", LogLevel.Debug)
-            return
-        folderPath = os.path.dirname(filePath)
-        fileName = os.path.basename(filePath)
-        data = RamMetaDataManager.getMetaData(folderPath)
-        metaFile = RamMetaDataManager.getMetaDataFile(folderPath)
-        if not data and os.path.isfile(metaFile) and os.path.getsize(metaFile) > 2:
-            log(
-                "Metadata sidecar could not be read (locked or corrupt): "
-                "skipping this metadata update instead of overwriting the "
-                "folder's existing metadata. (" + metaFile + ")",
-                LogLevel.Critical,
-            )
-            return
-        data[fileName] = fileData
-        RamMetaDataManager.setMetaData(folderPath, data)
-
-    _original_getValue = RamMetaDataManager.getValue
-    _original_setValue = RamMetaDataManager.setValue
-
-    def _patched_getValue(filePath, key):
-        # copyToVersion()/restoreVersionFile() can return None; the vendored
-        # getValue/setValue crash in os.path on it (TypeError) deep inside
-        # the save chain. Degrade to a no-op instead.
-        if not filePath:
-            return None
-        return _original_getValue(filePath, key)
-
-    def _patched_setValue(filePath, key, value):
-        if not filePath:
-            log("Metadata write skipped: no file path.", LogLevel.Debug)
-            return
-        return _original_setValue(filePath, key, value)
-
-    RamMetaDataManager.getMetaData = staticmethod(_patched_getMetaData)
-    RamMetaDataManager.setFileMetaData = staticmethod(_patched_setFileMetaData)
-    RamMetaDataManager.getValue = staticmethod(_patched_getValue)
-    RamMetaDataManager.setValue = staticmethod(_patched_setValue)
-    RamMetaDataManager._ramses_patched = True
 
 
 def _patch_daemon_interface():
     """Makes RamDaemonInterface.online() never raise.
 
-    The vendored __testConnection subscripts the ping reply ('content',
-    'ramses') without guards, and the socket send/recv paths aren't fully
-    wrapped — a daemon that dies mid-reply made online() raise
-    KeyError/ConnectionResetError instead of returning False, crashing
-    callers that just wanted a connectivity check.
+    online() is a connectivity probe and callers expect a bool. Upstream now
+    guards the *shape* of the ping reply inside __testConnection(), but
+    online() itself is a bare `return self.__testConnection()` and the socket
+    send/recv path underneath can still raise (ConnectionResetError, and
+    whatever a daemon dying mid-reply produces). Wrap it so a probe never
+    takes down its caller.
     """
     from ramses.daemon_interface import RamDaemonInterface
 
-    # Same re-entrancy hazard as the metadata patches: this wraps the current
-    # online(), so a second apply() would wrap the wrapper.
+    # This wraps the current online(), so a second apply() would wrap the
+    # wrapper: Ramses-Fusion's entry script reloads its host module on every
+    # launch and stacked one layer per launch before this guard existed.
     if getattr(RamDaemonInterface, "_ramses_patched", False):
         return
 
@@ -167,10 +81,6 @@ def _patch_daemon_interface():
 
 def apply():
     """Applies all available runtime patches."""
-    # NOTE: No fusion_config patch needed — fusion_config.py already contains the
-    # correct robust parser. The old _patch_fusion_config was replacing it with an
-    # identical copy (dead maintenance weight) and has been removed.
-    _patch_metadata_manager()
     _patch_daemon_interface()
     log("Ramses runtime patches applied.", LogLevel.Debug)
 
