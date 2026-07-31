@@ -646,25 +646,36 @@ class RamDaemonInterface( object ):
 
                 startTime = time.time()
 
-                s.sendall(query.encode('utf-8'))
+                try:
+                    s.sendall(query.encode('utf-8'))
 
-                if bufsize == 0:
-                    return None
+                    if bufsize == 0:
+                        return None
 
-                data = s.recv(bufsize)
-                if not data:
-                    log("Empty reply from the Ramses Daemon.", LogLevel.Critical)
+                    data = s.recv(bufsize)
+                    if not data:
+                        log("Empty reply from the Ramses Daemon.", LogLevel.Critical)
+                        return {
+                            'accepted': False,
+                            'success': False
+                        }
+
+                    # More data to get
+                    while not data.endswith(self.DATA_END) and (time.time() - startTime) < timeout:
+                        moreData = s.recv(bufsize)
+                        if not moreData:
+                            break;
+                        data = data + moreData
+                except OSError as e:
+                    # The daemon can drop mid-exchange (client quit, socket
+                    # reset). This is a query, not a connectivity probe, so
+                    # report failure rather than letting the exception escape
+                    # to callers (e.g. online()) that only expect a reply dict.
+                    log("Lost connection to the Ramses Daemon: " + str(e), LogLevel.Critical)
                     return {
                         'accepted': False,
                         'success': False
                     }
-
-                # More data to get
-                while not data.endswith(self.DATA_END) and (time.time() - startTime) < timeout:
-                    moreData = s.recv(bufsize)
-                    if not moreData:
-                        break;
-                    data = data + moreData
 
             if not data.endswith(self.DATA_END):
                 log("Data received from the Ramses Daemon looks unterminated.", LogLevel.Debug)
@@ -683,28 +694,31 @@ class RamDaemonInterface( object ):
 
             log (str(data), LogLevel.DataReceived )
 
-            if not obj['accepted']: log("Unknown Ramses Daemon query: " + obj['query'], LogLevel.Critical)
-            if not obj['success']: log("Warning: the Ramses Daemon could not reply to the query: " + obj['query'], LogLevel.Debug)
-            if obj['message']: log(obj['message'], LogLevel.Debug)
+            if not obj.get('accepted'): log("Unknown Ramses Daemon query: " + str(obj.get('query')), LogLevel.Critical)
+            if not obj.get('success'): log("Warning: the Ramses Daemon could not reply to the query: " + str(obj.get('query')), LogLevel.Debug)
+            if obj.get('message'): log(obj.get('message'), LogLevel.Debug)
 
             return obj
 
     def __testConnection(self):
-        """Checks if the Ramses Daemon is available"""
+        """Checks if the Ramses Daemon is available.
+
+        This backs online() and must never raise: it is a connectivity probe,
+        and callers expect a bool. The reply keys are read defensively (a
+        malformed reply, or one missing 'content'/'ramses', means "not
+        available", not a KeyError), the same way __checkUser() already does."""
 
         data = self.ping()
 
-        if data is None:
+        if not isinstance(data, dict):
             log("Daemon unavailable", LogLevel.Debug)
             return False
 
-        content = data['content']
-        if content is None:
-            log("Daemon did not reply correctly")
+        content = data.get('content')
+        if not isinstance(content, dict):
+            log("Daemon did not reply correctly", LogLevel.Debug)
             return False
-        if content['ramses'] == "Ramses":
-            return True
-        if content['ramses'] == "Ramses-Client":
+        if content.get('ramses') in ("Ramses", "Ramses-Client"):
             return True
 
         log("Invalid content in the Daemon reply", LogLevel.Critical)
