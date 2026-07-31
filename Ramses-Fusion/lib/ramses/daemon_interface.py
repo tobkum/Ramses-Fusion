@@ -72,10 +72,11 @@ class RamDaemonInterface( object ):
 
     @staticmethod
     def checkReply( obj ):
-        if not obj:
+        """Returns the reply's content, or {} for any reply without usable content."""
+        if not isinstance(obj, dict):
             return {}
-        if obj['accepted'] and obj['success'] and obj['content'] is not None:
-            return obj['content']
+        if obj.get('accepted') and obj.get('success') and obj.get('content') is not None:
+            return obj.get('content')
         return {}
 
     @classmethod
@@ -97,8 +98,12 @@ class RamDaemonInterface( object ):
         raise RuntimeError("RamDaemonInterface can't be initialized with `RamDaemonInterface()`, it is a singleton. Call RamDaemonInterface.instance() or Ramses.instance().daemonInterface() instead.")
 
     def online(self):
-        """Checks if the daemon is available"""
-        return self.__testConnection()
+        """Checks if the daemon is available. Never raises; returns False."""
+        try:
+            return self.__testConnection()
+        except Exception as e: # pylint: disable=broad-except
+            log("Daemon connectivity check failed: " + str(e), LogLevel.Debug)
+            return False
 
     def ping(self):
         """Gets the version and current user of the ramses daemon.

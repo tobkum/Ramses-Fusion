@@ -22,38 +22,22 @@ class TestPatchIdempotence(unittest.TestCase):
     """apply() must be safe to run repeatedly.
 
     Ramses-Fusion.py reloads fusion_host on every launch, which re-runs
-    apply(). getValue/setValue/online wrap whatever is currently installed,
-    so without a guard each launch added another wrapper layer.
+    apply(). The patches it used to install wrapped whatever was currently
+    installed, so without a guard each launch added another wrapper layer.
     """
-
-    @staticmethod
-    def _wrapper_depth(func):
-        depth = 0
-        while depth < 60:
-            nested = [
-                cell.cell_contents
-                for cell in (func.__closure__ or ())
-                if callable(cell.cell_contents)
-            ]
-            if not nested:
-                break
-            func = nested[0]
-            depth += 1
-        return depth
 
     def test_apply_is_a_no_op_and_stays_callable(self):
         """apply() no longer patches anything, but both hosts still call it.
 
-        The fixes it used to install are in the vendored SDK as of
-        Ramses-Py 30582ce. Removing the function would break the call sites,
-        so it stays as the hook for the next one.
+        The metadata fixes are in the vendored SDK as of Ramses-Py 30582ce,
+        the daemon one as of d19ce44. Removing the function would break the
+        call sites, so it stays as the hook for the next one.
         """
         for _ in range(5):
             ramses_patches.apply()
         self.assertFalse(
             getattr(RamMetaDataManager, "_ramses_patched", False),
-            "the metadata patches are gone; only the daemon patch sets a "
-            "sentinel now, and it is on RamDaemonInterface",
+            "no patch installs a sentinel any more",
         )
 
 
@@ -144,6 +128,12 @@ class TestFalsyPathGuards(unittest.TestCase):
 
 
 class TestDaemonOnlineNeverRaises(unittest.TestCase):
+    """online() is a connectivity probe; callers expect a bool, not a raise.
+
+    This asserts the vendored SDK now, not a runtime patch: the guard moved
+    upstream in Ramses-Py d19ce44 (PR #16) and the patch was deleted.
+    """
+
     def test_online_returns_false_when_the_daemon_misbehaves(self):
         from unittest.mock import MagicMock
 
