@@ -44,6 +44,18 @@ class MockTool:
             super().__setattr__(name, value)
 
 
+    def __getitem__(self, name):
+        """Fusion exposes a tool's inputs by name, e.g. ``tool["Reverse"][0]``.
+
+        The mock had no such access, so any code reading a named input was
+        invisible to the tests: the TypeError landed in the caller's own
+        guard and the path silently did nothing.
+        """
+        return self.Input.setdefault(name, FusionAttrTable())
+
+    def __setitem__(self, name, value):
+        self.Input[name] = value
+
     def SetAttrs(self, attrs):
         self.attrs.update(attrs)
         # Update Name if TOOLS_Name is set

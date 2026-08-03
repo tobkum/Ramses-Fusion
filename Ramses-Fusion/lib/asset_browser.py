@@ -50,6 +50,12 @@ class AssetBrowser:
                 self.ui.VGap(10),
                 self.ui.Label({"Text": "Published Versions:", "Weight": 0}),
                 self.ui.Tree({"ID": "VersionTree", "Weight": 1, "HeaderHidden": False, "ColumnCount": 2}),
+                # Import used to be able to do nothing at all — no selection,
+                # the "nothing published" placeholder, or a file that has since
+                # left the disk all fell through the same silent guard, so the
+                # button simply did not respond and the artist had no way to
+                # tell which of the three it was.
+                self.ui.Label({"ID": "Msg", "Text": "", "Weight": 0}),
                 self.ui.VGap(10),
                 self.ui.HGroup({"Weight": 0}, [
                     self.ui.HGap(0, 1),
@@ -91,35 +97,51 @@ class AssetBrowser:
         # Event Handlers
         results = [None]
         
+        msg = items.get("Msg")
+
+        def say(text):
+            if msg is not None:
+                msg.Text = text
+
         def on_step_changed(ev):
             idx = int(combo.CurrentIndex)
             step = self.step_map.get(idx)
             if step:
+                say("")
                 self.populate_versions(step)
-            
+
         def on_import(ev):
             # Handle potential PyFunctionCall wrapper
             item_or_func = tree.CurrentItem
-            if item_or_func is None:
-                return
-
             if callable(item_or_func):
                 item = item_or_func()
             else:
                 item = item_or_func
 
-            if item:
-                # Column 1 holds the full path
-                # Try GetText method first (safer)
-                if hasattr(item, "GetText"):
-                    path = item.GetText(1)
-                else:
-                    path = item.Text[1]
-                    
-                if path and os.path.exists(path):
-                    results[0] = path
-                    self.disp.ExitLoop()
-        
+            if not item:
+                say("Select a version first.")
+                return
+
+            # Column 1 holds the full path
+            # Try GetText method first (safer)
+            if hasattr(item, "GetText"):
+                path = item.GetText(1)
+            else:
+                path = item.Text[1]
+
+            # The "nothing published yet" placeholder carries no path.
+            if not path:
+                say("There is nothing to import from this step.")
+                return
+
+            if not os.path.exists(path):
+                say("That file is no longer on disk. Refresh the step.")
+                return
+
+            results[0] = path
+            self.disp.ExitLoop()
+
+
         def on_cancel(ev):
             self.disp.ExitLoop()
             
@@ -170,7 +192,11 @@ class AssetBrowser:
             status = shot.currentStatus(upstream)
 
             is_skipped = False
-            if status:
+            # A status can exist with no state on it. Everywhere else in the
+            # plugin that reads a state guards for this; here it did not, so
+            # opening the browser on a shot with such a status raised an
+            # AttributeError out of show() instead of listing anything.
+            if status and status.state():
                 state_short = status.state().shortName().upper()
                 if state_short in self.SKIP_STATES:
                     is_skipped = True

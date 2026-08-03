@@ -1,6 +1,7 @@
 import sys
 import os
 import shutil
+import tempfile
 import unittest
 from unittest.mock import MagicMock, patch, ANY
 
@@ -258,6 +259,11 @@ class TestFusionHost(unittest.TestCase):
         final_node = comp.AddTool("Saver", 0, 0)
         final_node.SetAttrs({"TOOLS_Name": "_FINAL"})
         final_node.Clip[1] = "D:/Renders/TEST_S_Shot01_COMP.mov"
+        # _publish resolves its own final path now, which is a daemon
+        # round-trip. Keep the unit test off the daemon and let it fall
+        # back to the path already on the Saver.
+        self.host.resolveFinalPath = MagicMock(return_value="")
+        self.host.apply_render_preset = MagicMock()
         
         # 1. Setup mock publish info
         expected_dst = "D:/Projects/Published/TEST_S_Shot01_COMP.comp"
@@ -287,6 +293,749 @@ class TestFusionHost(unittest.TestCase):
         self.assertIn("D:/Renders/TEST_S_Shot01_COMP.mov", published)
         self.assertIn(expected_dst, published)
 
+    def test_preview_applies_preset_outside_the_comp_lock(self):
+        """The preview preset is a daemon round-trip and must not hold the lock.
+
+        Same reason as the publish path: apply_render_preset() reads the step's
+        settings from the Ramses daemon, and doing that inside comp.Lock() would
+        leave Fusion sitting on a locked comp whenever the daemon is slow.
+        """
+        comp = self.mock_fusion.GetCurrentComp()
+        preview_node = comp.AddTool("Saver", 0, 0)
+        preview_node.SetAttrs({"TOOLS_Name": "_PREVIEW"})
+
+        import tempfile
+        preview_dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, preview_dir, True)
+
+        self.host.resolvePreviewPath = MagicMock(
+            return_value=os.path.join(preview_dir, "shot.mov")
+        )
+        self.host._verify_render_output = MagicMock(return_value=True)
+
+        order = []
+        comp.Lock = MagicMock(side_effect=lambda: order.append("lock"))
+        comp.Unlock = MagicMock(side_effect=lambda: order.append("unlock"))
+        self.host.apply_render_preset = MagicMock(
+            side_effect=lambda *a, **k: order.append("preset")
+        )
+
+        self.host._preview(preview_dir, "shot", None, None)
+
+        self.assertIn("preset", order)
+        self.assertLess(order.index("preset"), order.index("lock"))
+
+    def test_preview_reports_an_unwritable_output_directory(self):
+        """A folder that cannot be created is a failure, not a traceback.
+
+        A disconnected share is the everyday cause. The makedirs call sat
+        outside any try, so the OSError travelled up through savePreview() and
+        out of the button handler: the artist got a console traceback and the
+        UI's "Preview was not created" branch was never reached. _publish
+        already handled the same case this way.
+        """
+        comp = self.mock_fusion.GetCurrentComp()
+        preview_node = comp.AddTool("Saver", 0, 0)
+        preview_node.SetAttrs({"TOOLS_Name": "_PREVIEW"})
+
+        self.host.resolvePreviewPath = MagicMock(
+            return_value="Q:/gone/shot.mov"
+        )
+        self.host._render_anchor = MagicMock(return_value=True)
+        # The preset is applied before the directory check now, because the
+        # format decides the extension and therefore the real output path.
+        # It is a daemon round-trip, which this test has no business making.
+        self.host.apply_render_preset = MagicMock()
+        preview_node.Clip[1] = "Q:/gone/shot.mov"
+
+        with patch(
+            "os.makedirs", side_effect=OSError("network path not found")
+        ):
+            result = self.host._preview("Q:/gone", "shot", None, None)
+
+        self.assertEqual(result, [])
+        # Nothing should have been rendered once the destination is unusable.
+        self.host._render_anchor.assert_not_called()
+
+    def test_replace_keeps_the_loader_playback_settings(self):
+        """Swapping a Loader's clip must not discard the artist's settings.
+
+        Fusion resets a Loader's playback inputs when the clip behind it
+        changes length, so updating a plate to a longer or shorter version
+        silently threw away any hold, reverse or timecode offset that had been
+        set on it. Nothing reported it; the artist found out by looking.
+        """
+        from mocks import MockTool
+
+        loader = MockTool("Loader1")
+        loader.SetAttrs({"TOOLS_RegID": "Loader", "TOOLS_Name": "Loader1"})
+        loader["HoldFirstFrame"][0] = 5
+        loader["Reverse"][0] = 1
+        loader["TimeCodeOffset"][0] = 12
+
+        comp = self.mock_fusion.GetCurrentComp()
+        comp.ActiveTool = loader
+
+        # Fusion's own reset on a length change, which is what the guard
+        # has to survive.
+        def _swap_and_reset(*_a, **_k):
+            loader["HoldFirstFrame"][0] = 0
+            loader["Reverse"][0] = 0
+            loader["TimeCodeOffset"][0] = 0
+
+        original_clip = loader.Clip
+
+        class _ResettingClip(dict):
+            def __missing__(self, key):
+                return ""
+
+            def __setitem__(self, key, value):
+                dict.__setitem__(self, key, value)
+                _swap_and_reset()
+
+        loader.Clip = _ResettingClip(original_clip)
+
+        item = MagicMock()
+        item.shortName.return_value = "SH010"
+        item.uuid.return_value = "item-uuid"
+        step = MagicMock()
+        step.shortName.return_value = "COMP"
+        step.uuid.return_value = "step-uuid"
+
+        ok = self.host._replace(
+            ["X:/proj/SH010_PLATE_002/SH010.exr"], item, step, [], False
+        )
+
+        self.assertTrue(ok)
+        self.assertEqual(loader["HoldFirstFrame"][0], 5)
+        self.assertEqual(loader["Reverse"][0], 1)
+        self.assertEqual(loader["TimeCodeOffset"][0], 12)
+
+    def test_incomplete_sequence_fails_verification(self):
+        """A render that died partway must not pass as a finished master.
+
+        The check used to return True as soon as any one frame of the sequence
+        existed, so a render that stopped at frame 40 of 200 left a folder of
+        perfectly valid EXRs, published clean, and was found at delivery.
+        """
+        seq_dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, seq_dir, True)
+
+        for frame in range(1001, 1041):
+            with open(os.path.join(seq_dir, "SH010.%04d.exr" % frame), "w") as fh:
+                fh.write("x")
+
+        path = os.path.join(seq_dir, "SH010.0000.exr")
+
+        self.assertFalse(
+            self.host._verify_render_output(path, expected_frames=200),
+            "40 of 200 frames must not verify",
+        )
+        self.assertTrue(
+            self.host._verify_render_output(path, expected_frames=40),
+            "a complete sequence must verify",
+        )
+
+    def test_movie_still_verifies_against_a_frame_range(self):
+        """One movie file covers the whole range; it is not 200 files.
+
+        The frame-count check must not reject a QuickTime just because the
+        range is 200 frames long and there is one file on disk.
+        """
+        out_dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, out_dir, True)
+
+        path = os.path.join(out_dir, "SH010.mov")
+        with open(path, "w") as fh:
+            fh.write("x")
+
+        self.assertTrue(
+            self.host._verify_render_output(path, expected_frames=200)
+        )
+
+    def test_pinned_comp_survives_a_tab_switch(self):
+        """A publish must finish on the comp it started on.
+
+        `comp` is a property over GetCurrentComp(), so switching comp tabs
+        mid-publish changed what every later helper saw. The pin holds it.
+        """
+        started_on = self.mock_fusion.GetCurrentComp()
+        other = MagicMock(name="OtherComp")
+
+        with self.host.pinned_comp(started_on):
+            # The artist clicks another tab.
+            self.host.fusion.GetCurrentComp = MagicMock(return_value=other)
+            self.assertIs(self.host.comp, started_on)
+
+        # Once the operation is over, the current comp is current again.
+        self.assertIs(self.host.comp, other)
+
+    def test_pin_is_released_when_the_operation_raises(self):
+        """A failed publish must not leave the host pinned to a stale comp."""
+        started_on = self.mock_fusion.GetCurrentComp()
+        other = MagicMock(name="OtherComp")
+
+        with self.assertRaises(RuntimeError):
+            with self.host.pinned_comp(started_on):
+                self.host.fusion.GetCurrentComp = MagicMock(return_value=other)
+                raise RuntimeError("render blew up")
+
+        self.assertIs(self.host.comp, other)
+
+    def test_unset_render_range_falls_back_to_the_global_range(self):
+        """Fusion reports an unset render range as a sentinel, not as None.
+
+        Taken at face value, -1000000000 becomes a render of a billion frames,
+        a frame count no sequence can satisfy, and a validation dialog full of
+        nonsense numbers.
+        """
+        comp = self.mock_fusion.GetCurrentComp()
+        comp.GetAttrs = MagicMock(
+            return_value={
+                "COMPN_RenderStart": -1000000000,
+                "COMPN_RenderEnd": -1000000000,
+                "COMPN_GlobalStart": 1001.0,
+                "COMPN_GlobalEnd": 1100.0,
+            }
+        )
+
+        self.assertEqual(self.host.compRenderRange(comp), (1001.0, 1100.0))
+        self.assertEqual(self.host.expectedFrameCount(comp), 100)
+
+    def test_render_range_is_preferred_when_it_is_set(self):
+        comp = self.mock_fusion.GetCurrentComp()
+        comp.GetAttrs = MagicMock(
+            return_value={
+                "COMPN_RenderStart": 1010.0,
+                "COMPN_RenderEnd": 1020.0,
+                "COMPN_GlobalStart": 1001.0,
+                "COMPN_GlobalEnd": 1100.0,
+            }
+        )
+
+        self.assertEqual(self.host.compRenderRange(comp), (1010.0, 1020.0))
+        self.assertEqual(self.host.expectedFrameCount(comp), 11)
+
+    def test_no_range_at_all_yields_no_frame_count(self):
+        """With nothing to go on, the count is 0 and the sequence check is
+        skipped rather than failing every render."""
+        comp = self.mock_fusion.GetCurrentComp()
+        comp.GetAttrs = MagicMock(
+            return_value={
+                "COMPN_RenderStart": -1000000000,
+                "COMPN_RenderEnd": -1000000000,
+                "COMPN_GlobalStart": -1000000000,
+                "COMPN_GlobalEnd": -1000000000,
+            }
+        )
+
+        self.assertEqual(self.host.compRenderRange(comp), (None, None))
+        self.assertEqual(self.host.expectedFrameCount(comp), 0)
+
+    def test_preview_follows_the_extension_fusion_actually_wrote(self):
+        """Changing a Saver's format makes Fusion rewrite the extension.
+
+        The preview asked for .mov, the step's config switched the format and
+        Fusion rewrote the Clip to .exr, and the render went there — but
+        verification, the returned file list and therefore the version
+        metadata all still pointed at the .mov, which does not exist. The
+        artist got "Preview render produced an invalid file" for a preview
+        that had rendered perfectly. _publish already re-read the Saver.
+        """
+        comp = self.mock_fusion.GetCurrentComp()
+        preview_node = comp.AddTool("Saver", 0, 0)
+        preview_node.SetAttrs({"TOOLS_Name": "_PREVIEW"})
+
+        out_dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, out_dir, True)
+
+        asked_for = os.path.join(out_dir, "shot.mov").replace("\\", "/")
+        actually_written = os.path.join(out_dir, "shot.exr").replace("\\", "/")
+        with open(actually_written, "w") as fh:
+            fh.write("x")
+
+        self.host.resolvePreviewPath = MagicMock(return_value=asked_for)
+        self.host._render_anchor = MagicMock(return_value=True)
+        self.host.expectedFrameCount = MagicMock(return_value=0)
+
+        # Applying the preset is what rewrites the extension.
+        def _rewrite_extension(node, _preset):
+            node.Clip[1] = actually_written
+
+        self.host.apply_render_preset = MagicMock(side_effect=_rewrite_extension)
+
+        result = self.host._preview(out_dir, "shot", None, None)
+
+        self.assertEqual(
+            result, [actually_written],
+            "the preview must report the file Fusion actually wrote",
+        )
+
+    def test_tool_resolution_restores_comment_and_modified_flag(self):
+        """Reading a resolution must leave no trace.
+
+        The expression is parked in the tool's Comments field, which is where
+        Ramses keeps its own artist-facing anchor text, and Fusion counts the
+        write as an edit. Both were measured in real Fusion before this
+        shipped: the comment comes back exactly, and the modified flag is
+        settable back to False.
+        """
+        comp = self.mock_fusion.GetCurrentComp()
+        node = comp.AddTool("Saver", 0, 0)
+        node.SetAttrs({"TOOLS_Name": "_FINAL"})
+
+        original_comment = "Final renders will be saved here."
+        comments = node["Comments"]
+        comments[1001] = original_comment
+
+        attrs = {
+            "COMPN_RenderStart": 1001.0,
+            "COMPN_RenderEnd": 1100.0,
+            "COMPB_Modified": False,
+        }
+        comp.GetAttrs = MagicMock(return_value=attrs)
+
+        set_attrs_calls = []
+
+        def _set_attrs(new_attrs):
+            set_attrs_calls.append(dict(new_attrs))
+            attrs.update(new_attrs)
+
+        comp.SetAttrs = MagicMock(side_effect=_set_attrs)
+
+        # Evaluating the expression is what dirties the comp in Fusion.
+        def _expression(value):
+            attrs["COMPB_Modified"] = True
+            return value
+
+        seen = []
+
+        class _Evaluating(dict):
+            def __missing__(self, key):
+                return ""
+
+            def GetExpression(self):
+                return None
+
+            def SetExpression(self, expr):
+                seen.append(expr)
+                if expr == "self.Input.OriginalWidth":
+                    self[1001] = _expression(3840)
+                elif expr == "self.Input.OriginalHeight":
+                    self[1001] = _expression(1936)
+
+        evaluating = _Evaluating()
+        evaluating[1001] = original_comment
+        node.Input["Comments"] = evaluating
+
+        result = self.host.toolResolution(node)
+
+        self.assertEqual(result, (3840, 1936))
+        self.assertEqual(
+            evaluating[1001], original_comment,
+            "the anchor's own comment must come back untouched",
+        )
+        self.assertFalse(
+            attrs["COMPB_Modified"],
+            "reading a resolution must not leave the comp modified",
+        )
+        self.assertIn({"COMPB_Modified": False}, set_attrs_calls)
+
+    def test_tool_resolution_returns_none_rather_than_raising(self):
+        """An unreadable resolution must never block a publish."""
+        comp = self.mock_fusion.GetCurrentComp()
+        node = comp.AddTool("Saver", 0, 0)
+        node.SetAttrs({"TOOLS_Name": "_FINAL"})
+        comp.GetAttrs = MagicMock(
+            return_value={
+                "COMPN_RenderStart": 1001.0,
+                "COMPN_RenderEnd": 1100.0,
+                "COMPB_Modified": False,
+            }
+        )
+
+        class _Broken(dict):
+            def __missing__(self, key):
+                return ""
+
+            def GetExpression(self):
+                return None
+
+            def SetExpression(self, expr):
+                raise RuntimeError("expressions unavailable in this build")
+
+        node.Input["Comments"] = _Broken()
+
+        self.assertIsNone(self.host.toolResolution(node))
+
+        self.assertIsNone(self.host.toolResolution(None))
+
+    def test_evaluate_on_attribute_restores_a_plain_value(self):
+        from fusion_host import evaluate_on_attribute
+
+        class _Attr(dict):
+            def __missing__(self, key):
+                return ""
+
+            def __init__(self):
+                dict.__init__(self)
+                self.expression = None
+
+            def GetExpression(self):
+                return self.expression
+
+            def SetExpression(self, expr):
+                self.expression = expr
+                if expr == "W":
+                    self[1] = 3840
+                elif expr == "H":
+                    self[1] = 1936
+
+        attr = _Attr()
+        attr[1] = "an artist's note"
+
+        self.assertEqual(evaluate_on_attribute(attr, 1, ("W", "H")), [3840, 1936])
+        self.assertEqual(attr[1], "an artist's note")
+        self.assertIsNone(attr.GetExpression())
+
+    def test_evaluate_on_attribute_restores_a_driving_expression(self):
+        """An attribute already driven by an expression must go back as one.
+
+        Putting the old text back as a plain value would silently replace a
+        live expression with a frozen string, which is the kind of damage
+        nobody notices until the value stops updating.
+        """
+        from fusion_host import evaluate_on_attribute
+
+        class _Attr(dict):
+            def __missing__(self, key):
+                return ""
+
+            def __init__(self):
+                dict.__init__(self)
+                self.expression = "self.SomethingElse"
+
+            def GetExpression(self):
+                return self.expression
+
+            def SetExpression(self, expr):
+                self.expression = expr
+                if expr == "W":
+                    self[1] = 1920
+
+        attr = _Attr()
+
+        self.assertEqual(evaluate_on_attribute(attr, 1, ("W",)), [1920])
+        self.assertEqual(
+            attr.GetExpression(), "self.SomethingElse",
+            "the original driving expression must be reinstated",
+        )
+
+    def test_evaluate_on_attribute_restores_even_when_evaluation_raises(self):
+        """A failed read must not leave the artist's field holding our probe."""
+        from fusion_host import evaluate_on_attribute
+
+        class _Attr(dict):
+            def __missing__(self, key):
+                return ""
+
+            def __init__(self):
+                dict.__init__(self)
+                self.expression = None
+
+            def GetExpression(self):
+                return self.expression
+
+            def SetExpression(self, expr):
+                if expr == "BOOM":
+                    raise RuntimeError("expression rejected")
+                self.expression = expr
+
+        attr = _Attr()
+        attr[1] = "keep me"
+
+        with self.assertRaises(RuntimeError):
+            evaluate_on_attribute(attr, 1, ("BOOM",))
+
+        self.assertEqual(attr[1], "keep me")
+
+    def _setup_options(self):
+        import ramses
+        ramses.RAM_SETTINGS.userSettings = {"compStartFrame": 1001}
+        return {
+            "width": 3840, "height": 2160, "framerate": 25.0,
+            "frames": 250, "pixelAspectRatio": 1.0,
+        }
+
+    def _shot_item(self):
+        item = MagicMock()
+        item.itemType.return_value = "S"
+        item.duration.return_value = 10.0
+        return item
+
+    def test_setup_asks_before_changing_an_existing_comp_format(self):
+        """Resolution and rate are the artist's work, not ours to rewrite."""
+        comp = self.mock_fusion.GetCurrentComp()
+        work = comp.AddTool("Merge", 0, 0)
+        work.SetAttrs({"TOOLS_Name": "Merge1"})
+
+        self.host._confirm_format_change = MagicMock(return_value=True)
+        self.host._setupCurrentFile(self._shot_item(), None, self._setup_options())
+
+        self.host._confirm_format_change.assert_called_once()
+        self.assertEqual(comp.GetPrefs("Comp.FrameFormat")["Width"], 3840)
+
+    def test_setup_keeps_the_format_when_the_artist_declines(self):
+        """Declining keeps their settings and still saves, ranges included."""
+        comp = self.mock_fusion.GetCurrentComp()
+        work = comp.AddTool("Merge", 0, 0)
+        work.SetAttrs({"TOOLS_Name": "Merge1"})
+        comp.SetPrefs({"Comp.FrameFormat.Width": 1920,
+                       "Comp.FrameFormat.Height": 1080})
+
+        self.host._confirm_format_change = MagicMock(return_value=False)
+        success = self.host._setupCurrentFile(
+            self._shot_item(), None, self._setup_options()
+        )
+
+        self.assertTrue(success, "declining must not fail the save")
+        self.assertEqual(comp.GetPrefs("Comp.FrameFormat")["Width"], 1920,
+                         "the artist's format must be left alone")
+        # The frame range is not the artist's to keep: the shot's duration
+        # changes in Ramses and the comp follows it.
+        self.assertEqual(comp.GetAttrs()["COMPN_RenderStart"], 1001)
+
+    def test_setup_does_not_ask_about_an_empty_comp(self):
+        """A comp with nothing but our anchors has nothing to disturb."""
+        comp = self.mock_fusion.GetCurrentComp()
+        anchor_tool = comp.AddTool("Saver", 0, 0)
+        anchor_tool.SetAttrs({"TOOLS_Name": "_FINAL"})
+
+        self.host._confirm_format_change = MagicMock(return_value=True)
+        self.host._setupCurrentFile(self._shot_item(), None, self._setup_options())
+
+        self.host._confirm_format_change.assert_not_called()
+        self.assertEqual(comp.GetPrefs("Comp.FrameFormat")["Width"], 3840)
+
+    def test_comp_undo_discards_the_entry_when_asked(self):
+        """Plugin housekeeping must not land in the artist's undo stack."""
+        from fusion_host import comp_undo
+
+        comp = self.mock_fusion.GetCurrentComp()
+        comp.StartUndo = MagicMock()
+        comp.EndUndo = MagicMock()
+
+        with comp_undo(comp, "Housekeeping", keep=False):
+            pass
+
+        comp.StartUndo.assert_called_once_with("Housekeeping")
+        comp.EndUndo.assert_called_once_with(False)
+
+    def test_comp_undo_closes_the_entry_even_on_error(self):
+        """A leaked undo block leaves Fusion in a strange state."""
+        from fusion_host import comp_undo
+
+        comp = self.mock_fusion.GetCurrentComp()
+        comp.StartUndo = MagicMock()
+        comp.EndUndo = MagicMock()
+
+        with self.assertRaises(RuntimeError):
+            with comp_undo(comp, "Boom", keep=True):
+                raise RuntimeError("boom")
+
+        comp.EndUndo.assert_called_once_with(True)
+
+    def test_comp_locked_always_unlocks(self):
+        """A leaked lock leaves Fusion unresponsive to the artist."""
+        from fusion_host import comp_locked
+
+        comp = self.mock_fusion.GetCurrentComp()
+
+        with self.assertRaises(RuntimeError):
+            with comp_locked(comp):
+                self.assertTrue(comp.locked)
+                raise RuntimeError("boom")
+
+        self.assertFalse(comp.locked)
+
+    def test_maintained_comp_range_restores_the_range(self):
+        """Anything that renders a different range must put it back."""
+        from fusion_host import maintained_comp_range
+
+        comp = self.mock_fusion.GetCurrentComp()
+        comp.SetAttrs({
+            "COMPN_GlobalStart": 1001, "COMPN_GlobalEnd": 1100,
+            "COMPN_RenderStart": 1001, "COMPN_RenderEnd": 1100,
+        })
+
+        with maintained_comp_range(comp):
+            comp.SetAttrs({"COMPN_RenderStart": 1050, "COMPN_RenderEnd": 1050})
+            self.assertEqual(comp.GetAttrs()["COMPN_RenderStart"], 1050)
+
+        self.assertEqual(comp.GetAttrs()["COMPN_RenderStart"], 1001)
+        self.assertEqual(comp.GetAttrs()["COMPN_RenderEnd"], 1100)
+
+    def test_render_isolates_the_anchor_from_other_savers(self):
+        """comp.Render() renders every enabled Saver, not the one you arm.
+
+        An artist's own Saver left enabled would render during a publish, and a
+        failure in its branch would fail the publish.
+        """
+        comp = self.mock_fusion.GetCurrentComp()
+
+        anchor = comp.AddTool("Saver", 0, 0)
+        anchor.SetAttrs({"TOOLS_Name": "_FINAL", "TOOLB_PassThrough": True})
+        artist = comp.AddTool("Saver", 0, 0)
+        artist.SetAttrs({"TOOLS_Name": "ArtistSaver", "TOOLB_PassThrough": False})
+
+        during = {}
+        comp.Render = MagicMock(side_effect=lambda kw: during.update(
+            {s.Name: s.GetAttrs()["TOOLB_PassThrough"]
+             for s in comp.GetToolList(False, "Saver").values()}
+        ) or True)
+
+        self.assertTrue(self.host._render_anchor(anchor))
+
+        self.assertFalse(during["_FINAL"], "the anchor must be enabled")
+        self.assertTrue(during["ArtistSaver"],
+                        "every other Saver must be passed through")
+        self.assertFalse(artist.GetAttrs()["TOOLB_PassThrough"],
+                         "the artist's Saver must be restored afterwards")
+
+    def test_render_states_its_settings_instead_of_inheriting_them(self):
+        """Render(wait) leaves quality, motion blur and range to the viewer.
+
+        A master render must not come out at whatever quality the artist last
+        toggled, so the settings are passed explicitly.
+        """
+        comp = self.mock_fusion.GetCurrentComp()
+        comp.SetAttrs({"COMPN_RenderStart": 1001, "COMPN_RenderEnd": 1100})
+
+        anchor = comp.AddTool("Saver", 0, 0)
+        anchor.SetAttrs({"TOOLS_Name": "_FINAL"})
+
+        captured = {}
+        comp.Render = MagicMock(side_effect=lambda kw: captured.update(kw) or True)
+
+        self.host._render_anchor(anchor)
+
+        self.assertTrue(captured["Wait"])
+        self.assertTrue(captured["HiQ"])
+        self.assertTrue(captured["MotionBlur"])
+        self.assertEqual(captured["Start"], 1001)
+        self.assertEqual(captured["End"], 1100)
+        self.assertEqual(captured["RenderFlags"], self.host.REQF_QUIET)
+
+    def test_render_restores_other_savers_even_if_the_render_raises(self):
+        """A failed render must not leave the artist's Savers disabled."""
+        comp = self.mock_fusion.GetCurrentComp()
+
+        anchor = comp.AddTool("Saver", 0, 0)
+        anchor.SetAttrs({"TOOLS_Name": "_FINAL"})
+        artist = comp.AddTool("Saver", 0, 0)
+        artist.SetAttrs({"TOOLS_Name": "ArtistSaver", "TOOLB_PassThrough": False})
+
+        comp.Render = MagicMock(side_effect=RuntimeError("render exploded"))
+
+        with self.assertRaises(RuntimeError):
+            self.host._render_anchor(anchor)
+
+        self.assertFalse(artist.GetAttrs()["TOOLB_PassThrough"])
+
+    def test_publish_sets_its_own_path_and_preset(self):
+        """_publish must prepare the Saver itself, not trust the UI.
+
+        The preview path sets its own output path and preset before rendering;
+        the final path used to render whatever was left on _FINAL. Publish is
+        the one action that never calls _sync_render_anchors(), so a stale or
+        hand-edited Saver produced a master render with the wrong settings.
+        """
+        comp = self.mock_fusion.GetCurrentComp()
+        comp.SetAttrs({"COMPS_FileName": "D:/Projects/WIP/TEST_S_Shot01_COMP_v001.comp"})
+
+        final_node = comp.AddTool("Saver", 0, 0)
+        final_node.SetAttrs({"TOOLS_Name": "_FINAL"})
+        final_node.Clip[1] = "D:/Renders/STALE.mov"
+
+        resolved = "D:/Exports/Shot01/Shot01.0000.exr"
+        self.host.resolveFinalPath = MagicMock(return_value=resolved)
+        self.host.apply_render_preset = MagicMock()
+        self.host._verify_render_output = MagicMock(return_value=True)
+
+        mock_info = MagicMock()
+        mock_info.copy.return_value = mock_info
+        mock_info.filePath.return_value = "D:/Projects/Published/x.comp"
+
+        with patch("os.makedirs"), patch("ramses.file_manager.RamFileManager.copy"):
+            published = self.host._publish(mock_info, {})
+
+        self.assertEqual(final_node.Clip[1], resolved,
+                         "the stale path must be replaced by the resolved one")
+        self.host.apply_render_preset.assert_called_once_with(final_node, "final")
+        self.assertIn(resolved, published)
+
+    def test_publish_keeps_saver_path_when_resolution_fails(self):
+        """An unresolvable path must not wipe a good one.
+
+        resolveFinalPath() returns "" on any failure. Writing that to the Saver
+        would turn a recoverable state into a failed publish.
+        """
+        comp = self.mock_fusion.GetCurrentComp()
+        comp.SetAttrs({"COMPS_FileName": "D:/Projects/WIP/TEST_S_Shot01_COMP_v001.comp"})
+
+        final_node = comp.AddTool("Saver", 0, 0)
+        final_node.SetAttrs({"TOOLS_Name": "_FINAL"})
+        existing = "D:/Renders/TEST_S_Shot01_COMP.mov"
+        final_node.Clip[1] = existing
+
+        self.host.resolveFinalPath = MagicMock(return_value="")
+        self.host.apply_render_preset = MagicMock()
+        self.host._verify_render_output = MagicMock(return_value=True)
+
+        mock_info = MagicMock()
+        mock_info.copy.return_value = mock_info
+        mock_info.filePath.return_value = "D:/Projects/Published/x.comp"
+
+        with patch("os.makedirs"), patch("ramses.file_manager.RamFileManager.copy"):
+            published = self.host._publish(mock_info, {})
+
+        self.assertEqual(final_node.Clip[1], existing)
+        self.assertIn(existing, published)
+
+    def test_publish_resolves_path_outside_the_comp_lock(self):
+        """Path resolution is a daemon round-trip and must not hold the lock.
+
+        Doing it inside comp.Lock() would leave Fusion sitting on a locked comp
+        whenever the daemon is slow or unreachable.
+        """
+        comp = self.mock_fusion.GetCurrentComp()
+        comp.SetAttrs({"COMPS_FileName": "D:/Projects/WIP/TEST_S_Shot01_COMP_v001.comp"})
+
+        final_node = comp.AddTool("Saver", 0, 0)
+        final_node.SetAttrs({"TOOLS_Name": "_FINAL"})
+        final_node.Clip[1] = "D:/Renders/TEST.mov"
+
+        order = []
+        comp.Lock = MagicMock(side_effect=lambda: order.append("lock"))
+        comp.Unlock = MagicMock(side_effect=lambda: order.append("unlock"))
+        self.host.resolveFinalPath = MagicMock(
+            side_effect=lambda: (order.append("resolve"), "")[1]
+        )
+        self.host.apply_render_preset = MagicMock(
+            side_effect=lambda *a, **k: order.append("preset")
+        )
+        self.host._verify_render_output = MagicMock(return_value=True)
+
+        mock_info = MagicMock()
+        mock_info.copy.return_value = mock_info
+        mock_info.filePath.return_value = "D:/Projects/Published/x.comp"
+
+        with patch("os.makedirs"), patch("ramses.file_manager.RamFileManager.copy"):
+            self.host._publish(mock_info, {})
+
+        self.assertLess(order.index("resolve"), order.index("lock"))
+        self.assertLess(order.index("preset"), order.index("lock"))
+
     def test_publish_aborts_on_missing_anchor(self):
         """Verify that publish is aborted if no _FINAL anchor is present."""
         comp = self.mock_fusion.GetCurrentComp()
@@ -309,6 +1058,11 @@ class TestFusionHost(unittest.TestCase):
         final_node.SetAttrs({"TOOLS_Name": "_FINAL"})
 
         # Mock Render failure
+        # _publish resolves its own final path now, which is a daemon
+        # round-trip. Keep the unit test off the daemon and let it fall
+        # back to the path already on the Saver.
+        self.host.resolveFinalPath = MagicMock(return_value="")
+        self.host.apply_render_preset = MagicMock()
         comp.Render = MagicMock(return_value=False)
 
         mock_info = MagicMock()
@@ -326,6 +1080,11 @@ class TestFusionHost(unittest.TestCase):
         final_node.SetAttrs({"TOOLS_Name": "_FINAL"})
         
         # Mock Render success but Verification failure
+        # _publish resolves its own final path now, which is a daemon
+        # round-trip. Keep the unit test off the daemon and let it fall
+        # back to the path already on the Saver.
+        self.host.resolveFinalPath = MagicMock(return_value="")
+        self.host.apply_render_preset = MagicMock()
         comp.Render = MagicMock(return_value=True)
         self.host._verify_render_output = MagicMock(return_value=False)
 

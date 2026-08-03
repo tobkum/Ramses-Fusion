@@ -449,7 +449,12 @@ class TestRamsesFusionApp(unittest.TestCase):
         # Mock version and refresh to avoid real API/filesystem hits
         host.currentVersion = MagicMock(return_value=1)
 
-        with patch.object(self.app, "refresh_header"):
+        # Saving a note writes a version, so on_comment syncs the render
+        # anchors first. That resolves publish paths through the daemon, which
+        # this test has no business waiting on.
+        with patch.object(self.app, "_sync_render_anchors"), patch.object(
+            self.app, "refresh_header"
+        ):
             with patch.object(host, "currentStatus", return_value=mock_status):
                 # 1. Test Cancellation (no save)
                 with patch.object(self.app, "_run_pyside_dialog", return_value=None):

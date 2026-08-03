@@ -105,7 +105,7 @@ def checkUpdate(url, toolName, version, host, hostVersion, preRelease = False, l
     response = request(url, args, False)
     try:
         return loads(response)
-    except:
+    except (ValueError, TypeError):
         return {}
 
 def request(url, args=None, secured=True, request_timeout=4):

@@ -80,7 +80,7 @@ class RamObject(object):
         if fmt == 'yaml':
             try:
                 as_yaml = yaml.safe_load( as_str )
-            except yaml.scanner.ScannerError as err:
+            except yaml.YAMLError as err:
                 log("Sorry, there is a syntax error in the " + settingsName + ".\nSee the console for more details.",
                     LogLevel.Critical)
                 print(err)
@@ -233,7 +233,13 @@ class RamObject(object):
     def color( self ):
         """Returns the color as (R,G,B)"""
         colorName = self.colorName().lstrip("#")
-        return tuple(int(colorName[i:i+2], 16) for i in (0, 2, 4))
+        try:
+            return tuple(int(colorName[i:i+2], 16) for i in (0, 2, 4))
+        except (ValueError, IndexError):
+            # Malformed colour value (short form like #fff, a name, empty...):
+            # fall back to the same default colorName() uses (#e3e3e3) rather
+            # than raising out of a simple getter.
+            return (227, 227, 227)
 
     def colorName(self):
         """Returns the color as #000000"""
@@ -259,7 +265,7 @@ class RamObject(object):
         if p != "" and not os.path.isdir( p ):
             try:
                 os.makedirs( p )
-            except:
+            except OSError:
                 return ""
         return p       
 
@@ -278,7 +284,7 @@ class RamObject(object):
         if isinstance(other, RamObject):
             try:
                 return self.__uuid == other.uuid()
-            except:
+            except Exception:
                 return False
         # Test UUID or shortname
         if other == self.__uuid:
@@ -286,3 +292,9 @@ class RamObject(object):
         if other == self.shortName():
             return True
         return False
+
+    def __hash__(self):
+        # Defining __eq__ sets __hash__ to None in Python 3, which makes every
+        # RamObject unhashable -- set()/dict-key usage raises TypeError. Objects
+        # compare equal by uuid, so hash by uuid to keep the eq/hash contract.
+        return hash(self.__uuid)

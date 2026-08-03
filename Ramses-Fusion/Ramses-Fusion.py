@@ -725,6 +725,20 @@ class RamsesFusionApp:
         if not comp:
             return
 
+        # Resolved before the lock is taken. Both calls are Ramses daemon
+        # round-trips, and holding comp.Lock() across a slow or unreachable
+        # daemon leaves Fusion's UI frozen with no way to tell why. _publish,
+        # _preview and _sync_render_anchors all keep their daemon calls outside
+        # the lock; this was the last place that did not.
+        with DisableMakedirs():
+            preview_path = self.ramses.host.resolvePreviewPath()
+            publish_path = self.ramses.host.resolveFinalPath()
+
+        # (node, preset kind) for each anchor, applied once the lock is
+        # released: apply_render_preset reads the step's settings from the
+        # daemon too.
+        pending_presets = []
+
         comp.Lock()
         comp.StartUndo("Create Render Anchors")
         try:
@@ -755,11 +769,6 @@ class RamsesFusionApp:
                 },
             }
 
-            # Pre-calculate paths via Host
-            with DisableMakedirs():
-                preview_path = self.ramses.host.resolvePreviewPath()
-                publish_path = self.ramses.host.resolveFinalPath()
-
             for name, cfg in anchors_config.items():
                 node = comp.FindTool(name)
 
@@ -780,20 +789,23 @@ class RamsesFusionApp:
                     if name == "_PREVIEW":
                         if preview_path:
                             node.Clip[1] = preview_path
-                        self.ramses.host.apply_render_preset(node, "preview")
+                        pending_presets.append((node, "preview"))
                         node.Comments[1] = (
                             "Preview renders will be saved here. Connect your output."
                         )
                     else:
                         if publish_path:
                             node.Clip[1] = publish_path
-                        self.ramses.host.apply_render_preset(node, "final")
+                        pending_presets.append((node, "final"))
                         node.Comments[1] = (
                             "Final renders will be saved here. Connect your output."
                         )
         finally:
             comp.EndUndo(True)
             comp.Unlock()
+
+        for node, kind in pending_presets:
+            self.ramses.host.apply_render_preset(node, kind)
 
     def _validate_publish(
         self, check_preview: bool = True, check_final: bool = True
@@ -831,11 +843,16 @@ class RamsesFusionApp:
         if item.itemType() == ram.ItemType.SHOT:
             expected_frames = settings.get("frames", 0)
 
-            # Check Render Range
-            attrs = comp.GetAttrs()
-            comp_start = attrs.get("COMPN_RenderStart", 0)
-            comp_end = attrs.get("COMPN_RenderEnd", 0)
-            actual_frames = int(comp_end - comp_start + 1)
+            # Check Render Range. Read through the host rather than off
+            # GetAttrs(): Fusion reports an unset render range as a sentinel,
+            # which arithmetic turns into a mismatch of about a billion frames
+            # and a dialog the artist cannot act on.
+            comp_start, comp_end = self.ramses.host.compRenderRange(comp)
+            actual_frames = (
+                int(comp_end - comp_start + 1)
+                if comp_start is not None and comp_end is not None
+                else 0
+            )
 
             if expected_frames > 0 and actual_frames != expected_frames:
                 errors.append(
@@ -890,17 +907,54 @@ class RamsesFusionApp:
                 return f"<font color='#ff4444'><b>Disconnected Anchor</b></font><br><font color='#999'>The '{tool_name}' node has no input connection.</font>"
             return None
 
+        def check_anchor_resolution(tool_name):
+            """What the anchor will actually WRITE, which is not necessarily
+            the composition's format.
+
+            The resolution check above compares the database against
+            Comp.FrameFormat. A Crop, Resize or Scale in front of a Saver
+            changes the delivered resolution while leaving FrameFormat exactly
+            as the database says it should be, so that check agrees with
+            itself and the master still goes out at the wrong size.
+
+            Soft, never a hard error: a deliberate crop for delivery is
+            legitimate and must not block a publish.
+            """
+            node = comp.FindTool(tool_name)
+            actual = self.ramses.host.toolResolution(node)
+            if not actual:
+                # Unreadable is not wrong. A disconnected anchor is already
+                # reported as a hard error above.
+                return None
+            act_w, act_h = int(actual[0]), int(actual[1])
+            if (act_w, act_h) == (db_w, db_h):
+                return None
+            return (
+                f"<font color='#ffcc00'><b>{tool_name} Writes A Different "
+                f"Resolution</b></font><br><font color='#999'>Database: "
+                f"<b>{db_w}x{db_h}</b> | This Saver outputs: "
+                f"<b>{act_w}x{act_h}</b></font>"
+            )
+
         if check_preview:
             err_preview = check_anchor("_PREVIEW")
             if err_preview:
                 errors.append(err_preview)
                 has_hard_errors = True
+            else:
+                res_preview = check_anchor_resolution("_PREVIEW")
+                if res_preview:
+                    errors.append(res_preview)
 
         if check_final:
             err_final = check_anchor("_FINAL")
             if err_final:
                 errors.append(err_final)
                 has_hard_errors = True
+            else:
+                res_final = check_anchor_resolution("_FINAL")
+                if res_final:
+                    errors.append(res_final)
 
         if errors:
             return False, "<br><br>".join(errors), has_hard_errors
@@ -985,8 +1039,14 @@ class RamsesFusionApp:
             preview_needs_update = False
             final_needs_update = False
 
-            comp.Lock()
-            try:
+            # Bookkeeping, not the artist's edit: this runs on every UI
+            # refresh, so the writes are grouped into one undo entry and
+            # that entry is then discarded. Previously each SetInput
+            # landed in the undo stack on its own, so Ctrl+Z after a
+            # refresh undid our path sync instead of their work.
+            with fusion_host.comp_locked(comp), fusion_host.comp_undo(
+                comp, "Sync Ramses Anchors", keep=False
+            ):
                 # Only write a path we actually resolved. resolvePreviewPath()
                 # and resolveFinalPath() return "" on any failure, and the
                 # guard above only returns early when BOTH are empty — so if
@@ -1006,8 +1066,6 @@ class RamsesFusionApp:
                     if curr_f != final_path:
                         final_node.Clip[1] = final_path
                         final_needs_update = True
-            finally:
-                comp.Unlock()
                 
             # Apply presets outside the lock to prevent daemon calls from blocking Fusion UI
             if preview_needs_update and preview_node:
@@ -2287,6 +2345,17 @@ class RamsesFusionApp:
         """Handler for 'Save As / Create' button."""
         if self.ramses.host.saveAs():
             self.refresh_header(force_full=True)
+            self._emit_action_status(
+                f"✓ Saved as v{self.ramses.host.currentVersion()} · {time.strftime('%H:%M')}",
+                self.ramses.host.currentStatus(),
+            )
+        else:
+            # saveAs() returns False both when the artist cancels and when the
+            # save fails, so this cannot accuse. Silence was worse: a failed
+            # Save As looked exactly like a successful one.
+            self._set_status(
+                "Save As did not complete - see the Fusion console.", "error"
+            )
 
     @requires_connection
     def on_switch_shot(self, ev: object) -> None:
@@ -2298,6 +2367,16 @@ class RamsesFusionApp:
         # inside its _openUI implementation.
         if self.ramses.host.open():
             self.refresh_header(force_full=True)
+            self._emit_action_status(
+                f"✓ Opened {os.path.basename(self.ramses.host.currentFilePath())}",
+                self.ramses.host.currentStatus(),
+            )
+        else:
+            # Same as Save As: open() cannot tell a cancel from a failure, and
+            # saying nothing hid the failures.
+            self._set_status(
+                "Nothing was opened - see the Fusion console.", "error"
+            )
 
     def _on_switch_shot_uimanager(self):
         """Original UIManager-based Switch Shot wizard logic."""
@@ -2582,6 +2661,13 @@ class RamsesFusionApp:
         if self.ramses.host.importItem():
             self.refresh_header()
             self._set_status("✓ Imported published input.", "ok")
+        else:
+            # importItem() returns False for both "the artist closed the
+            # picker" and "the import failed", so the wording has to cover
+            # each without claiming the other happened.
+            self._set_status(
+                "Import did not complete — see the Fusion console.", "error"
+            )
 
     @requires_connection
     def on_replace(self, ev: object) -> None:
@@ -2590,6 +2676,10 @@ class RamsesFusionApp:
         if self.ramses.host.replaceItem():
             self.refresh_header()
             self._set_status("✓ Loader replaced.", "ok")
+        else:
+            self._set_status(
+                "Replace did not complete — see the Fusion console.", "error"
+            )
 
     @requires_connection
     def on_save(self, ev: object) -> None:
@@ -2681,6 +2771,9 @@ class RamsesFusionApp:
 
                 if comment_changed or is_incremental:
                     has_project = self.ramses.project() is not None
+                    # Anchors must be current before a version is written,
+                    # exactly as on_save and on_incremental_save do it.
+                    self._sync_render_anchors()
                     if host.save(comment=res["Comment"], setupFile=has_project, incremental=is_incremental, state=state):
                         if status:
                             status.setComment(res["Comment"])
@@ -2704,11 +2797,22 @@ class RamsesFusionApp:
             if res_comment != current_note:
                 has_project = self.ramses.project() is not None
                 # Use standard save (non-incremental) as the standard dialog doesn't have an increment toggle
+                # Anchors must be current before a version is written,
+                # exactly as on_save and on_incremental_save do it.
+                self._sync_render_anchors()
                 if host.save(comment=res_comment, setupFile=has_project, incremental=False, state=state):
                     if status:
                         status.setComment(res_comment)
                         # We don't update version here because it was a simple save-over
                     self.refresh_header()
+                    self._set_status(
+                        f"✓ Saved v{host.currentVersion()} with note · {time.strftime('%H:%M')}",
+                        "ok",
+                    )
+                else:
+                    self._set_status(
+                        "Save failed — see the Fusion console.", "error"
+                    )
 
     @requires_connection
     def on_update_status(self, ev: object) -> None:
@@ -3263,11 +3367,23 @@ class RamsesFusionApp:
             return
 
         name = re.sub(r"[^a-zA-Z0-9_]", "", res["Name"].replace(" ", "_").replace("-", "_"))
+        # A name of nothing but punctuation sanitises down to "", which lands
+        # back on the bare PROJ_G_<step>.comp that the resource field below
+        # exists to avoid — so the next template written would silently
+        # overwrite it.
+        if not name:
+            self._set_status(
+                "That template name has no letters or digits in it.", "warn"
+            )
+            return
 
         tpl_folder = step.templatesFolderPath()
         if not tpl_folder:
             self.log(
                 "Step does not have a valid templates folder.", ram.LogLevel.Warning
+            )
+            self._set_status(
+                "This step has no templates folder — nothing was saved.", "error"
             )
             return
 
@@ -3294,18 +3410,29 @@ class RamsesFusionApp:
         if src:
             if not comp.Save(src):
                 self.log("Could not save current comp before templating.", ram.LogLevel.Critical)
+                self._set_status(
+                    "Could not save the comp, so no template was written.", "error"
+                )
                 return
             try:
                 os.makedirs(os.path.dirname(path), exist_ok=True)
                 fusion_host.RamFileManager.copy(src, path, separateThread=False)
             except Exception as e:
                 self.log(f"Failed to copy template to {path}: {e}", ram.LogLevel.Critical)
+                self._set_status(
+                    "Template could not be written — see the Fusion console.",
+                    "error",
+                )
                 return
         else:
             # Unsaved comp: saving directly to the template path is fine — there
             # is no prior identity to preserve.
             if not comp.Save(path):
                 self.log(f"Failed to save template to {path}", ram.LogLevel.Critical)
+                self._set_status(
+                    "Template could not be written — see the Fusion console.",
+                    "error",
+                )
                 return
 
         self.log(f"Template '{name}' saved to {path}", ram.LogLevel.Info)
@@ -3336,6 +3463,12 @@ class RamsesFusionApp:
             self.refresh_header()
             self._set_status(
                 f"✓ Restored — now at v{self.ramses.host.currentVersion()}.", "ok"
+            )
+        else:
+            # restoreVersion() returns False both when the artist closes the
+            # version list and when the restore itself fails.
+            self._set_status(
+                "Nothing was restored — see the Fusion console.", "error"
             )
 
     def on_close(self, ev: object) -> None:

@@ -90,6 +90,41 @@ class TestListDeliverables(unittest.TestCase):
             "newest published version must be the first row",
         )
 
+    def test_upstream_walk_survives_a_status_with_no_state(self):
+        """A status object can exist with no state on it.
+
+        resolve_upstream_source() read status.state().shortName() behind a
+        guard that only checked `status`, so such a status raised an
+        AttributeError straight out of show() and the browser would not open
+        at all. Everywhere else in the plugin that reads a state guards for
+        this; this was the one place that did not.
+        """
+        stateless = MagicMock()
+        stateless.state.return_value = None
+
+        upstream = MagicMock()
+        upstream.uuid.return_value = "upstream-uuid"
+        upstream.inputPipes.return_value = []
+
+        pipe = MagicMock()
+        pipe.outputStep.return_value = upstream
+
+        current = MagicMock()
+        current.uuid.return_value = "current-uuid"
+        current.inputPipes.return_value = [pipe]
+
+        shot = MagicMock()
+        shot.currentStatus.return_value = stateless
+
+        # Not skipped (no state means no skip state), so the walk asks whether
+        # the upstream step has anything published.
+        self.browser._published_version_folders = MagicMock(
+            return_value=["/published/SH010_001_OK"]
+        )
+
+        found = self.browser.resolve_upstream_source(shot, current)
+        self.assertIs(found, upstream)
+
     def test_comp_only_folder_yields_one_comp_row(self):
         self._touch("DNX_0163_camera.comp", "_ramses_data.json", ".ramses_complete")
         res = self.browser._list_deliverables(self.tmp, {".comp"})

@@ -133,7 +133,7 @@ class RamProject( RamObject ):
         if not os.path.isdir( thePath ):
             try:
                 os.makedirs( thePath )
-            except:
+            except OSError:
                 return ""
         
         return thePath
@@ -153,7 +153,7 @@ class RamProject( RamObject ):
         if not os.path.isdir( thePath ):
             try:
                 os.makedirs( thePath )
-            except:
+            except OSError:
                 return ""
 
         return thePath
@@ -173,7 +173,7 @@ class RamProject( RamObject ):
         if not os.path.isdir( thePath ):
             try:
                 os.makedirs( thePath )
-            except:
+            except OSError:
                 return ""
 
         return thePath
@@ -193,7 +193,7 @@ class RamProject( RamObject ):
         if not os.path.isdir( thePath ):
             try:
                 os.makedirs( thePath )
-            except:
+            except OSError:
                 return ""
 
         return thePath
@@ -214,7 +214,7 @@ class RamProject( RamObject ):
         if not os.path.isdir( thePath ):
             try:
                 os.makedirs( thePath )
-            except:
+            except OSError:
                 return ""
         
         return thePath
@@ -234,7 +234,7 @@ class RamProject( RamObject ):
         if not os.path.isdir( thePath ):
             try:
                 os.makedirs( thePath )
-            except:
+            except OSError:
                 return ""
         
         return thePath
@@ -254,7 +254,7 @@ class RamProject( RamObject ):
         if not os.path.isdir( thePath ):
             try:
                 os.makedirs( thePath )
-            except:
+            except OSError:
                 return ""
         
         return thePath

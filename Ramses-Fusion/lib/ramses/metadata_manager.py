@@ -21,7 +21,8 @@ import os, json, time, tempfile
 from datetime import datetime
 
 from .file_manager import RamFileManager
-from .constants import FileNames, MetaDataKeys
+from .constants import FileNames, MetaDataKeys, LogLevel
+from .logger import log
 
 class RamMetaDataManager():
     """A Class to get/set metadata from files
@@ -43,6 +44,11 @@ class RamMetaDataManager():
     @staticmethod
     def getValue(filePath, key):
         """Gets the value of a specific key for the file"""
+        # copyToVersion()/restoreVersionFile() and friends can hand back None;
+        # os.path.isfile(None) raises TypeError (isfile only catches OSError /
+        # ValueError), so guard before touching the filesystem.
+        if not filePath:
+            return None
         if not os.path.isfile(filePath):
             return None
         data = RamMetaDataManager.getFileMetaData( filePath )
@@ -73,6 +79,9 @@ class RamMetaDataManager():
     @staticmethod
     def setValue(filePath, key, value):
         """Sets a value for a specific key for the file"""
+        if not filePath:
+            log("Metadata write skipped: no file path.", LogLevel.Debug)
+            return
         # file data
         fileData = RamMetaDataManager.getFileMetaData(filePath)
         # update comment
@@ -167,7 +176,7 @@ class RamMetaDataManager():
 
     @staticmethod
     def getMetaData( folderPath ):
-        """removes metadata for files which don't exist anymore and returns the data"""
+        """Reads and returns the metadata for the folder containing the given path."""
         file = RamMetaDataManager.getMetaDataFile( folderPath )
         if not os.path.exists( file ):
             return {}
@@ -184,27 +193,29 @@ class RamMetaDataManager():
                     continue
                 return {}
 
-        folder = folderPath
-        if os.path.isfile(folderPath):
-            folder = os.path.dirname(folderPath)
-        
-        for fileName in dict(data):
-            test = RamFileManager.buildPath((
-                folder,
-                fileName
-            ))
-            if not os.path.isfile(test):
-                del data[fileName]
-        
-        
         return data
 
     @staticmethod
     def setFileMetaData(filePath, fileData):
-        """Sets the metadata for the given file using the given dict"""
+        """Sets the metadata for the given file using the given dict."""
+        if not filePath:
+            log("Metadata write skipped: no file path.", LogLevel.Debug)
+            return
         folderPath = os.path.dirname(filePath)
         fileName = os.path.basename(filePath)
         data = RamMetaDataManager.getMetaData( folderPath )
+        metaFile = RamMetaDataManager.getMetaDataFile( folderPath )
+        # An empty dict on top of a non-empty sidecar means the read failed,
+        # not that the folder has no metadata: refuse to overwrite. (2 bytes is
+        # an empty "{}"; anything larger holds real entries.)
+        if not data and os.path.isfile(metaFile) and os.path.getsize(metaFile) > 2:
+            log(
+                "Metadata sidecar could not be read (locked or corrupt); "
+                "skipping this update rather than overwriting the folder's "
+                "existing metadata: " + metaFile,
+                LogLevel.Critical
+            )
+            return
         data[fileName] = fileData
         RamMetaDataManager.setMetaData( folderPath, data )
 

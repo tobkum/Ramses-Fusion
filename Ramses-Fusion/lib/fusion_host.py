@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import contextlib
 import os
 import re
 import threading
@@ -123,6 +124,184 @@ def _is_delivery_path(host, path: str) -> bool:
 from ramses import RamFileManager
 
 # Module-level lock for thread-safe daemon initialization
+@contextlib.contextmanager
+def comp_undo(comp, name, keep=True):
+    """Groups comp changes into one undo entry, or discards it entirely.
+
+    `keep=False` removes the entry from the artist's undo stack afterwards.
+    Use it for anything the plugin does on its own initiative: syncing a
+    Saver's path on a UI refresh is bookkeeping, not the artist's edit, and
+    ending up in their undo history means Ctrl+Z undoes our housekeeping
+    instead of their work.
+    """
+    comp.StartUndo(name)
+    try:
+        yield
+    finally:
+        comp.EndUndo(bool(keep))
+
+
+@contextlib.contextmanager
+def comp_locked(comp):
+    """Locks the comp for the duration, and always unlocks it.
+
+    A lock that leaks leaves Fusion unresponsive to the artist, so this exists
+    so no caller has to remember the finally.
+    """
+    comp.Lock()
+    try:
+        yield
+    finally:
+        comp.Unlock()
+
+
+# Loader inputs Fusion resets when the clip behind it changes length.
+# All of them are length-independent playback settings, so putting them back
+# afterwards is unambiguous — unlike the trim (ClipTimeStart/ClipTimeEnd),
+# which only means anything relative to a particular clip length and is
+# deliberately left alone here.
+_LOADER_PLAYBACK_INPUTS = (
+    "HoldFirstFrame",
+    "HoldLastFrame",
+    "Reverse",
+    "Depth",
+    "KeyCode",
+    "TimeCodeOffset",
+)
+
+
+@contextlib.contextmanager
+def maintained_loader_inputs(node, names=_LOADER_PLAYBACK_INPUTS):
+    """Keeps a Loader's playback settings across a change of clip.
+
+    Pointing a Loader at a version of a different length makes Fusion reset
+    these, so an artist who had set a hold, a reverse or a timecode offset
+    lost it the moment the plate was updated, with nothing to say so.
+
+    Every read and write is guarded individually: an input this build of
+    Fusion does not expose is skipped rather than failing the update, so the
+    worst case is the behaviour that existed before.
+    """
+    saved = {}
+    for name in names:
+        try:
+            value = node[name][0]
+        except Exception:  # pylint: disable=broad-except
+            continue
+        if value is not None:
+            saved[name] = value
+    try:
+        yield
+    finally:
+        for name, value in saved.items():
+            try:
+                node[name][0] = value
+            except Exception:  # pylint: disable=broad-except
+                continue
+
+
+@contextlib.contextmanager
+def maintained_modified_flag(comp):
+    """Restores the comp's modified flag afterwards.
+
+    Some read-only inspections dirty the comp anyway. Reading a tool's
+    resolution parks a temporary expression on it, and Fusion counts that as
+    an edit even though it is put straight back — which would mean a passive
+    validation check made Fusion think there was unsaved work, and _preview
+    calls comp.Save(), so a read would have started writing files.
+
+    Measured in Fusion before this was written: a clean comp goes False ->
+    read -> True, and SetAttrs puts it back to False.
+    """
+    try:
+        was_modified = comp.GetAttrs().get("COMPB_Modified")
+    except Exception:  # pylint: disable=broad-except
+        was_modified = None
+    try:
+        yield
+    finally:
+        # Only ever restores what was there. A comp that was already dirty
+        # stays dirty; this cannot be used to discard someone's edits.
+        if was_modified is not None:
+            try:
+                comp.SetAttrs({"COMPB_Modified": bool(was_modified)})
+            except Exception:  # pylint: disable=broad-except
+                pass
+
+
+def evaluate_on_attribute(attribute, frame, expressions):
+    """Makes Fusion compute `expressions` and returns what each evaluated to.
+
+    Fusion offers no way to ask a tool what is arriving at its input. It will,
+    however, evaluate an expression in the tool's own context and leave the
+    answer in whichever attribute the expression sits on — so an otherwise
+    unused text field on the tool can be borrowed as a scratch pad, written
+    with `self.Input.OriginalWidth`, and read straight back as a number.
+
+    The field this borrows in practice is Comments, which is also where
+    _create_render_anchors puts its instructions to the artist. That makes
+    the restore the important half of this function, not the read.
+
+    All the expressions share ONE save and ONE restore rather than repeating
+    the pair per expression: the attribute is visible to the artist, so every
+    additional write to it is another opportunity to leave it damaged, and a
+    single `finally` is the version whose failure modes are easy to see.
+
+    Args:
+        attribute: the tool attribute to borrow (e.g. ``node["Comments"]``).
+        frame (int): the frame to evaluate at.
+        expressions (iterable): Fusion expression strings, in order.
+
+    Returns:
+        list: the raw value each expression produced, in the order given.
+    """
+    # An attribute already driven by an expression has to be put back as an
+    # expression; one holding a plain value has to be put back as a value.
+    # Which of the two it is decides how the restore has to be written, so it
+    # is captured before anything is touched.
+    driving_expression = attribute.GetExpression()
+    restore_as_expression = driving_expression is not None
+    saved = driving_expression if restore_as_expression else attribute[frame]
+
+    results = []
+    try:
+        for expression in expressions:
+            attribute.SetExpression(expression)
+            results.append(attribute[frame])
+        return results
+    finally:
+        attribute.SetExpression(None)
+        if restore_as_expression:
+            attribute.SetExpression(saved)
+        else:
+            # An attribute that held nothing reads back as "", not None, and
+            # writing None where "" belongs is its own small corruption.
+            attribute[frame] = "" if saved is None else saved
+
+
+@contextlib.contextmanager
+def maintained_comp_range(comp):
+    """Restores the comp's frame ranges after the block.
+
+    For operations that need to render or evaluate a different range than the
+    artist is working in. Fusion has no notion of a scoped range, so it has to
+    be put back by hand.
+    """
+    attrs = comp.GetAttrs()
+    keys = (
+        "COMPN_GlobalStart",
+        "COMPN_GlobalEnd",
+        "COMPN_RenderStart",
+        "COMPN_RenderEnd",
+    )
+    previous = {k: attrs.get(k) for k in keys if attrs.get(k) is not None}
+    try:
+        yield
+    finally:
+        if previous:
+            comp.SetAttrs(previous)
+
+
 _DAEMON_INIT_LOCK = threading.Lock()
 
 # Use a flag to ensure patches are only applied once; guard inside the lock so
@@ -466,6 +645,28 @@ class FusionHost(RamHost):
         abs_path = os.path.abspath(path_str)
         return abs_path.replace("\\", "/")
 
+    _pinned_comp = None
+
+    @contextlib.contextmanager
+    def pinned_comp(self, comp=None):
+        """Pins `comp` as the current composition for the duration.
+
+        Publishing is not instantaneous: the artist can click a different comp
+        tab while a render is running, and from that moment every `self.comp`
+        read — in this method and in every helper it calls — returns the new
+        one. The operation then finishes against a composition it never
+        started on.
+
+        Capturing the comp into a local only protects the function holding it;
+        this pins it for everything underneath.
+        """
+        previous = FusionHost._pinned_comp
+        FusionHost._pinned_comp = comp if comp is not None else self.comp
+        try:
+            yield FusionHost._pinned_comp
+        finally:
+            FusionHost._pinned_comp = previous
+
     @property
     def comp(self) -> object:
         """Gets the currently active Fusion composition.
@@ -473,6 +674,8 @@ class FusionHost(RamHost):
         Returns:
             object: The active Fusion composition object, or None if not available.
         """
+        if FusionHost._pinned_comp is not None:
+            return FusionHost._pinned_comp
         return self.fusion.GetCurrentComp()
 
     def currentFilePath(self) -> str:
@@ -1365,6 +1568,76 @@ class FusionHost(RamHost):
     # UI Implementation helpers using UIManager
     # -------------------------------------------------------------------------
 
+    def _confirm_format_change(self, changes: list) -> bool:
+        """Asks before changing an existing comp's resolution, rate or aspect.
+
+        Frame ranges are not routed through here: a shot's duration legitimately
+        changes in Ramses and the comp should follow it. Format is different.
+        Changing resolution or frame rate under a comp that already has work in
+        it can shift framing and retime animation, so it is the artist's call.
+
+        Declining leaves the format alone and lets the save continue. It asks
+        again next time rather than remembering, so a mismatch stays visible.
+
+        Returns:
+            bool: True to apply the change.
+        """
+        rows = "<br>".join(changes)
+        fields = [
+            {
+                "id": "W",
+                "label": "This comp does not match the project:",
+                "type": "label",
+                "default": rows,
+            },
+            {
+                "id": "Q",
+                "label": "",
+                "type": "label",
+                "default": (
+                    "<b>Update the composition to match?</b><br>"
+                    "<font color='#777'>Changing resolution or frame rate can "
+                    "shift framing and retime animation. Declining keeps your "
+                    "settings and saves anyway.</font>"
+                ),
+            },
+        ]
+        try:
+            result = self._request_input(
+                "Composition settings",
+                fields,
+                ok_text="Update comp",
+                cancel_text="Keep mine",
+            )
+        except Exception as e:  # pylint: disable=broad-except
+            # No UI available (headless, or Fusion without a window). Applying
+            # silently is the old behaviour and the safer of the two here: a
+            # comp that silently keeps the wrong format renders the wrong thing.
+            self.log(
+                f"Could not ask about the composition settings ({e}); "
+                "applying the project's.",
+                LogLevel.Warning,
+            )
+            return True
+        return result is not None
+
+    def _comp_has_content(self) -> bool:
+        """True if the comp holds anything but the plugin's own anchors.
+
+        A comp with no work in it has nothing to disturb, so the project format
+        is applied to it without asking. That covers new comps and templates,
+        where prompting would only ever get one answer.
+        """
+        if not self.comp:
+            return False
+        try:
+            tools = self.comp.GetToolList(False).values()
+        except Exception:  # pylint: disable=broad-except
+            return True  # cannot tell: assume there is work and ask
+        return any(
+            getattr(t, "Name", "") not in ("_PREVIEW", "_FINAL") for t in tools
+        )
+
     def _request_input(
         self, title: str, fields: list, ok_text: str = "OK", cancel_text: str = "Cancel"
     ) -> dict:
@@ -1684,7 +1957,11 @@ class FusionHost(RamHost):
         Returns:
             bool: True on success, False if no composition is open.
         """
-        if not self.comp:
+        # Resolved once, then used throughout: `comp` is a property over
+        # GetCurrentComp(), so repeated `self.comp` reads within one operation
+        # are not guaranteed to be the same composition.
+        comp = self.comp
+        if not comp:
             return False
 
         # The upstream import flow may pass the full contents of a published
@@ -1705,18 +1982,18 @@ class FusionHost(RamHost):
         # Start undo group with descriptive name
         num_files = len(filePaths)
         undo_name = f"Import {num_files} Loader{'s' if num_files > 1 else ''}"
-        self.comp.StartUndo(undo_name)
-        self.comp.Lock()
+        comp.StartUndo(undo_name)
+        comp.Lock()
         success = False
         try:
             # Get start frame for alignment
             start_frame = RAM_SETTINGS.userSettings.get("compStartFrame", 1001)
 
             # Determine Reference Position (Grid Units)
-            flow = self.comp.CurrentFrame.FlowView
+            flow = comp.CurrentFrame.FlowView
             start_x, start_y = 0, 0
 
-            active = self.comp.ActiveTool
+            active = comp.ActiveTool
             if active and flow:
                 pos = flow.GetPosTable(active)
                 # Fusion returns {1.0: x, 2.0: y} in Grid Units
@@ -1739,7 +2016,7 @@ class FusionHost(RamHost):
                         # bmd.readfile() reads the .comp as a clip string; comp.Paste() inserts it.
                         content = self._read_comp_file(normalized_path)
                         if content:
-                            self.comp.Paste(content)
+                            comp.Paste(content)
                             self.log(f"Merged nodes from composition: {normalized_path}", LogLevel.Info)
                         else:
                             self.log(f"Could not read content from: {normalized_path}", LogLevel.Critical)
@@ -1749,7 +2026,7 @@ class FusionHost(RamHost):
                     # load a .comp file and creating one would produce an invalid node.
                     continue
 
-                loader = self.comp.AddTool("Loader", target_x, target_y)
+                loader = comp.AddTool("Loader", target_x, target_y)
                 if not loader:
                     self.log(
                         f"Failed to create Loader at ({target_x}, {target_y})",
@@ -1796,7 +2073,7 @@ class FusionHost(RamHost):
                     # Prevent name collisions by checking if node exists and appending counter
                     final_name = name
                     counter = 1
-                    while self.comp.FindTool(final_name) and counter < 100:
+                    while comp.FindTool(final_name) and counter < 100:
                         final_name = f"{name}_{counter}"
                         counter += 1
                     loader.SetAttrs({"TOOLS_Name": final_name})
@@ -1810,8 +2087,8 @@ class FusionHost(RamHost):
             self.log(f"Import failed: {e}", LogLevel.Critical)
             return False
         finally:
-            self.comp.Unlock()
-            self.comp.EndUndo(success)  # Commit if successful, discard if failed
+            comp.Unlock()
+            comp.EndUndo(success)  # Commit if successful, discard if failed
 
     @staticmethod
     def findStepByShortName(project, *short_names):
@@ -2102,11 +2379,31 @@ class FusionHost(RamHost):
         Returns:
             list: List of generated file paths (usually just one), or empty list on failure.
         """
-        if not self.comp:
+        # Resolved once, then used throughout: `comp` is a property over
+        # GetCurrentComp(), so repeated `self.comp` reads within one operation
+        # are not guaranteed to be the same composition.
+        comp = self.comp
+        if not comp:
             return []
 
+        # Pinned for the same reason as _publish: the preview render and every
+        # helper below it must stay on the composition this started on.
+        with self.pinned_comp(comp):
+            return self._previewPinned(
+                comp, previewFolderPath, previewFileBaseName, item, step
+            )
+
+    def _previewPinned(
+        self,
+        comp,
+        previewFolderPath: str,
+        previewFileBaseName: str,
+        item: RamItem,
+        step: RamStep,
+    ) -> list:
+        """The body of :meth:`_preview`, run with the composition pinned."""
         # 1. Find the Preview Anchor
-        preview_node = self.comp.FindTool("_PREVIEW")
+        preview_node = comp.FindTool("_PREVIEW")
         if not preview_node:
             self.log(
                 "Preview anchor (_PREVIEW) not found in Flow. Use 'Setup Scene' to add one.",
@@ -2123,24 +2420,57 @@ class FusionHost(RamHost):
         # 3. Armed for render
         self.log(f"Starting preview render to: {dst}", LogLevel.Info)
 
-        # Ensure directory exists
-        prev_dir = os.path.dirname(dst)
-        if prev_dir:
-            os.makedirs(prev_dir, exist_ok=True)
-
-        # Lock comp during state modification and render
-        comp = self.comp
-        comp.Lock()
-        try:
+        # Prepare the Saver before locking, for the same reason _publish does:
+        # apply_render_preset() reads the step's settings from the Ramses
+        # daemon, and a slow or unreachable daemon would otherwise leave Fusion
+        # sitting on a locked comp. The path was already resolved above; only
+        # the preset was inside the lock.
+        # Bookkeeping, not the artist's edit, so it is grouped into one undo
+        # entry and that entry discarded — the same treatment
+        # _sync_render_anchors gives the identical writes. Without it, Ctrl+Z
+        # after a preview undid our path and preset instead of their work.
+        with comp_undo(comp, "Ramses Preview Setup", keep=False):
             preview_node.Clip[1] = dst
             self.apply_render_preset(preview_node, "preview")
-            preview_node.SetAttrs({"TOOLB_PassThrough": False})
 
+        # Read the path back off the Saver instead of trusting `dst`.
+        #
+        # Changing a Saver's output format makes Fusion rewrite the filename's
+        # extension, so the file that actually gets written is not always the
+        # one we asked for. _publish already re-reads Clip[1] after applying
+        # the preset; here the intended path was carried straight through to
+        # the directory creation, the verification and the returned file list,
+        # so a step whose config changes the format turned a perfectly good
+        # preview into "Preview render produced an invalid file" — and the
+        # version metadata was stamped onto a path with nothing at it.
+        dst = self.normalizePath(preview_node.Clip[1]) or dst
+
+        # Ensure directory exists. An unwritable or unreachable folder is an
+        # ordinary failure here (a disconnected share is the common one), so it
+        # is reported and returned like every other one. Uncaught, it left the
+        # UI's "Preview was not created" branch unreached and put a traceback
+        # in the console instead. _publish handles the same case the same way.
+        prev_dir = os.path.dirname(dst)
+        if prev_dir:
             try:
-                # 4. Trigger Fusion Render
-                if comp.Render(True):
-                    # 5. Verify the output
-                    if self._verify_render_output(dst):
+                os.makedirs(prev_dir, exist_ok=True)
+            except OSError as e:
+                self.log(
+                    f"Cannot create the preview directory {prev_dir}: {e}",
+                    LogLevel.Critical,
+                )
+                return []
+
+        # Lock comp during state modification and render
+        comp.Lock()
+        try:
+            try:
+                # 4. Trigger Fusion Render (isolated to this Saver)
+                if self._render_anchor(preview_node):
+                    # 5. Verify the output, frame count included
+                    if self._verify_render_output(
+                        dst, self.expectedFrameCount(comp)
+                    ):
                         # Disarm immediately after render
                         preview_node.SetAttrs({"TOOLB_PassThrough": True})
 
@@ -2233,19 +2563,269 @@ class FusionHost(RamHost):
         """
         return publishOptions or {}
 
-    def _verify_render_output(self, path: str) -> bool:
+    # Fusion render request flag: suppress the render progress/settings dialogs.
+    # Documented in the Fusion scripting reference.
+    REQF_QUIET = 524288
+
+    def _render_anchor(self, node) -> bool:
+        """Renders exactly one Saver, with the render settings stated explicitly.
+
+        Both render paths go through here so they cannot drift apart again.
+
+        Two things this fixes over calling comp.Render(True) directly:
+
+        1. comp.Render() renders EVERY enabled Saver, not the one you arm. An
+           artist's own Saver left enabled would therefore render during a
+           publish, and a failure anywhere in its branch would fail the publish.
+           Every Saver is disabled for the duration except the one asked for,
+           and all of them are put back afterwards.
+
+        2. Render() takes (wait, start, end, proxy, hiq, motionblur). Passing
+           only `wait` leaves quality, motion blur and proxy at whatever the
+           artist last toggled interactively, so a master render could go out at
+           low quality or proxied and nothing would say so. The Fusion render
+           dialog sets them, which is why a manual render does not have this
+           problem and a scripted one does.
+
+        Args:
+            node (Tool): the Saver to render.
+
+        Returns:
+            bool: True if Fusion reported a successful render.
+        """
+        comp = self.comp
+        if not comp or not node:
+            return False
+
+        passthrough = "TOOLB_PassThrough"
+        original = {}
+
+        try:
+            savers = list(comp.GetToolList(False, "Saver").values())
+        except Exception:  # pylint: disable=broad-except
+            savers = [node]
+
+        try:
+            for saver in savers:
+                try:
+                    original[saver.Name] = saver.GetAttrs()[passthrough]
+                except Exception:  # pylint: disable=broad-except
+                    continue
+                # PassThrough is the inverse of enabled: everything but our
+                # anchor gets passed through.
+                saver.SetAttrs({passthrough: saver.Name != node.Name})
+
+            # Arm the anchor even if it was not in the list above (a Saver the
+            # comp did not report is still the node we were handed).
+            node.SetAttrs({passthrough: False})
+
+            # Not comp.GetAttrs() directly: an unset render range comes back
+            # as the RANGE_UNSET sentinel, and handing that to Render() asks
+            # Fusion for a billion frames starting a billion before zero.
+            range_start, range_end = self.compRenderRange(comp)
+            render_kwargs = {
+                "Wait": True,
+                "Start": range_start,
+                "End": range_end,
+                # A master render is never a draft: state the quality rather
+                # than inheriting the viewer's.
+                "HiQ": True,
+                "MotionBlur": True,
+                # No dialogs; this runs unattended from a button.
+                "RenderFlags": self.REQF_QUIET,
+            }
+            # Start/End are omitted rather than sent as None when the comp does
+            # not report them, so Fusion falls back to its own range.
+            render_kwargs = {k: v for k, v in render_kwargs.items() if v is not None}
+
+            self.log(
+                "Rendering '%s' frames %s-%s"
+                % (
+                    node.Name,
+                    render_kwargs.get("Start", "?"),
+                    render_kwargs.get("End", "?"),
+                ),
+                LogLevel.Debug,
+            )
+            # comp.Render(Start=, End=) writes those frames back onto the comp
+            # as its render range, so a scripted render leaves behind the range
+            # it used. Today the values come from the comp's own range, making
+            # the guard a no-op — it is here so this cannot quietly become a
+            # scene edit the day either path renders a range of its own.
+            with maintained_comp_range(comp):
+                return bool(comp.Render(render_kwargs))
+        finally:
+            # The anchor is deliberately not restored here; the caller disarms
+            # it. Restoring it too would fight that and leave the outcome
+            # depending on which finally ran last.
+            for saver in savers:
+                if saver.Name != node.Name and saver.Name in original:
+                    saver.SetAttrs({passthrough: original[saver.Name]})
+
+    # Fusion reports an UNSET render range as this sentinel, not as None and
+    # not as the global range. Read at face value it becomes a render of a
+    # billion frames, a frame count no sequence can ever satisfy, and a
+    # validation dialog full of nonsense numbers.
+    RANGE_UNSET = -1000000000
+
+    def compRenderRange(self, comp=None):
+        """The comp's render range, falling back to its global range.
+
+        Returns:
+            tuple: (start, end), or (None, None) when neither range is set.
+        """
+        comp = comp or self.comp
+        if not comp:
+            return None, None
+        try:
+            attrs = comp.GetAttrs()
+        except Exception:  # pylint: disable=broad-except
+            return None, None
+
+        def _resolve(render_key, global_key):
+            value = attrs.get(render_key)
+            if value is None or value == self.RANGE_UNSET:
+                value = attrs.get(global_key)
+            if value is None or value == self.RANGE_UNSET:
+                return None
+            return value
+
+        start = _resolve("COMPN_RenderStart", "COMPN_GlobalStart")
+        end = _resolve("COMPN_RenderEnd", "COMPN_GlobalEnd")
+        if start is None or end is None:
+            return None, None
+        return start, end
+
+    def toolResolution(self, node, frame: int = None):
+        """The resolution actually arriving at `node`, or None.
+
+        Fusion does not store a tool's input resolution until it has been
+        rendered, so it cannot simply be read; it is obtained by parking an
+        expression on the tool and evaluating that. This is what tells a
+        master render apart from the composition's format — a Crop, Resize or
+        Scale in front of a Saver changes what gets delivered while
+        Comp.FrameFormat stays exactly as the database says it should be.
+
+        Returns None rather than raising. A resolution that cannot be read
+        (a disconnected Saver, an older Fusion, an expression that will not
+        evaluate) is not a reason to stop someone publishing.
+
+        Args:
+            node (Tool): the tool whose incoming resolution to read.
+            frame (int): the frame to evaluate at. Defaults to the first
+                frame of the render range.
+
+        Returns:
+            tuple: (width, height) as ints, or None.
+        """
+        if not node:
+            return None
+        comp = self.comp
+        if not comp:
+            return None
+
+        if frame is None:
+            start, _ = self.compRenderRange(comp)
+            if start is None:
+                return None
+            frame = int(start)
+
+        try:
+            attribute = node["Comments"]
+        except Exception:  # pylint: disable=broad-except
+            return None
+
+        try:
+            # The modified-flag guard is OUTERMOST on purpose: releasing the
+            # lock and discarding the undo can each dirty the comp too, so it
+            # has to be the last thing restored.
+            with maintained_modified_flag(comp), comp_locked(comp), comp_undo(
+                comp, "Read resolution", keep=False
+            ):
+                width, height = evaluate_on_attribute(
+                    attribute,
+                    frame,
+                    (
+                        "self.Input.OriginalWidth",
+                        "self.Input.OriginalHeight",
+                    ),
+                )
+
+            if width in (None, "") or height in (None, ""):
+                return None
+            return int(width), int(height)
+        except Exception as e:  # pylint: disable=broad-except
+            self.log(
+                f"Could not read the resolution at "
+                f"{getattr(node, 'Name', '?')}: {e}",
+                LogLevel.Debug,
+            )
+            return None
+
+    def expectedFrameCount(self, comp=None) -> int:
+        """How many frames the comp's render range covers, or 0 if unknown."""
+        start, end = self.compRenderRange(comp)
+        if start is None or end is None:
+            return 0
+        try:
+            return int(end) - int(start) + 1
+        except (TypeError, ValueError):
+            return 0
+
+    def _count_rendered_frames(self, path: str) -> int:
+        """Counts the non-empty files belonging to the sequence at `path`.
+
+        Returns 0 when the path names a single file rather than a sequence.
+        """
+        directory = os.path.dirname(path)
+        if not os.path.isdir(directory):
+            return 0
+
+        wildcard_name = re.sub(
+            r"(?<=\.)(0+|#+|%\d*d)(?=\.)", "*", os.path.basename(path)
+        )
+        if "*" not in wildcard_name:
+            return 0
+
+        matches = glob.glob(os.path.join(directory, wildcard_name).replace("\\", "/"))
+        return sum(
+            1 for m in matches if os.path.isfile(m) and os.path.getsize(m) > 0
+        )
+
+    def _verify_render_output(self, path: str, expected_frames: int = 0) -> bool:
         """Verifies that a render output exists and is valid.
         Handles image sequences by checking for wildcard matches if the exact path
         contains padding placeholders (e.g., .0000. or .####.).
 
         Args:
             path (str): The path to verify.
+            expected_frames (int): How many frames the render should have
+                produced. When given and greater than one, a sequence must
+                account for all of them.
 
         Returns:
             bool: True if file(s) exist and size > 0, False otherwise.
         """
         if not path:
             return False
+
+        # A sequence has to be counted, not sampled.
+        #
+        # Checking only that *some* frame exists passed a render that died
+        # partway: the folder is full of perfectly valid EXRs, the publish is
+        # marked complete, and the gap is found at delivery.
+        if expected_frames > 1:
+            found = self._count_rendered_frames(path)
+            if found:
+                if found >= expected_frames:
+                    return True
+                self.log(
+                    f"Render is incomplete: found {found} of {expected_frames} "
+                    f"frames for {path}",
+                    LogLevel.Critical,
+                )
+                return False
+            # No frame token in the path: one movie covers the whole range.
 
         # 1. Direct check (for movies or single frames)
         if os.path.exists(path) and os.path.getsize(path) > 0:
@@ -2466,6 +3046,14 @@ class FusionHost(RamHost):
         if not comp:
             return []
 
+        # Everything below — including currentFilePath(), currentItem() and
+        # the render itself — must see the composition this publish started
+        # on, not whichever tab the artist clicks while it runs.
+        with self.pinned_comp(comp):
+            return self._publishPinned(comp, publishInfo, publishOptions)
+
+    def _publishPinned(self, comp, publishInfo: RamFileInfo, publishOptions: dict) -> list:
+        """The body of :meth:`_publish`, run with the composition pinned."""
         src = self.currentFilePath()
         if not src:
             self.log(
@@ -2505,6 +3093,54 @@ class FusionHost(RamHost):
 
             self.log("Starting final master render...", LogLevel.Info)
 
+            # Prepare the Saver before locking, rather than trusting whatever
+            # the UI last wrote to it.
+            #
+            # _renderPreview sets its own output path and applies its own preset
+            # immediately before rendering, so a preview is correct whatever
+            # state the node was in. The final render did neither: it rendered
+            # with whatever path, format and numbering happened to be on _FINAL.
+            # Those are only written by _sync_render_anchors(), and Publish is
+            # the one action that does not call it (Save and Save Incremental
+            # both do), so a hand-edited Saver, or a step whose YAML changed
+            # since the last UI refresh, produced a master render with the wrong
+            # settings and nobody found out until delivery.
+            #
+            # Deliberately OUTSIDE comp.Lock(): resolving the path and reading
+            # the step's settings both talk to the Ramses daemon, and a slow or
+            # unreachable daemon would otherwise leave Fusion sitting on a
+            # locked comp. _sync_render_anchors() writes these unlocked too.
+            #
+            # A resolved path only ever replaces the existing one. Resolution
+            # returns "" on failure, and stomping a good path with an empty one
+            # would turn a recoverable state into a failed publish.
+            try:
+                resolved = self.resolveFinalPath()
+            except Exception as e:  # pylint: disable=broad-except
+                resolved = ""
+                self.log(
+                    f"Could not resolve the final render path ({e}); keeping "
+                    "the path already on _FINAL.",
+                    LogLevel.Warning,
+                )
+
+            if not resolved:
+                self.log(
+                    "Final render path could not be resolved; using the path "
+                    "already set on _FINAL.",
+                    LogLevel.Warning,
+                )
+
+            # Grouped and discarded for the same reason as in _preview: these
+            # are our writes, not the artist's, and they must not become the
+            # thing Ctrl+Z reaches for after a publish.
+            with comp_undo(comp, "Ramses Publish Setup", keep=False):
+                if resolved and self.normalizePath(
+                    final_node.Clip[1]
+                ) != self.normalizePath(resolved):
+                    final_node.Clip[1] = resolved
+                self.apply_render_preset(final_node, "final")
+
             render_success = False
 
             # Lock comp during state modification and render
@@ -2525,14 +3161,15 @@ class FusionHost(RamHost):
                         )
                         return []
 
-                # Enable the node
-                final_node.SetAttrs({"TOOLB_PassThrough": False})
-
                 try:
-                    # Execute render - comp.Render returns True only on success
-                    if comp.Render(True):
-                        # Secondary Verification: Check file existence and size
-                        if self._verify_render_output(render_path):
+                    # Execute render, isolated to this Saver. Returns True only
+                    # on success.
+                    if self._render_anchor(final_node):
+                        # Secondary Verification: existence, size, and — for a
+                        # sequence — that every frame of the range is there.
+                        if self._verify_render_output(
+                            render_path, self.expectedFrameCount(comp)
+                        ):
                             self.log(
                                 f"Final render complete and verified: {render_path}",
                                 LogLevel.Info,
@@ -2612,9 +3249,13 @@ class FusionHost(RamHost):
         Returns:
             bool: True on success, False if no valid Loader selected.
         """
-        if not self.comp:
+        # Resolved once, then used throughout: `comp` is a property over
+        # GetCurrentComp(), so repeated `self.comp` reads within one operation
+        # are not guaranteed to be the same composition.
+        comp = self.comp
+        if not comp:
             return False
-        active = self.comp.ActiveTool
+        active = comp.ActiveTool
         # GetAttrs() can return None/False from Fusion; subscripting it
         # directly raised an uncaught TypeError (the guarding try block
         # only starts further down).
@@ -2627,17 +3268,18 @@ class FusionHost(RamHost):
             return False
 
         # Start undo group for atomic operation
-        self.comp.StartUndo("Replace Loader")
-        self.comp.Lock()
+        comp.StartUndo("Replace Loader")
+        comp.Lock()
         success = False
         try:
             # Re-validate active tool hasn't changed
-            if not self.comp.ActiveTool or self.comp.ActiveTool != active:
+            if not comp.ActiveTool or comp.ActiveTool != active:
                 self.log("Selection changed during operation.", LogLevel.Warning)
                 return False
 
             path = self.normalizePath(filePaths[0])
-            active.Clip[1] = path
+            with maintained_loader_inputs(active):
+                active.Clip[1] = path
 
             # Store Ramses metadata on Loader node
             if item:
@@ -2670,11 +3312,11 @@ class FusionHost(RamHost):
                 if name:
                     final_name = name
                     counter = 1
-                    existing = self.comp.FindTool(final_name)
+                    existing = comp.FindTool(final_name)
                     while existing and existing != active:
                         final_name = f"{name}_{counter}"
                         counter += 1
-                        existing = self.comp.FindTool(final_name)
+                        existing = comp.FindTool(final_name)
                     active.SetAttrs({"TOOLS_Name": final_name})
 
             success = True
@@ -2683,8 +3325,8 @@ class FusionHost(RamHost):
             self.log(f"Replace failed: {e}", LogLevel.Critical)
             return False
         finally:
-            self.comp.Unlock()
-            self.comp.EndUndo(success)  # Commit if successful, discard if failed
+            comp.Unlock()
+            comp.EndUndo(success)  # Commit if successful, discard if failed
 
     def _replaceUI(self, item: RamItem, step: RamStep) -> dict:
         """Shows the Ramses Asset Browser for replacing."""
@@ -3025,27 +3667,49 @@ class FusionHost(RamHost):
         if attrs.get("COMPN_RenderEnd") != float(end):
             new_attrs["COMPN_RenderEnd"] = float(end)
 
-        # Lock comp and wrap in undo for atomic application
-        comp.Lock()
-        comp.StartUndo("Setup Ramses Scene")
-        success = False
+        # Ask before changing the format of a comp that has work in it.
+        #
+        # Resolution, rate and pixel aspect used to be rewritten silently on
+        # every save. Changing them under an existing comp can shift framing and
+        # retime animation, which is not something to do to someone's work
+        # without saying so. Frame ranges are deliberately NOT routed through
+        # here: a shot's duration legitimately changes in Ramses and the comp
+        # should follow it.
+        if new_prefs and self._comp_has_content():
+            labels = {
+                "Comp.FrameFormat.Width": ("Width", curr_w),
+                "Comp.FrameFormat.Height": ("Height", curr_h),
+                "Comp.FrameFormat.Rate": ("Frame rate", curr_fps),
+                "Comp.FrameFormat.AspectX": ("Pixel aspect X", curr_pa_x),
+                "Comp.FrameFormat.AspectY": ("Pixel aspect Y", curr_pa_y),
+            }
+            changes = []
+            for key, value in new_prefs.items():
+                label, current = labels.get(key, (key, "?"))
+                changes.append(f"{label}: <b>{current}</b> &rarr; <b>{value}</b>")
+
+            if not self._confirm_format_change(changes):
+                self.log(
+                    "Artist kept the composition's own format; only the frame "
+                    "range was updated.",
+                    LogLevel.Info,
+                )
+                new_prefs = {}
+
+        # Setup runs on the plugin's initiative, during a save the artist asked
+        # for. Keeping it out of their undo stack means Ctrl+Z undoes their last
+        # edit rather than our housekeeping.
         try:
-            if new_prefs:
-                comp.SetPrefs(new_prefs)
-            if new_attrs:
-                comp.SetAttrs(new_attrs)
-
-            # Always store metadata inside undo block
-            self._store_ramses_metadata(item)
-
-            success = True
+            with comp_locked(comp), comp_undo(comp, "Setup Ramses Scene", keep=False):
+                if new_prefs:
+                    comp.SetPrefs(new_prefs)
+                if new_attrs:
+                    comp.SetAttrs(new_attrs)
+                self._store_ramses_metadata(item)
             return True
         except Exception as e:
             self.log(f"Setup failed: {e}", LogLevel.Critical)
             return False
-        finally:
-            comp.EndUndo(success)
-            comp.Unlock()
 
     def _saveAsUI(self) -> dict:
         """Shows the Ramses Save As Dialog with intelligent pre-selection."""
@@ -3172,13 +3836,17 @@ class FusionHost(RamHost):
 
         Note: Does NOT create undo entries (automatic visual feedback, not user edit).
         """
-        if not self.comp:
+        # Resolved once, then used throughout: `comp` is a property over
+        # GetCurrentComp(), so repeated `self.comp` reads within one operation
+        # are not guaranteed to be the same composition.
+        comp = self.comp
+        if not comp:
             return 0
 
         # Phase 1: Collect loader data (fast, with lock)
-        self.comp.Lock()
+        comp.Lock()
         try:
-            loaders = self.comp.GetToolList(False, "Loader")
+            loaders = comp.GetToolList(False, "Loader")
             if not loaders:
                 with self._cache_lock:
                     self._node_version_cache = {}
@@ -3222,7 +3890,7 @@ class FusionHost(RamHost):
                 except Exception:
                     continue
         finally:
-            self.comp.Unlock()
+            comp.Unlock()
 
         # Phase 2: Process data (slow, without lock)
         count = 0
@@ -3305,13 +3973,13 @@ class FusionHost(RamHost):
 
         # Phase 3: Apply visual updates (fast, with lock)
         if updates:
-            self.comp.Lock()
+            comp.Lock()
             try:
                 for name, data in updates.items():
                     # Use the node collected in Phase 1 rather than looking it
                     # up again: GetToolList() keys are indices, so the previous
                     # FindTool(key) never matched and no tile was ever coloured.
-                    node = data["node"] or self.comp.FindTool(name)
+                    node = data["node"] or comp.FindTool(name)
                     if node:
                         # Only update if current color differs
                         color = node.TileColor
@@ -3337,7 +4005,7 @@ class FusionHost(RamHost):
                         elif not data["comment"] and current_comment:
                             node.Comments[1] = ""
             finally:
-                self.comp.Unlock()
+                comp.Unlock()
 
         return count
 
@@ -3373,8 +4041,12 @@ class FusionHost(RamHost):
 
         # --- SMART UPDATE LOGIC ---
         # Only trigger on interactive calls (no paths provided)
-        if len(paths) == 0 and not item and self.comp:
-            active = self.comp.ActiveTool
+        # Resolved once, then used throughout: `comp` is a property over
+        # GetCurrentComp(), so repeated `self.comp` reads within one operation
+        # are not guaranteed to be the same composition.
+        comp = self.comp
+        if len(paths) == 0 and not item and comp:
+            active = comp.ActiveTool
             if active and active.ID == "Loader":
                 path = self.normalizePath(active.Clip[1])
                 # Fast Filter
@@ -3466,14 +4138,15 @@ class FusionHost(RamHost):
                                             return False
 
                                     # Wrap update in undo group with Lock/Unlock
-                                    self.comp.StartUndo("Update Loader to Latest")
-                                    self.comp.Lock()
+                                    comp.StartUndo("Update Loader to Latest")
+                                    comp.Lock()
                                     success = False
                                     try:
                                         new_path_normalized = self.normalizePath(
                                             new_path
                                         )
-                                        active.Clip[1] = new_path_normalized
+                                        with maintained_loader_inputs(active):
+                                            active.Clip[1] = new_path_normalized
 
                                         # Store updated Ramses metadata
                                         if itm:
@@ -3517,8 +4190,8 @@ class FusionHost(RamHost):
                                         self.log(f"Update failed: {e}", LogLevel.Error)
                                         return False
                                     finally:
-                                        self.comp.Unlock()
-                                        self.comp.EndUndo(
+                                        comp.Unlock()
+                                        comp.EndUndo(
                                             success
                                         )  # Commit if successful, discard if failed
                                 else:
