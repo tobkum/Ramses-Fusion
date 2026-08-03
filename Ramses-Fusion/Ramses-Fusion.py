@@ -725,6 +725,20 @@ class RamsesFusionApp:
         if not comp:
             return
 
+        # Resolved before the lock is taken. Both calls are Ramses daemon
+        # round-trips, and holding comp.Lock() across a slow or unreachable
+        # daemon leaves Fusion's UI frozen with no way to tell why. _publish,
+        # _preview and _sync_render_anchors all keep their daemon calls outside
+        # the lock; this was the last place that did not.
+        with DisableMakedirs():
+            preview_path = self.ramses.host.resolvePreviewPath()
+            publish_path = self.ramses.host.resolveFinalPath()
+
+        # (node, preset kind) for each anchor, applied once the lock is
+        # released: apply_render_preset reads the step's settings from the
+        # daemon too.
+        pending_presets = []
+
         comp.Lock()
         comp.StartUndo("Create Render Anchors")
         try:
@@ -755,11 +769,6 @@ class RamsesFusionApp:
                 },
             }
 
-            # Pre-calculate paths via Host
-            with DisableMakedirs():
-                preview_path = self.ramses.host.resolvePreviewPath()
-                publish_path = self.ramses.host.resolveFinalPath()
-
             for name, cfg in anchors_config.items():
                 node = comp.FindTool(name)
 
@@ -780,20 +789,23 @@ class RamsesFusionApp:
                     if name == "_PREVIEW":
                         if preview_path:
                             node.Clip[1] = preview_path
-                        self.ramses.host.apply_render_preset(node, "preview")
+                        pending_presets.append((node, "preview"))
                         node.Comments[1] = (
                             "Preview renders will be saved here. Connect your output."
                         )
                     else:
                         if publish_path:
                             node.Clip[1] = publish_path
-                        self.ramses.host.apply_render_preset(node, "final")
+                        pending_presets.append((node, "final"))
                         node.Comments[1] = (
                             "Final renders will be saved here. Connect your output."
                         )
         finally:
             comp.EndUndo(True)
             comp.Unlock()
+
+        for node, kind in pending_presets:
+            self.ramses.host.apply_render_preset(node, kind)
 
     def _validate_publish(
         self, check_preview: bool = True, check_final: bool = True
@@ -2291,6 +2303,17 @@ class RamsesFusionApp:
         """Handler for 'Save As / Create' button."""
         if self.ramses.host.saveAs():
             self.refresh_header(force_full=True)
+            self._emit_action_status(
+                f"✓ Saved as v{self.ramses.host.currentVersion()} · {time.strftime('%H:%M')}",
+                self.ramses.host.currentStatus(),
+            )
+        else:
+            # saveAs() returns False both when the artist cancels and when the
+            # save fails, so this cannot accuse. Silence was worse: a failed
+            # Save As looked exactly like a successful one.
+            self._set_status(
+                "Save As did not complete - see the Fusion console.", "error"
+            )
 
     @requires_connection
     def on_switch_shot(self, ev: object) -> None:
@@ -2302,6 +2325,16 @@ class RamsesFusionApp:
         # inside its _openUI implementation.
         if self.ramses.host.open():
             self.refresh_header(force_full=True)
+            self._emit_action_status(
+                f"✓ Opened {os.path.basename(self.ramses.host.currentFilePath())}",
+                self.ramses.host.currentStatus(),
+            )
+        else:
+            # Same as Save As: open() cannot tell a cancel from a failure, and
+            # saying nothing hid the failures.
+            self._set_status(
+                "Nothing was opened - see the Fusion console.", "error"
+            )
 
     def _on_switch_shot_uimanager(self):
         """Original UIManager-based Switch Shot wizard logic."""
@@ -2586,6 +2619,13 @@ class RamsesFusionApp:
         if self.ramses.host.importItem():
             self.refresh_header()
             self._set_status("✓ Imported published input.", "ok")
+        else:
+            # importItem() returns False for both "the artist closed the
+            # picker" and "the import failed", so the wording has to cover
+            # each without claiming the other happened.
+            self._set_status(
+                "Import did not complete — see the Fusion console.", "error"
+            )
 
     @requires_connection
     def on_replace(self, ev: object) -> None:
@@ -2594,6 +2634,10 @@ class RamsesFusionApp:
         if self.ramses.host.replaceItem():
             self.refresh_header()
             self._set_status("✓ Loader replaced.", "ok")
+        else:
+            self._set_status(
+                "Replace did not complete — see the Fusion console.", "error"
+            )
 
     @requires_connection
     def on_save(self, ev: object) -> None:
@@ -2685,6 +2729,9 @@ class RamsesFusionApp:
 
                 if comment_changed or is_incremental:
                     has_project = self.ramses.project() is not None
+                    # Anchors must be current before a version is written,
+                    # exactly as on_save and on_incremental_save do it.
+                    self._sync_render_anchors()
                     if host.save(comment=res["Comment"], setupFile=has_project, incremental=is_incremental, state=state):
                         if status:
                             status.setComment(res["Comment"])
@@ -2708,11 +2755,22 @@ class RamsesFusionApp:
             if res_comment != current_note:
                 has_project = self.ramses.project() is not None
                 # Use standard save (non-incremental) as the standard dialog doesn't have an increment toggle
+                # Anchors must be current before a version is written,
+                # exactly as on_save and on_incremental_save do it.
+                self._sync_render_anchors()
                 if host.save(comment=res_comment, setupFile=has_project, incremental=False, state=state):
                     if status:
                         status.setComment(res_comment)
                         # We don't update version here because it was a simple save-over
                     self.refresh_header()
+                    self._set_status(
+                        f"✓ Saved v{host.currentVersion()} with note · {time.strftime('%H:%M')}",
+                        "ok",
+                    )
+                else:
+                    self._set_status(
+                        "Save failed — see the Fusion console.", "error"
+                    )
 
     @requires_connection
     def on_update_status(self, ev: object) -> None:

@@ -324,6 +324,33 @@ class TestFusionHost(unittest.TestCase):
         self.assertIn("preset", order)
         self.assertLess(order.index("preset"), order.index("lock"))
 
+    def test_preview_reports_an_unwritable_output_directory(self):
+        """A folder that cannot be created is a failure, not a traceback.
+
+        A disconnected share is the everyday cause. The makedirs call sat
+        outside any try, so the OSError travelled up through savePreview() and
+        out of the button handler: the artist got a console traceback and the
+        UI's "Preview was not created" branch was never reached. _publish
+        already handled the same case this way.
+        """
+        comp = self.mock_fusion.GetCurrentComp()
+        preview_node = comp.AddTool("Saver", 0, 0)
+        preview_node.SetAttrs({"TOOLS_Name": "_PREVIEW"})
+
+        self.host.resolvePreviewPath = MagicMock(
+            return_value="Q:/gone/shot.mov"
+        )
+        self.host._render_anchor = MagicMock(return_value=True)
+
+        with patch(
+            "os.makedirs", side_effect=OSError("network path not found")
+        ):
+            result = self.host._preview("Q:/gone", "shot", None, None)
+
+        self.assertEqual(result, [])
+        # Nothing should have been rendered once the destination is unusable.
+        self.host._render_anchor.assert_not_called()
+
     def _setup_options(self):
         import ramses
         ramses.RAM_SETTINGS.userSettings = {"compStartFrame": 1001}

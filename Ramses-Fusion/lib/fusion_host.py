@@ -2249,10 +2249,21 @@ class FusionHost(RamHost):
         # 3. Armed for render
         self.log(f"Starting preview render to: {dst}", LogLevel.Info)
 
-        # Ensure directory exists
+        # Ensure directory exists. An unwritable or unreachable folder is an
+        # ordinary failure here (a disconnected share is the common one), so it
+        # is reported and returned like every other one. Uncaught, it left the
+        # UI's "Preview was not created" branch unreached and put a traceback
+        # in the console instead. _publish handles the same case the same way.
         prev_dir = os.path.dirname(dst)
         if prev_dir:
-            os.makedirs(prev_dir, exist_ok=True)
+            try:
+                os.makedirs(prev_dir, exist_ok=True)
+            except OSError as e:
+                self.log(
+                    f"Cannot create the preview directory {prev_dir}: {e}",
+                    LogLevel.Critical,
+                )
+                return []
 
         # Prepare the Saver before locking, for the same reason _publish does:
         # apply_render_preset() reads the step's settings from the Ramses
@@ -2260,8 +2271,13 @@ class FusionHost(RamHost):
         # sitting on a locked comp. The path was already resolved above; only
         # the preset was inside the lock.
         comp = self.comp
-        preview_node.Clip[1] = dst
-        self.apply_render_preset(preview_node, "preview")
+        # Bookkeeping, not the artist's edit, so it is grouped into one undo
+        # entry and that entry discarded — the same treatment
+        # _sync_render_anchors gives the identical writes. Without it, Ctrl+Z
+        # after a preview undid our path and preset instead of their work.
+        with comp_undo(comp, "Ramses Preview Setup", keep=False):
+            preview_node.Clip[1] = dst
+            self.apply_render_preset(preview_node, "preview")
 
         # Lock comp during state modification and render
         comp.Lock()
@@ -2758,17 +2774,22 @@ class FusionHost(RamHost):
                     LogLevel.Warning,
                 )
 
-            if resolved:
-                if self.normalizePath(final_node.Clip[1]) != self.normalizePath(resolved):
-                    final_node.Clip[1] = resolved
-            else:
+            if not resolved:
                 self.log(
                     "Final render path could not be resolved; using the path "
                     "already set on _FINAL.",
                     LogLevel.Warning,
                 )
 
-            self.apply_render_preset(final_node, "final")
+            # Grouped and discarded for the same reason as in _preview: these
+            # are our writes, not the artist's, and they must not become the
+            # thing Ctrl+Z reaches for after a publish.
+            with comp_undo(comp, "Ramses Publish Setup", keep=False):
+                if resolved and self.normalizePath(
+                    final_node.Clip[1]
+                ) != self.normalizePath(resolved):
+                    final_node.Clip[1] = resolved
+                self.apply_render_preset(final_node, "final")
 
             render_success = False
 
