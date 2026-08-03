@@ -1421,6 +1421,76 @@ class FusionHost(RamHost):
     # UI Implementation helpers using UIManager
     # -------------------------------------------------------------------------
 
+    def _confirm_format_change(self, changes: list) -> bool:
+        """Asks before changing an existing comp's resolution, rate or aspect.
+
+        Frame ranges are not routed through here: a shot's duration legitimately
+        changes in Ramses and the comp should follow it. Format is different.
+        Changing resolution or frame rate under a comp that already has work in
+        it can shift framing and retime animation, so it is the artist's call.
+
+        Declining leaves the format alone and lets the save continue. It asks
+        again next time rather than remembering, so a mismatch stays visible.
+
+        Returns:
+            bool: True to apply the change.
+        """
+        rows = "<br>".join(changes)
+        fields = [
+            {
+                "id": "W",
+                "label": "This comp does not match the project:",
+                "type": "label",
+                "default": rows,
+            },
+            {
+                "id": "Q",
+                "label": "",
+                "type": "label",
+                "default": (
+                    "<b>Update the composition to match?</b><br>"
+                    "<font color='#777'>Changing resolution or frame rate can "
+                    "shift framing and retime animation. Declining keeps your "
+                    "settings and saves anyway.</font>"
+                ),
+            },
+        ]
+        try:
+            result = self._request_input(
+                "Composition settings",
+                fields,
+                ok_text="Update comp",
+                cancel_text="Keep mine",
+            )
+        except Exception as e:  # pylint: disable=broad-except
+            # No UI available (headless, or Fusion without a window). Applying
+            # silently is the old behaviour and the safer of the two here: a
+            # comp that silently keeps the wrong format renders the wrong thing.
+            self.log(
+                f"Could not ask about the composition settings ({e}); "
+                "applying the project's.",
+                LogLevel.Warning,
+            )
+            return True
+        return result is not None
+
+    def _comp_has_content(self) -> bool:
+        """True if the comp holds anything but the plugin's own anchors.
+
+        A comp with no work in it has nothing to disturb, so the project format
+        is applied to it without asking. That covers new comps and templates,
+        where prompting would only ever get one answer.
+        """
+        if not self.comp:
+            return False
+        try:
+            tools = self.comp.GetToolList(False).values()
+        except Exception:  # pylint: disable=broad-except
+            return True  # cannot tell: assume there is work and ask
+        return any(
+            getattr(t, "Name", "") not in ("_PREVIEW", "_FINAL") for t in tools
+        )
+
     def _request_input(
         self, title: str, fields: list, ok_text: str = "OK", cancel_text: str = "Cancel"
     ) -> dict:
@@ -3217,6 +3287,35 @@ class FusionHost(RamHost):
             new_attrs["COMPN_RenderStart"] = float(start)
         if attrs.get("COMPN_RenderEnd") != float(end):
             new_attrs["COMPN_RenderEnd"] = float(end)
+
+        # Ask before changing the format of a comp that has work in it.
+        #
+        # Resolution, rate and pixel aspect used to be rewritten silently on
+        # every save. Changing them under an existing comp can shift framing and
+        # retime animation, which is not something to do to someone's work
+        # without saying so. Frame ranges are deliberately NOT routed through
+        # here: a shot's duration legitimately changes in Ramses and the comp
+        # should follow it.
+        if new_prefs and self._comp_has_content():
+            labels = {
+                "Comp.FrameFormat.Width": ("Width", curr_w),
+                "Comp.FrameFormat.Height": ("Height", curr_h),
+                "Comp.FrameFormat.Rate": ("Frame rate", curr_fps),
+                "Comp.FrameFormat.AspectX": ("Pixel aspect X", curr_pa_x),
+                "Comp.FrameFormat.AspectY": ("Pixel aspect Y", curr_pa_y),
+            }
+            changes = []
+            for key, value in new_prefs.items():
+                label, current = labels.get(key, (key, "?"))
+                changes.append(f"{label}: <b>{current}</b> &rarr; <b>{value}</b>")
+
+            if not self._confirm_format_change(changes):
+                self.log(
+                    "Artist kept the composition's own format; only the frame "
+                    "range was updated.",
+                    LogLevel.Info,
+                )
+                new_prefs = {}
 
         # Setup runs on the plugin's initiative, during a save the artist asked
         # for. Keeping it out of their undo stack means Ctrl+Z undoes their last

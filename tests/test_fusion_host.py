@@ -324,6 +324,64 @@ class TestFusionHost(unittest.TestCase):
         self.assertIn("preset", order)
         self.assertLess(order.index("preset"), order.index("lock"))
 
+    def _setup_options(self):
+        import ramses
+        ramses.RAM_SETTINGS.userSettings = {"compStartFrame": 1001}
+        return {
+            "width": 3840, "height": 2160, "framerate": 25.0,
+            "frames": 250, "pixelAspectRatio": 1.0,
+        }
+
+    def _shot_item(self):
+        item = MagicMock()
+        item.itemType.return_value = "S"
+        item.duration.return_value = 10.0
+        return item
+
+    def test_setup_asks_before_changing_an_existing_comp_format(self):
+        """Resolution and rate are the artist's work, not ours to rewrite."""
+        comp = self.mock_fusion.GetCurrentComp()
+        work = comp.AddTool("Merge", 0, 0)
+        work.SetAttrs({"TOOLS_Name": "Merge1"})
+
+        self.host._confirm_format_change = MagicMock(return_value=True)
+        self.host._setupCurrentFile(self._shot_item(), None, self._setup_options())
+
+        self.host._confirm_format_change.assert_called_once()
+        self.assertEqual(comp.GetPrefs("Comp.FrameFormat")["Width"], 3840)
+
+    def test_setup_keeps_the_format_when_the_artist_declines(self):
+        """Declining keeps their settings and still saves, ranges included."""
+        comp = self.mock_fusion.GetCurrentComp()
+        work = comp.AddTool("Merge", 0, 0)
+        work.SetAttrs({"TOOLS_Name": "Merge1"})
+        comp.SetPrefs({"Comp.FrameFormat.Width": 1920,
+                       "Comp.FrameFormat.Height": 1080})
+
+        self.host._confirm_format_change = MagicMock(return_value=False)
+        success = self.host._setupCurrentFile(
+            self._shot_item(), None, self._setup_options()
+        )
+
+        self.assertTrue(success, "declining must not fail the save")
+        self.assertEqual(comp.GetPrefs("Comp.FrameFormat")["Width"], 1920,
+                         "the artist's format must be left alone")
+        # The frame range is not the artist's to keep: the shot's duration
+        # changes in Ramses and the comp follows it.
+        self.assertEqual(comp.GetAttrs()["COMPN_RenderStart"], 1001)
+
+    def test_setup_does_not_ask_about_an_empty_comp(self):
+        """A comp with nothing but our anchors has nothing to disturb."""
+        comp = self.mock_fusion.GetCurrentComp()
+        anchor_tool = comp.AddTool("Saver", 0, 0)
+        anchor_tool.SetAttrs({"TOOLS_Name": "_FINAL"})
+
+        self.host._confirm_format_change = MagicMock(return_value=True)
+        self.host._setupCurrentFile(self._shot_item(), None, self._setup_options())
+
+        self.host._confirm_format_change.assert_not_called()
+        self.assertEqual(comp.GetPrefs("Comp.FrameFormat")["Width"], 3840)
+
     def test_comp_undo_discards_the_entry_when_asked(self):
         """Plugin housekeeping must not land in the artist's undo stack."""
         from fusion_host import comp_undo
