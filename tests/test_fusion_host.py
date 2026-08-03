@@ -1,6 +1,7 @@
 import sys
 import os
 import shutil
+import tempfile
 import unittest
 from unittest.mock import MagicMock, patch, ANY
 
@@ -404,6 +405,77 @@ class TestFusionHost(unittest.TestCase):
         self.assertEqual(loader["HoldFirstFrame"][0], 5)
         self.assertEqual(loader["Reverse"][0], 1)
         self.assertEqual(loader["TimeCodeOffset"][0], 12)
+
+    def test_incomplete_sequence_fails_verification(self):
+        """A render that died partway must not pass as a finished master.
+
+        The check used to return True as soon as any one frame of the sequence
+        existed, so a render that stopped at frame 40 of 200 left a folder of
+        perfectly valid EXRs, published clean, and was found at delivery.
+        """
+        seq_dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, seq_dir, True)
+
+        for frame in range(1001, 1041):
+            with open(os.path.join(seq_dir, "SH010.%04d.exr" % frame), "w") as fh:
+                fh.write("x")
+
+        path = os.path.join(seq_dir, "SH010.0000.exr")
+
+        self.assertFalse(
+            self.host._verify_render_output(path, expected_frames=200),
+            "40 of 200 frames must not verify",
+        )
+        self.assertTrue(
+            self.host._verify_render_output(path, expected_frames=40),
+            "a complete sequence must verify",
+        )
+
+    def test_movie_still_verifies_against_a_frame_range(self):
+        """One movie file covers the whole range; it is not 200 files.
+
+        The frame-count check must not reject a QuickTime just because the
+        range is 200 frames long and there is one file on disk.
+        """
+        out_dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, out_dir, True)
+
+        path = os.path.join(out_dir, "SH010.mov")
+        with open(path, "w") as fh:
+            fh.write("x")
+
+        self.assertTrue(
+            self.host._verify_render_output(path, expected_frames=200)
+        )
+
+    def test_pinned_comp_survives_a_tab_switch(self):
+        """A publish must finish on the comp it started on.
+
+        `comp` is a property over GetCurrentComp(), so switching comp tabs
+        mid-publish changed what every later helper saw. The pin holds it.
+        """
+        started_on = self.mock_fusion.GetCurrentComp()
+        other = MagicMock(name="OtherComp")
+
+        with self.host.pinned_comp(started_on):
+            # The artist clicks another tab.
+            self.host.fusion.GetCurrentComp = MagicMock(return_value=other)
+            self.assertIs(self.host.comp, started_on)
+
+        # Once the operation is over, the current comp is current again.
+        self.assertIs(self.host.comp, other)
+
+    def test_pin_is_released_when_the_operation_raises(self):
+        """A failed publish must not leave the host pinned to a stale comp."""
+        started_on = self.mock_fusion.GetCurrentComp()
+        other = MagicMock(name="OtherComp")
+
+        with self.assertRaises(RuntimeError):
+            with self.host.pinned_comp(started_on):
+                self.host.fusion.GetCurrentComp = MagicMock(return_value=other)
+                raise RuntimeError("render blew up")
+
+        self.assertIs(self.host.comp, other)
 
     def _setup_options(self):
         import ramses

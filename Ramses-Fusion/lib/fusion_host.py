@@ -568,6 +568,29 @@ class FusionHost(RamHost):
         abs_path = os.path.abspath(path_str)
         return abs_path.replace("\\", "/")
 
+    _pinned_comp = None
+
+    @contextlib.contextmanager
+    def pinned_comp(self, comp=None):
+        """Pins `comp` as the current composition for the duration.
+
+        Publishing is not instantaneous: the artist can click a different comp
+        tab while a render is running, and from that moment every `self.comp`
+        read — in this method and in every helper it calls — returns the new
+        one. The operation then finishes against a composition it never
+        started on.
+
+        Capturing the comp into a local only protects the function holding it;
+        this pins it for everything underneath. AYON's Fusion host does the
+        same, for the same stated reason.
+        """
+        previous = FusionHost._pinned_comp
+        FusionHost._pinned_comp = comp if comp is not None else self.comp
+        try:
+            yield FusionHost._pinned_comp
+        finally:
+            FusionHost._pinned_comp = previous
+
     @property
     def comp(self) -> object:
         """Gets the currently active Fusion composition.
@@ -575,6 +598,8 @@ class FusionHost(RamHost):
         Returns:
             object: The active Fusion composition object, or None if not available.
         """
+        if FusionHost._pinned_comp is not None:
+            return FusionHost._pinned_comp
         return self.fusion.GetCurrentComp()
 
     def currentFilePath(self) -> str:
@@ -2285,6 +2310,22 @@ class FusionHost(RamHost):
         if not comp:
             return []
 
+        # Pinned for the same reason as _publish: the preview render and every
+        # helper below it must stay on the composition this started on.
+        with self.pinned_comp(comp):
+            return self._previewPinned(
+                comp, previewFolderPath, previewFileBaseName, item, step
+            )
+
+    def _previewPinned(
+        self,
+        comp,
+        previewFolderPath: str,
+        previewFileBaseName: str,
+        item: RamItem,
+        step: RamStep,
+    ) -> list:
+        """The body of :meth:`_preview`, run with the composition pinned."""
         # 1. Find the Preview Anchor
         preview_node = comp.FindTool("_PREVIEW")
         if not preview_node:
@@ -2338,8 +2379,10 @@ class FusionHost(RamHost):
             try:
                 # 4. Trigger Fusion Render (isolated to this Saver)
                 if self._render_anchor(preview_node):
-                    # 5. Verify the output
-                    if self._verify_render_output(dst):
+                    # 5. Verify the output, frame count included
+                    if self._verify_render_output(
+                        dst, self.expectedFrameCount(comp)
+                    ):
                         # Disarm immediately after render
                         preview_node.SetAttrs({"TOOLB_PassThrough": True})
 
@@ -2531,19 +2574,76 @@ class FusionHost(RamHost):
                 if saver.Name != node.Name and saver.Name in original:
                     saver.SetAttrs({passthrough: original[saver.Name]})
 
-    def _verify_render_output(self, path: str) -> bool:
+    def expectedFrameCount(self, comp=None) -> int:
+        """How many frames the comp's render range covers, or 0 if unknown."""
+        comp = comp or self.comp
+        if not comp:
+            return 0
+        try:
+            attrs = comp.GetAttrs()
+            start = attrs.get("COMPN_RenderStart")
+            end = attrs.get("COMPN_RenderEnd")
+            if start is None or end is None:
+                return 0
+            return int(end) - int(start) + 1
+        except Exception:  # pylint: disable=broad-except
+            return 0
+
+    def _count_rendered_frames(self, path: str) -> int:
+        """Counts the non-empty files belonging to the sequence at `path`.
+
+        Returns 0 when the path names a single file rather than a sequence.
+        """
+        directory = os.path.dirname(path)
+        if not os.path.isdir(directory):
+            return 0
+
+        wildcard_name = re.sub(
+            r"(?<=\.)(0+|#+|%\d*d)(?=\.)", "*", os.path.basename(path)
+        )
+        if "*" not in wildcard_name:
+            return 0
+
+        matches = glob.glob(os.path.join(directory, wildcard_name).replace("\\", "/"))
+        return sum(
+            1 for m in matches if os.path.isfile(m) and os.path.getsize(m) > 0
+        )
+
+    def _verify_render_output(self, path: str, expected_frames: int = 0) -> bool:
         """Verifies that a render output exists and is valid.
         Handles image sequences by checking for wildcard matches if the exact path
         contains padding placeholders (e.g., .0000. or .####.).
 
         Args:
             path (str): The path to verify.
+            expected_frames (int): How many frames the render should have
+                produced. When given and greater than one, a sequence must
+                account for all of them.
 
         Returns:
             bool: True if file(s) exist and size > 0, False otherwise.
         """
         if not path:
             return False
+
+        # A sequence has to be counted, not sampled.
+        #
+        # Checking only that *some* frame exists passed a render that died
+        # partway: the folder is full of perfectly valid EXRs, the publish is
+        # marked complete, and the gap is found at delivery. AYON checks every
+        # expected frame for the same reason.
+        if expected_frames > 1:
+            found = self._count_rendered_frames(path)
+            if found:
+                if found >= expected_frames:
+                    return True
+                self.log(
+                    f"Render is incomplete: found {found} of {expected_frames} "
+                    f"frames for {path}",
+                    LogLevel.Critical,
+                )
+                return False
+            # No frame token in the path: one movie covers the whole range.
 
         # 1. Direct check (for movies or single frames)
         if os.path.exists(path) and os.path.getsize(path) > 0:
@@ -2764,6 +2864,14 @@ class FusionHost(RamHost):
         if not comp:
             return []
 
+        # Everything below — including currentFilePath(), currentItem() and
+        # the render itself — must see the composition this publish started
+        # on, not whichever tab the artist clicks while it runs.
+        with self.pinned_comp(comp):
+            return self._publishPinned(comp, publishInfo, publishOptions)
+
+    def _publishPinned(self, comp, publishInfo: RamFileInfo, publishOptions: dict) -> list:
+        """The body of :meth:`_publish`, run with the composition pinned."""
         src = self.currentFilePath()
         if not src:
             self.log(
@@ -2875,8 +2983,11 @@ class FusionHost(RamHost):
                     # Execute render, isolated to this Saver. Returns True only
                     # on success.
                     if self._render_anchor(final_node):
-                        # Secondary Verification: Check file existence and size
-                        if self._verify_render_output(render_path):
+                        # Secondary Verification: existence, size, and — for a
+                        # sequence — that every frame of the range is there.
+                        if self._verify_render_output(
+                            render_path, self.expectedFrameCount(comp)
+                        ):
                             self.log(
                                 f"Final render complete and verified: {render_path}",
                                 LogLevel.Info,
