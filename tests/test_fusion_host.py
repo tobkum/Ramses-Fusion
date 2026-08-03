@@ -670,6 +670,95 @@ class TestFusionHost(unittest.TestCase):
 
         self.assertIsNone(self.host.toolResolution(None))
 
+    def test_evaluate_on_attribute_restores_a_plain_value(self):
+        from fusion_host import evaluate_on_attribute
+
+        class _Attr(dict):
+            def __missing__(self, key):
+                return ""
+
+            def __init__(self):
+                dict.__init__(self)
+                self.expression = None
+
+            def GetExpression(self):
+                return self.expression
+
+            def SetExpression(self, expr):
+                self.expression = expr
+                if expr == "W":
+                    self[1] = 3840
+                elif expr == "H":
+                    self[1] = 1936
+
+        attr = _Attr()
+        attr[1] = "an artist's note"
+
+        self.assertEqual(evaluate_on_attribute(attr, 1, ("W", "H")), [3840, 1936])
+        self.assertEqual(attr[1], "an artist's note")
+        self.assertIsNone(attr.GetExpression())
+
+    def test_evaluate_on_attribute_restores_a_driving_expression(self):
+        """An attribute already driven by an expression must go back as one.
+
+        Putting the old text back as a plain value would silently replace a
+        live expression with a frozen string, which is the kind of damage
+        nobody notices until the value stops updating.
+        """
+        from fusion_host import evaluate_on_attribute
+
+        class _Attr(dict):
+            def __missing__(self, key):
+                return ""
+
+            def __init__(self):
+                dict.__init__(self)
+                self.expression = "self.SomethingElse"
+
+            def GetExpression(self):
+                return self.expression
+
+            def SetExpression(self, expr):
+                self.expression = expr
+                if expr == "W":
+                    self[1] = 1920
+
+        attr = _Attr()
+
+        self.assertEqual(evaluate_on_attribute(attr, 1, ("W",)), [1920])
+        self.assertEqual(
+            attr.GetExpression(), "self.SomethingElse",
+            "the original driving expression must be reinstated",
+        )
+
+    def test_evaluate_on_attribute_restores_even_when_evaluation_raises(self):
+        """A failed read must not leave the artist's field holding our probe."""
+        from fusion_host import evaluate_on_attribute
+
+        class _Attr(dict):
+            def __missing__(self, key):
+                return ""
+
+            def __init__(self):
+                dict.__init__(self)
+                self.expression = None
+
+            def GetExpression(self):
+                return self.expression
+
+            def SetExpression(self, expr):
+                if expr == "BOOM":
+                    raise RuntimeError("expression rejected")
+                self.expression = expr
+
+        attr = _Attr()
+        attr[1] = "keep me"
+
+        with self.assertRaises(RuntimeError):
+            evaluate_on_attribute(attr, 1, ("BOOM",))
+
+        self.assertEqual(attr[1], "keep me")
+
     def _setup_options(self):
         import ramses
         ramses.RAM_SETTINGS.userSettings = {"compStartFrame": 1001}

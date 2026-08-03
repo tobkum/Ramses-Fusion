@@ -229,43 +229,54 @@ def maintained_modified_flag(comp):
                 pass
 
 
-@contextlib.contextmanager
-def temp_expression(attribute, frame, expression):
-    """Drives `attribute` from `expression` for the duration, then restores it.
+def evaluate_on_attribute(attribute, frame, expressions):
+    """Makes Fusion compute `expressions` and returns what each evaluated to.
 
-    The attribute is used as a scratch pad: Fusion evaluates the expression
-    and the result is read straight back off it. Ramses puts artist-facing
-    text in the anchors' Comments field, which is the attribute this borrows,
-    so the restore is load-bearing — it was verified exact on both anchors,
-    with and without existing text, before this shipped.
+    Fusion offers no way to ask a tool what is arriving at its input. It will,
+    however, evaluate an expression in the tool's own context and leave the
+    answer in whichever attribute the expression sits on — so an otherwise
+    unused text field on the tool can be borrowed as a scratch pad, written
+    with `self.Input.OriginalWidth`, and read straight back as a number.
 
-    Derived from `temp_expression` in ynput/ayon-fusion
-    (client/ayon_fusion/api/lib.py), Apache License 2.0. Retained here
-    because the licence requires attribution to travel with the source, not
-    because the note is decorative — do not delete it while the function
-    still resembles the original.
+    The field this borrows in practice is Comments, which is also where
+    _create_render_anchors puts its instructions to the artist. That makes
+    the restore the important half of this function, not the read.
+
+    All the expressions share ONE save and ONE restore rather than repeating
+    the pair per expression: the attribute is visible to the artist, so every
+    additional write to it is another opportunity to leave it damaged, and a
+    single `finally` is the version whose failure modes are easy to see.
+
+    Args:
+        attribute: the tool attribute to borrow (e.g. ``node["Comments"]``).
+        frame (int): the frame to evaluate at.
+        expressions (iterable): Fusion expression strings, in order.
+
+    Returns:
+        list: the raw value each expression produced, in the order given.
     """
-    old_comment = ""
-    has_expression = False
+    # An attribute already driven by an expression has to be put back as an
+    # expression; one holding a plain value has to be put back as a value.
+    # Which of the two it is decides how the restore has to be written, so it
+    # is captured before anything is touched.
+    driving_expression = attribute.GetExpression()
+    restore_as_expression = driving_expression is not None
+    saved = driving_expression if restore_as_expression else attribute[frame]
 
-    if attribute[frame] not in ["", None]:
-        if attribute.GetExpression() is not None:
-            has_expression = True
-            old_comment = attribute.GetExpression()
-            attribute.SetExpression(None)
-        else:
-            old_comment = attribute[frame]
-            attribute[frame] = ""
-
+    results = []
     try:
-        attribute.SetExpression(expression)
-        yield
+        for expression in expressions:
+            attribute.SetExpression(expression)
+            results.append(attribute[frame])
+        return results
     finally:
         attribute.SetExpression(None)
-        if has_expression:
-            attribute.SetExpression(old_comment)
+        if restore_as_expression:
+            attribute.SetExpression(saved)
         else:
-            attribute[frame] = old_comment
+            # An attribute that held nothing reads back as "", not None, and
+            # writing None where "" belongs is its own small corruption.
+            attribute[frame] = "" if saved is None else saved
 
 
 @contextlib.contextmanager
@@ -2731,14 +2742,14 @@ class FusionHost(RamHost):
             with maintained_modified_flag(comp), comp_locked(comp), comp_undo(
                 comp, "Read resolution", keep=False
             ):
-                with temp_expression(
-                    attribute, frame, "self.Input.OriginalWidth"
-                ):
-                    width = attribute[frame]
-                with temp_expression(
-                    attribute, frame, "self.Input.OriginalHeight"
-                ):
-                    height = attribute[frame]
+                width, height = evaluate_on_attribute(
+                    attribute,
+                    frame,
+                    (
+                        "self.Input.OriginalWidth",
+                        "self.Input.OriginalHeight",
+                    ),
+                )
 
             if width in (None, "") or height in (None, ""):
                 return None
