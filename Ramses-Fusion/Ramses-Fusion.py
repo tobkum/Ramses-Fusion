@@ -915,9 +915,7 @@ class RamsesFusionApp:
             Comp.FrameFormat. A Crop, Resize or Scale in front of a Saver
             changes the delivered resolution while leaving FrameFormat exactly
             as the database says it should be, so that check agrees with
-            itself and the master still goes out at the wrong size. Measured
-            on a live shot: _FINAL writing 3840x1936 under a 3840x2160 comp,
-            with validation reporting no mismatch at all.
+            itself and the master still goes out at the wrong size.
 
             Soft, never a hard error: a deliberate crop for delivery is
             legitimate and must not block a publish.
