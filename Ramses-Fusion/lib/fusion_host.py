@@ -156,6 +156,52 @@ def comp_locked(comp):
         comp.Unlock()
 
 
+# Loader inputs Fusion resets when the clip behind it changes length. AYON's
+# Fusion loader preserves the same set across an update for the same reason.
+# All of them are length-independent playback settings, so putting them back
+# afterwards is unambiguous — unlike the trim (ClipTimeStart/ClipTimeEnd),
+# which only means anything relative to a particular clip length and is
+# deliberately left alone here.
+_LOADER_PLAYBACK_INPUTS = (
+    "HoldFirstFrame",
+    "HoldLastFrame",
+    "Reverse",
+    "Depth",
+    "KeyCode",
+    "TimeCodeOffset",
+)
+
+
+@contextlib.contextmanager
+def maintained_loader_inputs(node, names=_LOADER_PLAYBACK_INPUTS):
+    """Keeps a Loader's playback settings across a change of clip.
+
+    Pointing a Loader at a version of a different length makes Fusion reset
+    these, so an artist who had set a hold, a reverse or a timecode offset
+    lost it the moment the plate was updated, with nothing to say so.
+
+    Every read and write is guarded individually: an input this build of
+    Fusion does not expose is skipped rather than failing the update, so the
+    worst case is the behaviour that existed before.
+    """
+    saved = {}
+    for name in names:
+        try:
+            value = node[name][0]
+        except Exception:  # pylint: disable=broad-except
+            continue
+        if value is not None:
+            saved[name] = value
+    try:
+        yield
+    finally:
+        for name, value in saved.items():
+            try:
+                node[name][0] = value
+            except Exception:  # pylint: disable=broad-except
+                continue
+
+
 @contextlib.contextmanager
 def maintained_comp_range(comp):
     """Restores the comp's frame ranges after the block.
@@ -2939,7 +2985,8 @@ class FusionHost(RamHost):
                 return False
 
             path = self.normalizePath(filePaths[0])
-            active.Clip[1] = path
+            with maintained_loader_inputs(active):
+                active.Clip[1] = path
 
             # Store Ramses metadata on Loader node
             if item:
@@ -3805,7 +3852,8 @@ class FusionHost(RamHost):
                                         new_path_normalized = self.normalizePath(
                                             new_path
                                         )
-                                        active.Clip[1] = new_path_normalized
+                                        with maintained_loader_inputs(active):
+                                            active.Clip[1] = new_path_normalized
 
                                         # Store updated Ramses metadata
                                         if itm:

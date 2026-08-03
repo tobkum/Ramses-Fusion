@@ -351,6 +351,60 @@ class TestFusionHost(unittest.TestCase):
         # Nothing should have been rendered once the destination is unusable.
         self.host._render_anchor.assert_not_called()
 
+    def test_replace_keeps_the_loader_playback_settings(self):
+        """Swapping a Loader's clip must not discard the artist's settings.
+
+        Fusion resets a Loader's playback inputs when the clip behind it
+        changes length, so updating a plate to a longer or shorter version
+        silently threw away any hold, reverse or timecode offset that had been
+        set on it. Nothing reported it; the artist found out by looking.
+        """
+        from mocks import MockTool
+
+        loader = MockTool("Loader1")
+        loader.SetAttrs({"TOOLS_RegID": "Loader", "TOOLS_Name": "Loader1"})
+        loader["HoldFirstFrame"][0] = 5
+        loader["Reverse"][0] = 1
+        loader["TimeCodeOffset"][0] = 12
+
+        comp = self.mock_fusion.GetCurrentComp()
+        comp.ActiveTool = loader
+
+        # Fusion's own reset on a length change, which is what the guard
+        # has to survive.
+        def _swap_and_reset(*_a, **_k):
+            loader["HoldFirstFrame"][0] = 0
+            loader["Reverse"][0] = 0
+            loader["TimeCodeOffset"][0] = 0
+
+        original_clip = loader.Clip
+
+        class _ResettingClip(dict):
+            def __missing__(self, key):
+                return ""
+
+            def __setitem__(self, key, value):
+                dict.__setitem__(self, key, value)
+                _swap_and_reset()
+
+        loader.Clip = _ResettingClip(original_clip)
+
+        item = MagicMock()
+        item.shortName.return_value = "SH010"
+        item.uuid.return_value = "item-uuid"
+        step = MagicMock()
+        step.shortName.return_value = "COMP"
+        step.uuid.return_value = "step-uuid"
+
+        ok = self.host._replace(
+            ["X:/proj/SH010_PLATE_002/SH010.exr"], item, step, [], False
+        )
+
+        self.assertTrue(ok)
+        self.assertEqual(loader["HoldFirstFrame"][0], 5)
+        self.assertEqual(loader["Reverse"][0], 1)
+        self.assertEqual(loader["TimeCodeOffset"][0], 12)
+
     def _setup_options(self):
         import ramses
         ramses.RAM_SETTINGS.userSettings = {"compStartFrame": 1001}
