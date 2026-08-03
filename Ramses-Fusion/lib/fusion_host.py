@@ -1810,7 +1810,11 @@ class FusionHost(RamHost):
         Returns:
             bool: True on success, False if no composition is open.
         """
-        if not self.comp:
+        # Resolved once, then used throughout: `comp` is a property over
+        # GetCurrentComp(), so repeated `self.comp` reads within one operation
+        # are not guaranteed to be the same composition.
+        comp = self.comp
+        if not comp:
             return False
 
         # The upstream import flow may pass the full contents of a published
@@ -1831,18 +1835,18 @@ class FusionHost(RamHost):
         # Start undo group with descriptive name
         num_files = len(filePaths)
         undo_name = f"Import {num_files} Loader{'s' if num_files > 1 else ''}"
-        self.comp.StartUndo(undo_name)
-        self.comp.Lock()
+        comp.StartUndo(undo_name)
+        comp.Lock()
         success = False
         try:
             # Get start frame for alignment
             start_frame = RAM_SETTINGS.userSettings.get("compStartFrame", 1001)
 
             # Determine Reference Position (Grid Units)
-            flow = self.comp.CurrentFrame.FlowView
+            flow = comp.CurrentFrame.FlowView
             start_x, start_y = 0, 0
 
-            active = self.comp.ActiveTool
+            active = comp.ActiveTool
             if active and flow:
                 pos = flow.GetPosTable(active)
                 # Fusion returns {1.0: x, 2.0: y} in Grid Units
@@ -1865,7 +1869,7 @@ class FusionHost(RamHost):
                         # bmd.readfile() reads the .comp as a clip string; comp.Paste() inserts it.
                         content = self._read_comp_file(normalized_path)
                         if content:
-                            self.comp.Paste(content)
+                            comp.Paste(content)
                             self.log(f"Merged nodes from composition: {normalized_path}", LogLevel.Info)
                         else:
                             self.log(f"Could not read content from: {normalized_path}", LogLevel.Critical)
@@ -1875,7 +1879,7 @@ class FusionHost(RamHost):
                     # load a .comp file and creating one would produce an invalid node.
                     continue
 
-                loader = self.comp.AddTool("Loader", target_x, target_y)
+                loader = comp.AddTool("Loader", target_x, target_y)
                 if not loader:
                     self.log(
                         f"Failed to create Loader at ({target_x}, {target_y})",
@@ -1922,7 +1926,7 @@ class FusionHost(RamHost):
                     # Prevent name collisions by checking if node exists and appending counter
                     final_name = name
                     counter = 1
-                    while self.comp.FindTool(final_name) and counter < 100:
+                    while comp.FindTool(final_name) and counter < 100:
                         final_name = f"{name}_{counter}"
                         counter += 1
                     loader.SetAttrs({"TOOLS_Name": final_name})
@@ -1936,8 +1940,8 @@ class FusionHost(RamHost):
             self.log(f"Import failed: {e}", LogLevel.Critical)
             return False
         finally:
-            self.comp.Unlock()
-            self.comp.EndUndo(success)  # Commit if successful, discard if failed
+            comp.Unlock()
+            comp.EndUndo(success)  # Commit if successful, discard if failed
 
     @staticmethod
     def findStepByShortName(project, *short_names):
@@ -2228,11 +2232,15 @@ class FusionHost(RamHost):
         Returns:
             list: List of generated file paths (usually just one), or empty list on failure.
         """
-        if not self.comp:
+        # Resolved once, then used throughout: `comp` is a property over
+        # GetCurrentComp(), so repeated `self.comp` reads within one operation
+        # are not guaranteed to be the same composition.
+        comp = self.comp
+        if not comp:
             return []
 
         # 1. Find the Preview Anchor
-        preview_node = self.comp.FindTool("_PREVIEW")
+        preview_node = comp.FindTool("_PREVIEW")
         if not preview_node:
             self.log(
                 "Preview anchor (_PREVIEW) not found in Flow. Use 'Setup Scene' to add one.",
@@ -2270,7 +2278,6 @@ class FusionHost(RamHost):
         # daemon, and a slow or unreachable daemon would otherwise leave Fusion
         # sitting on a locked comp. The path was already resolved above; only
         # the preset was inside the lock.
-        comp = self.comp
         # Bookkeeping, not the artist's edit, so it is grouped into one undo
         # entry and that entry discarded — the same treatment
         # _sync_render_anchors gives the identical writes. Without it, Ctrl+Z
@@ -2896,9 +2903,13 @@ class FusionHost(RamHost):
         Returns:
             bool: True on success, False if no valid Loader selected.
         """
-        if not self.comp:
+        # Resolved once, then used throughout: `comp` is a property over
+        # GetCurrentComp(), so repeated `self.comp` reads within one operation
+        # are not guaranteed to be the same composition.
+        comp = self.comp
+        if not comp:
             return False
-        active = self.comp.ActiveTool
+        active = comp.ActiveTool
         # GetAttrs() can return None/False from Fusion; subscripting it
         # directly raised an uncaught TypeError (the guarding try block
         # only starts further down).
@@ -2911,12 +2922,12 @@ class FusionHost(RamHost):
             return False
 
         # Start undo group for atomic operation
-        self.comp.StartUndo("Replace Loader")
-        self.comp.Lock()
+        comp.StartUndo("Replace Loader")
+        comp.Lock()
         success = False
         try:
             # Re-validate active tool hasn't changed
-            if not self.comp.ActiveTool or self.comp.ActiveTool != active:
+            if not comp.ActiveTool or comp.ActiveTool != active:
                 self.log("Selection changed during operation.", LogLevel.Warning)
                 return False
 
@@ -2954,11 +2965,11 @@ class FusionHost(RamHost):
                 if name:
                     final_name = name
                     counter = 1
-                    existing = self.comp.FindTool(final_name)
+                    existing = comp.FindTool(final_name)
                     while existing and existing != active:
                         final_name = f"{name}_{counter}"
                         counter += 1
-                        existing = self.comp.FindTool(final_name)
+                        existing = comp.FindTool(final_name)
                     active.SetAttrs({"TOOLS_Name": final_name})
 
             success = True
@@ -2967,8 +2978,8 @@ class FusionHost(RamHost):
             self.log(f"Replace failed: {e}", LogLevel.Critical)
             return False
         finally:
-            self.comp.Unlock()
-            self.comp.EndUndo(success)  # Commit if successful, discard if failed
+            comp.Unlock()
+            comp.EndUndo(success)  # Commit if successful, discard if failed
 
     def _replaceUI(self, item: RamItem, step: RamStep) -> dict:
         """Shows the Ramses Asset Browser for replacing."""
@@ -3478,13 +3489,17 @@ class FusionHost(RamHost):
 
         Note: Does NOT create undo entries (automatic visual feedback, not user edit).
         """
-        if not self.comp:
+        # Resolved once, then used throughout: `comp` is a property over
+        # GetCurrentComp(), so repeated `self.comp` reads within one operation
+        # are not guaranteed to be the same composition.
+        comp = self.comp
+        if not comp:
             return 0
 
         # Phase 1: Collect loader data (fast, with lock)
-        self.comp.Lock()
+        comp.Lock()
         try:
-            loaders = self.comp.GetToolList(False, "Loader")
+            loaders = comp.GetToolList(False, "Loader")
             if not loaders:
                 with self._cache_lock:
                     self._node_version_cache = {}
@@ -3528,7 +3543,7 @@ class FusionHost(RamHost):
                 except Exception:
                     continue
         finally:
-            self.comp.Unlock()
+            comp.Unlock()
 
         # Phase 2: Process data (slow, without lock)
         count = 0
@@ -3611,13 +3626,13 @@ class FusionHost(RamHost):
 
         # Phase 3: Apply visual updates (fast, with lock)
         if updates:
-            self.comp.Lock()
+            comp.Lock()
             try:
                 for name, data in updates.items():
                     # Use the node collected in Phase 1 rather than looking it
                     # up again: GetToolList() keys are indices, so the previous
                     # FindTool(key) never matched and no tile was ever coloured.
-                    node = data["node"] or self.comp.FindTool(name)
+                    node = data["node"] or comp.FindTool(name)
                     if node:
                         # Only update if current color differs
                         color = node.TileColor
@@ -3643,7 +3658,7 @@ class FusionHost(RamHost):
                         elif not data["comment"] and current_comment:
                             node.Comments[1] = ""
             finally:
-                self.comp.Unlock()
+                comp.Unlock()
 
         return count
 
@@ -3679,8 +3694,12 @@ class FusionHost(RamHost):
 
         # --- SMART UPDATE LOGIC ---
         # Only trigger on interactive calls (no paths provided)
-        if len(paths) == 0 and not item and self.comp:
-            active = self.comp.ActiveTool
+        # Resolved once, then used throughout: `comp` is a property over
+        # GetCurrentComp(), so repeated `self.comp` reads within one operation
+        # are not guaranteed to be the same composition.
+        comp = self.comp
+        if len(paths) == 0 and not item and comp:
+            active = comp.ActiveTool
             if active and active.ID == "Loader":
                 path = self.normalizePath(active.Clip[1])
                 # Fast Filter
@@ -3772,8 +3791,8 @@ class FusionHost(RamHost):
                                             return False
 
                                     # Wrap update in undo group with Lock/Unlock
-                                    self.comp.StartUndo("Update Loader to Latest")
-                                    self.comp.Lock()
+                                    comp.StartUndo("Update Loader to Latest")
+                                    comp.Lock()
                                     success = False
                                     try:
                                         new_path_normalized = self.normalizePath(
@@ -3823,8 +3842,8 @@ class FusionHost(RamHost):
                                         self.log(f"Update failed: {e}", LogLevel.Error)
                                         return False
                                     finally:
-                                        self.comp.Unlock()
-                                        self.comp.EndUndo(
+                                        comp.Unlock()
+                                        comp.EndUndo(
                                             success
                                         )  # Commit if successful, discard if failed
                                 else:
