@@ -342,6 +342,11 @@ class TestFusionHost(unittest.TestCase):
             return_value="Q:/gone/shot.mov"
         )
         self.host._render_anchor = MagicMock(return_value=True)
+        # The preset is applied before the directory check now, because the
+        # format decides the extension and therefore the real output path.
+        # It is a daemon round-trip, which this test has no business making.
+        self.host.apply_render_preset = MagicMock()
+        preview_node.Clip[1] = "Q:/gone/shot.mov"
 
         with patch(
             "os.makedirs", side_effect=OSError("network path not found")
@@ -526,6 +531,45 @@ class TestFusionHost(unittest.TestCase):
 
         self.assertEqual(self.host.compRenderRange(comp), (None, None))
         self.assertEqual(self.host.expectedFrameCount(comp), 0)
+
+    def test_preview_follows_the_extension_fusion_actually_wrote(self):
+        """Changing a Saver's format makes Fusion rewrite the extension.
+
+        The preview asked for .mov, the step's config switched the format and
+        Fusion rewrote the Clip to .exr, and the render went there — but
+        verification, the returned file list and therefore the version
+        metadata all still pointed at the .mov, which does not exist. The
+        artist got "Preview render produced an invalid file" for a preview
+        that had rendered perfectly. _publish already re-read the Saver.
+        """
+        comp = self.mock_fusion.GetCurrentComp()
+        preview_node = comp.AddTool("Saver", 0, 0)
+        preview_node.SetAttrs({"TOOLS_Name": "_PREVIEW"})
+
+        out_dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, out_dir, True)
+
+        asked_for = os.path.join(out_dir, "shot.mov").replace("\\", "/")
+        actually_written = os.path.join(out_dir, "shot.exr").replace("\\", "/")
+        with open(actually_written, "w") as fh:
+            fh.write("x")
+
+        self.host.resolvePreviewPath = MagicMock(return_value=asked_for)
+        self.host._render_anchor = MagicMock(return_value=True)
+        self.host.expectedFrameCount = MagicMock(return_value=0)
+
+        # Applying the preset is what rewrites the extension.
+        def _rewrite_extension(node, _preset):
+            node.Clip[1] = actually_written
+
+        self.host.apply_render_preset = MagicMock(side_effect=_rewrite_extension)
+
+        result = self.host._preview(out_dir, "shot", None, None)
+
+        self.assertEqual(
+            result, [actually_written],
+            "the preview must report the file Fusion actually wrote",
+        )
 
     def _setup_options(self):
         import ramses
