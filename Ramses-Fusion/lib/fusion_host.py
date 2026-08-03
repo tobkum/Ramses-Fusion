@@ -2128,12 +2128,18 @@ class FusionHost(RamHost):
         if prev_dir:
             os.makedirs(prev_dir, exist_ok=True)
 
-        # Lock comp during state modification and render
+        # Prepare the Saver before locking, for the same reason _publish does:
+        # apply_render_preset() reads the step's settings from the Ramses
+        # daemon, and a slow or unreachable daemon would otherwise leave Fusion
+        # sitting on a locked comp. The path was already resolved above; only
+        # the preset was inside the lock.
         comp = self.comp
+        preview_node.Clip[1] = dst
+        self.apply_render_preset(preview_node, "preview")
+
+        # Lock comp during state modification and render
         comp.Lock()
         try:
-            preview_node.Clip[1] = dst
-            self.apply_render_preset(preview_node, "preview")
             preview_node.SetAttrs({"TOOLB_PassThrough": False})
 
             try:

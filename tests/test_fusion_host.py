@@ -292,6 +292,38 @@ class TestFusionHost(unittest.TestCase):
         self.assertIn("D:/Renders/TEST_S_Shot01_COMP.mov", published)
         self.assertIn(expected_dst, published)
 
+    def test_preview_applies_preset_outside_the_comp_lock(self):
+        """The preview preset is a daemon round-trip and must not hold the lock.
+
+        Same reason as the publish path: apply_render_preset() reads the step's
+        settings from the Ramses daemon, and doing that inside comp.Lock() would
+        leave Fusion sitting on a locked comp whenever the daemon is slow.
+        """
+        comp = self.mock_fusion.GetCurrentComp()
+        preview_node = comp.AddTool("Saver", 0, 0)
+        preview_node.SetAttrs({"TOOLS_Name": "_PREVIEW"})
+
+        import tempfile
+        preview_dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, preview_dir, True)
+
+        self.host.resolvePreviewPath = MagicMock(
+            return_value=os.path.join(preview_dir, "shot.mov")
+        )
+        self.host._verify_render_output = MagicMock(return_value=True)
+
+        order = []
+        comp.Lock = MagicMock(side_effect=lambda: order.append("lock"))
+        comp.Unlock = MagicMock(side_effect=lambda: order.append("unlock"))
+        self.host.apply_render_preset = MagicMock(
+            side_effect=lambda *a, **k: order.append("preset")
+        )
+
+        self.host._preview(preview_dir, "shot", None, None)
+
+        self.assertIn("preset", order)
+        self.assertLess(order.index("preset"), order.index("lock"))
+
     def test_publish_sets_its_own_path_and_preset(self):
         """_publish must prepare the Saver itself, not trust the UI.
 
