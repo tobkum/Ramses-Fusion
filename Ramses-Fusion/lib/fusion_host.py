@@ -132,8 +132,7 @@ def comp_undo(comp, name, keep=True):
     Use it for anything the plugin does on its own initiative: syncing a
     Saver's path on a UI refresh is bookkeeping, not the artist's edit, and
     ending up in their undo history means Ctrl+Z undoes our housekeeping
-    instead of their work. Borrowed from AYON's Fusion integration, which
-    passes the same flag for exactly this reason.
+    instead of their work.
     """
     comp.StartUndo(name)
     try:
@@ -156,8 +155,7 @@ def comp_locked(comp):
         comp.Unlock()
 
 
-# Loader inputs Fusion resets when the clip behind it changes length. AYON's
-# Fusion loader preserves the same set across an update for the same reason.
+# Loader inputs Fusion resets when the clip behind it changes length.
 # All of them are length-independent playback settings, so putting them back
 # afterwards is unambiguous — unlike the trim (ClipTimeStart/ClipTimeEnd),
 # which only means anything relative to a particular clip length and is
@@ -235,12 +233,17 @@ def maintained_modified_flag(comp):
 def temp_expression(attribute, frame, expression):
     """Drives `attribute` from `expression` for the duration, then restores it.
 
-    From AYON's Fusion integration. The attribute is used as a scratch pad:
-    Fusion evaluates the expression and the result is read straight back off
-    it. Ramses puts artist-facing text in the anchors' Comments field, which
-    is the attribute this borrows, so the restore is load-bearing — it was
-    verified exact on both anchors, with and without existing text, before
-    this shipped.
+    The attribute is used as a scratch pad: Fusion evaluates the expression
+    and the result is read straight back off it. Ramses puts artist-facing
+    text in the anchors' Comments field, which is the attribute this borrows,
+    so the restore is load-bearing — it was verified exact on both anchors,
+    with and without existing text, before this shipped.
+
+    Derived from `temp_expression` in ynput/ayon-fusion
+    (client/ayon_fusion/api/lib.py), Apache License 2.0. Retained here
+    because the licence requires attribution to travel with the source, not
+    because the note is decorative — do not delete it while the function
+    still resembles the original.
     """
     old_comment = ""
     has_expression = False
@@ -644,8 +647,7 @@ class FusionHost(RamHost):
         started on.
 
         Capturing the comp into a local only protects the function holding it;
-        this pins it for everything underneath. AYON's Fusion host does the
-        same, for the same stated reason.
+        this pins it for everything underneath.
         """
         previous = FusionHost._pinned_comp
         FusionHost._pinned_comp = comp if comp is not None else self.comp
@@ -2551,8 +2553,7 @@ class FusionHost(RamHost):
         return publishOptions or {}
 
     # Fusion render request flag: suppress the render progress/settings dialogs.
-    # Documented in the Fusion scripting reference and used the same way by
-    # AYON's Fusion integration.
+    # Documented in the Fusion scripting reference.
     REQF_QUIET = 524288
 
     def _render_anchor(self, node) -> bool:
@@ -2566,8 +2567,7 @@ class FusionHost(RamHost):
            artist's own Saver left enabled would therefore render during a
            publish, and a failure anywhere in its branch would fail the publish.
            Every Saver is disabled for the duration except the one asked for,
-           and all of them are put back afterwards. Both AYON's and Prism's
-           Fusion integrations do exactly this.
+           and all of them are put back afterwards.
 
         2. Render() takes (wait, start, end, proxy, hiq, motionblur). Passing
            only `wait` leaves quality, motion blur and proxy at whatever the
@@ -2640,8 +2640,7 @@ class FusionHost(RamHost):
             # as its render range, so a scripted render leaves behind the range
             # it used. Today the values come from the comp's own range, making
             # the guard a no-op — it is here so this cannot quietly become a
-            # scene edit the day either path renders a range of its own. AYON
-            # wraps every render the same way.
+            # scene edit the day either path renders a range of its own.
             with maintained_comp_range(comp):
                 return bool(comp.Render(render_kwargs))
         finally:
@@ -2803,8 +2802,7 @@ class FusionHost(RamHost):
         #
         # Checking only that *some* frame exists passed a render that died
         # partway: the folder is full of perfectly valid EXRs, the publish is
-        # marked complete, and the gap is found at delivery. AYON checks every
-        # expected frame for the same reason.
+        # marked complete, and the gap is found at delivery.
         if expected_frames > 1:
             found = self._count_rendered_frames(path)
             if found:
