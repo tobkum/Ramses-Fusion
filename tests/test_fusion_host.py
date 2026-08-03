@@ -571,6 +571,105 @@ class TestFusionHost(unittest.TestCase):
             "the preview must report the file Fusion actually wrote",
         )
 
+    def test_tool_resolution_restores_comment_and_modified_flag(self):
+        """Reading a resolution must leave no trace.
+
+        The expression is parked in the tool's Comments field, which is where
+        Ramses keeps its own artist-facing anchor text, and Fusion counts the
+        write as an edit. Both were measured in real Fusion before this
+        shipped: the comment comes back exactly, and the modified flag is
+        settable back to False.
+        """
+        comp = self.mock_fusion.GetCurrentComp()
+        node = comp.AddTool("Saver", 0, 0)
+        node.SetAttrs({"TOOLS_Name": "_FINAL"})
+
+        original_comment = "Final renders will be saved here."
+        comments = node["Comments"]
+        comments[1001] = original_comment
+
+        attrs = {
+            "COMPN_RenderStart": 1001.0,
+            "COMPN_RenderEnd": 1100.0,
+            "COMPB_Modified": False,
+        }
+        comp.GetAttrs = MagicMock(return_value=attrs)
+
+        set_attrs_calls = []
+
+        def _set_attrs(new_attrs):
+            set_attrs_calls.append(dict(new_attrs))
+            attrs.update(new_attrs)
+
+        comp.SetAttrs = MagicMock(side_effect=_set_attrs)
+
+        # Evaluating the expression is what dirties the comp in Fusion.
+        def _expression(value):
+            attrs["COMPB_Modified"] = True
+            return value
+
+        seen = []
+
+        class _Evaluating(dict):
+            def __missing__(self, key):
+                return ""
+
+            def GetExpression(self):
+                return None
+
+            def SetExpression(self, expr):
+                seen.append(expr)
+                if expr == "self.Input.OriginalWidth":
+                    self[1001] = _expression(3840)
+                elif expr == "self.Input.OriginalHeight":
+                    self[1001] = _expression(1936)
+
+        evaluating = _Evaluating()
+        evaluating[1001] = original_comment
+        node.Input["Comments"] = evaluating
+
+        result = self.host.toolResolution(node)
+
+        self.assertEqual(result, (3840, 1936))
+        self.assertEqual(
+            evaluating[1001], original_comment,
+            "the anchor's own comment must come back untouched",
+        )
+        self.assertFalse(
+            attrs["COMPB_Modified"],
+            "reading a resolution must not leave the comp modified",
+        )
+        self.assertIn({"COMPB_Modified": False}, set_attrs_calls)
+
+    def test_tool_resolution_returns_none_rather_than_raising(self):
+        """An unreadable resolution must never block a publish."""
+        comp = self.mock_fusion.GetCurrentComp()
+        node = comp.AddTool("Saver", 0, 0)
+        node.SetAttrs({"TOOLS_Name": "_FINAL"})
+        comp.GetAttrs = MagicMock(
+            return_value={
+                "COMPN_RenderStart": 1001.0,
+                "COMPN_RenderEnd": 1100.0,
+                "COMPB_Modified": False,
+            }
+        )
+
+        class _Broken(dict):
+            def __missing__(self, key):
+                return ""
+
+            def GetExpression(self):
+                return None
+
+            def SetExpression(self, expr):
+                raise RuntimeError("expressions unavailable in this build")
+
+        node.Input["Comments"] = _Broken()
+
+        self.assertIsNone(self.host.toolResolution(node))
+
+        self.assertIsNone(self.host.toolResolution(None))
+
     def _setup_options(self):
         import ramses
         ramses.RAM_SETTINGS.userSettings = {"compStartFrame": 1001}

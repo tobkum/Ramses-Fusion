@@ -203,6 +203,69 @@ def maintained_loader_inputs(node, names=_LOADER_PLAYBACK_INPUTS):
 
 
 @contextlib.contextmanager
+def maintained_modified_flag(comp):
+    """Restores the comp's modified flag afterwards.
+
+    Some read-only inspections dirty the comp anyway. Reading a tool's
+    resolution parks a temporary expression on it, and Fusion counts that as
+    an edit even though it is put straight back — which would mean a passive
+    validation check made Fusion think there was unsaved work, and _preview
+    calls comp.Save(), so a read would have started writing files.
+
+    Measured in Fusion before this was written: a clean comp goes False ->
+    read -> True, and SetAttrs puts it back to False.
+    """
+    try:
+        was_modified = comp.GetAttrs().get("COMPB_Modified")
+    except Exception:  # pylint: disable=broad-except
+        was_modified = None
+    try:
+        yield
+    finally:
+        # Only ever restores what was there. A comp that was already dirty
+        # stays dirty; this cannot be used to discard someone's edits.
+        if was_modified is not None:
+            try:
+                comp.SetAttrs({"COMPB_Modified": bool(was_modified)})
+            except Exception:  # pylint: disable=broad-except
+                pass
+
+
+@contextlib.contextmanager
+def temp_expression(attribute, frame, expression):
+    """Drives `attribute` from `expression` for the duration, then restores it.
+
+    From AYON's Fusion integration. The attribute is used as a scratch pad:
+    Fusion evaluates the expression and the result is read straight back off
+    it. Ramses puts artist-facing text in the anchors' Comments field, which
+    is the attribute this borrows, so the restore is load-bearing — it was
+    verified exact on both anchors, with and without existing text, before
+    this shipped.
+    """
+    old_comment = ""
+    has_expression = False
+
+    if attribute[frame] not in ["", None]:
+        if attribute.GetExpression() is not None:
+            has_expression = True
+            old_comment = attribute.GetExpression()
+            attribute.SetExpression(None)
+        else:
+            old_comment = attribute[frame]
+            attribute[frame] = ""
+
+    try:
+        attribute.SetExpression(expression)
+        yield
+    finally:
+        attribute.SetExpression(None)
+        if has_expression:
+            attribute.SetExpression(old_comment)
+        else:
+            attribute[frame] = old_comment
+
+
+@contextlib.contextmanager
 def maintained_comp_range(comp):
     """Restores the comp's frame ranges after the block.
 
@@ -2622,6 +2685,72 @@ class FusionHost(RamHost):
         if start is None or end is None:
             return None, None
         return start, end
+
+    def toolResolution(self, node, frame: int = None):
+        """The resolution actually arriving at `node`, or None.
+
+        Fusion does not store a tool's input resolution until it has been
+        rendered, so it cannot simply be read; it is obtained by parking an
+        expression on the tool and evaluating that. This is what tells a
+        master render apart from the composition's format — a Crop, Resize or
+        Scale in front of a Saver changes what gets delivered while
+        Comp.FrameFormat stays exactly as the database says it should be.
+
+        Returns None rather than raising. A resolution that cannot be read
+        (a disconnected Saver, an older Fusion, an expression that will not
+        evaluate) is not a reason to stop someone publishing.
+
+        Args:
+            node (Tool): the tool whose incoming resolution to read.
+            frame (int): the frame to evaluate at. Defaults to the first
+                frame of the render range.
+
+        Returns:
+            tuple: (width, height) as ints, or None.
+        """
+        if not node:
+            return None
+        comp = self.comp
+        if not comp:
+            return None
+
+        if frame is None:
+            start, _ = self.compRenderRange(comp)
+            if start is None:
+                return None
+            frame = int(start)
+
+        try:
+            attribute = node["Comments"]
+        except Exception:  # pylint: disable=broad-except
+            return None
+
+        try:
+            # The modified-flag guard is OUTERMOST on purpose: releasing the
+            # lock and discarding the undo can each dirty the comp too, so it
+            # has to be the last thing restored.
+            with maintained_modified_flag(comp), comp_locked(comp), comp_undo(
+                comp, "Read resolution", keep=False
+            ):
+                with temp_expression(
+                    attribute, frame, "self.Input.OriginalWidth"
+                ):
+                    width = attribute[frame]
+                with temp_expression(
+                    attribute, frame, "self.Input.OriginalHeight"
+                ):
+                    height = attribute[frame]
+
+            if width in (None, "") or height in (None, ""):
+                return None
+            return int(width), int(height)
+        except Exception as e:  # pylint: disable=broad-except
+            self.log(
+                f"Could not read the resolution at "
+                f"{getattr(node, 'Name', '?')}: {e}",
+                LogLevel.Debug,
+            )
+            return None
 
     def expectedFrameCount(self, comp=None) -> int:
         """How many frames the comp's render range covers, or 0 if unknown."""

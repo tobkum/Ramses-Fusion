@@ -907,17 +907,56 @@ class RamsesFusionApp:
                 return f"<font color='#ff4444'><b>Disconnected Anchor</b></font><br><font color='#999'>The '{tool_name}' node has no input connection.</font>"
             return None
 
+        def check_anchor_resolution(tool_name):
+            """What the anchor will actually WRITE, which is not necessarily
+            the composition's format.
+
+            The resolution check above compares the database against
+            Comp.FrameFormat. A Crop, Resize or Scale in front of a Saver
+            changes the delivered resolution while leaving FrameFormat exactly
+            as the database says it should be, so that check agrees with
+            itself and the master still goes out at the wrong size. Measured
+            on a live shot: _FINAL writing 3840x1936 under a 3840x2160 comp,
+            with validation reporting no mismatch at all.
+
+            Soft, never a hard error: a deliberate crop for delivery is
+            legitimate and must not block a publish.
+            """
+            node = comp.FindTool(tool_name)
+            actual = self.ramses.host.toolResolution(node)
+            if not actual:
+                # Unreadable is not wrong. A disconnected anchor is already
+                # reported as a hard error above.
+                return None
+            act_w, act_h = int(actual[0]), int(actual[1])
+            if (act_w, act_h) == (db_w, db_h):
+                return None
+            return (
+                f"<font color='#ffcc00'><b>{tool_name} Writes A Different "
+                f"Resolution</b></font><br><font color='#999'>Database: "
+                f"<b>{db_w}x{db_h}</b> | This Saver outputs: "
+                f"<b>{act_w}x{act_h}</b></font>"
+            )
+
         if check_preview:
             err_preview = check_anchor("_PREVIEW")
             if err_preview:
                 errors.append(err_preview)
                 has_hard_errors = True
+            else:
+                res_preview = check_anchor_resolution("_PREVIEW")
+                if res_preview:
+                    errors.append(res_preview)
 
         if check_final:
             err_final = check_anchor("_FINAL")
             if err_final:
                 errors.append(err_final)
                 has_hard_errors = True
+            else:
+                res_final = check_anchor_resolution("_FINAL")
+                if res_final:
+                    errors.append(res_final)
 
         if errors:
             return False, "<br><br>".join(errors), has_hard_errors
