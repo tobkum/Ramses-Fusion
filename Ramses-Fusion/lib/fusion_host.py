@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import contextlib
 import os
 import re
 import threading
@@ -123,6 +124,61 @@ def _is_delivery_path(host, path: str) -> bool:
 from ramses import RamFileManager
 
 # Module-level lock for thread-safe daemon initialization
+@contextlib.contextmanager
+def comp_undo(comp, name, keep=True):
+    """Groups comp changes into one undo entry, or discards it entirely.
+
+    `keep=False` removes the entry from the artist's undo stack afterwards.
+    Use it for anything the plugin does on its own initiative: syncing a
+    Saver's path on a UI refresh is bookkeeping, not the artist's edit, and
+    ending up in their undo history means Ctrl+Z undoes our housekeeping
+    instead of their work. Borrowed from AYON's Fusion integration, which
+    passes the same flag for exactly this reason.
+    """
+    comp.StartUndo(name)
+    try:
+        yield
+    finally:
+        comp.EndUndo(bool(keep))
+
+
+@contextlib.contextmanager
+def comp_locked(comp):
+    """Locks the comp for the duration, and always unlocks it.
+
+    A lock that leaks leaves Fusion unresponsive to the artist, so this exists
+    so no caller has to remember the finally.
+    """
+    comp.Lock()
+    try:
+        yield
+    finally:
+        comp.Unlock()
+
+
+@contextlib.contextmanager
+def maintained_comp_range(comp):
+    """Restores the comp's frame ranges after the block.
+
+    For operations that need to render or evaluate a different range than the
+    artist is working in. Fusion has no notion of a scoped range, so it has to
+    be put back by hand.
+    """
+    attrs = comp.GetAttrs()
+    keys = (
+        "COMPN_GlobalStart",
+        "COMPN_GlobalEnd",
+        "COMPN_RenderStart",
+        "COMPN_RenderEnd",
+    )
+    previous = {k: attrs.get(k) for k in keys if attrs.get(k) is not None}
+    try:
+        yield
+    finally:
+        if previous:
+            comp.SetAttrs(previous)
+
+
 _DAEMON_INIT_LOCK = threading.Lock()
 
 # Use a flag to ensure patches are only applied once; guard inside the lock so
@@ -3162,27 +3218,20 @@ class FusionHost(RamHost):
         if attrs.get("COMPN_RenderEnd") != float(end):
             new_attrs["COMPN_RenderEnd"] = float(end)
 
-        # Lock comp and wrap in undo for atomic application
-        comp.Lock()
-        comp.StartUndo("Setup Ramses Scene")
-        success = False
+        # Setup runs on the plugin's initiative, during a save the artist asked
+        # for. Keeping it out of their undo stack means Ctrl+Z undoes their last
+        # edit rather than our housekeeping.
         try:
-            if new_prefs:
-                comp.SetPrefs(new_prefs)
-            if new_attrs:
-                comp.SetAttrs(new_attrs)
-
-            # Always store metadata inside undo block
-            self._store_ramses_metadata(item)
-
-            success = True
+            with comp_locked(comp), comp_undo(comp, "Setup Ramses Scene", keep=False):
+                if new_prefs:
+                    comp.SetPrefs(new_prefs)
+                if new_attrs:
+                    comp.SetAttrs(new_attrs)
+                self._store_ramses_metadata(item)
             return True
         except Exception as e:
             self.log(f"Setup failed: {e}", LogLevel.Critical)
             return False
-        finally:
-            comp.EndUndo(success)
-            comp.Unlock()
 
     def _saveAsUI(self) -> dict:
         """Shows the Ramses Save As Dialog with intelligent pre-selection."""

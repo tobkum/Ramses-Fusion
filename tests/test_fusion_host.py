@@ -324,6 +324,64 @@ class TestFusionHost(unittest.TestCase):
         self.assertIn("preset", order)
         self.assertLess(order.index("preset"), order.index("lock"))
 
+    def test_comp_undo_discards_the_entry_when_asked(self):
+        """Plugin housekeeping must not land in the artist's undo stack."""
+        from fusion_host import comp_undo
+
+        comp = self.mock_fusion.GetCurrentComp()
+        comp.StartUndo = MagicMock()
+        comp.EndUndo = MagicMock()
+
+        with comp_undo(comp, "Housekeeping", keep=False):
+            pass
+
+        comp.StartUndo.assert_called_once_with("Housekeeping")
+        comp.EndUndo.assert_called_once_with(False)
+
+    def test_comp_undo_closes_the_entry_even_on_error(self):
+        """A leaked undo block leaves Fusion in a strange state."""
+        from fusion_host import comp_undo
+
+        comp = self.mock_fusion.GetCurrentComp()
+        comp.StartUndo = MagicMock()
+        comp.EndUndo = MagicMock()
+
+        with self.assertRaises(RuntimeError):
+            with comp_undo(comp, "Boom", keep=True):
+                raise RuntimeError("boom")
+
+        comp.EndUndo.assert_called_once_with(True)
+
+    def test_comp_locked_always_unlocks(self):
+        """A leaked lock leaves Fusion unresponsive to the artist."""
+        from fusion_host import comp_locked
+
+        comp = self.mock_fusion.GetCurrentComp()
+
+        with self.assertRaises(RuntimeError):
+            with comp_locked(comp):
+                self.assertTrue(comp.locked)
+                raise RuntimeError("boom")
+
+        self.assertFalse(comp.locked)
+
+    def test_maintained_comp_range_restores_the_range(self):
+        """Anything that renders a different range must put it back."""
+        from fusion_host import maintained_comp_range
+
+        comp = self.mock_fusion.GetCurrentComp()
+        comp.SetAttrs({
+            "COMPN_GlobalStart": 1001, "COMPN_GlobalEnd": 1100,
+            "COMPN_RenderStart": 1001, "COMPN_RenderEnd": 1100,
+        })
+
+        with maintained_comp_range(comp):
+            comp.SetAttrs({"COMPN_RenderStart": 1050, "COMPN_RenderEnd": 1050})
+            self.assertEqual(comp.GetAttrs()["COMPN_RenderStart"], 1050)
+
+        self.assertEqual(comp.GetAttrs()["COMPN_RenderStart"], 1001)
+        self.assertEqual(comp.GetAttrs()["COMPN_RenderEnd"], 1100)
+
     def test_render_isolates_the_anchor_from_other_savers(self):
         """comp.Render() renders every enabled Saver, not the one you arm.
 

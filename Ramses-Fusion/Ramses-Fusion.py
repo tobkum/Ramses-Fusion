@@ -985,8 +985,14 @@ class RamsesFusionApp:
             preview_needs_update = False
             final_needs_update = False
 
-            comp.Lock()
-            try:
+            # Bookkeeping, not the artist's edit: this runs on every UI
+            # refresh, so the writes are grouped into one undo entry and
+            # that entry is then discarded. Previously each SetInput
+            # landed in the undo stack on its own, so Ctrl+Z after a
+            # refresh undid our path sync instead of their work.
+            with fusion_host.comp_locked(comp), fusion_host.comp_undo(
+                comp, "Sync Ramses Anchors", keep=False
+            ):
                 # Only write a path we actually resolved. resolvePreviewPath()
                 # and resolveFinalPath() return "" on any failure, and the
                 # guard above only returns early when BOTH are empty — so if
@@ -1006,8 +1012,6 @@ class RamsesFusionApp:
                     if curr_f != final_path:
                         final_node.Clip[1] = final_path
                         final_needs_update = True
-            finally:
-                comp.Unlock()
                 
             # Apply presets outside the lock to prevent daemon calls from blocking Fusion UI
             if preview_needs_update and preview_node:
