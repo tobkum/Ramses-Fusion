@@ -477,6 +477,56 @@ class TestFusionHost(unittest.TestCase):
 
         self.assertIs(self.host.comp, other)
 
+    def test_unset_render_range_falls_back_to_the_global_range(self):
+        """Fusion reports an unset render range as a sentinel, not as None.
+
+        Taken at face value, -1000000000 becomes a render of a billion frames,
+        a frame count no sequence can satisfy, and a validation dialog full of
+        nonsense numbers.
+        """
+        comp = self.mock_fusion.GetCurrentComp()
+        comp.GetAttrs = MagicMock(
+            return_value={
+                "COMPN_RenderStart": -1000000000,
+                "COMPN_RenderEnd": -1000000000,
+                "COMPN_GlobalStart": 1001.0,
+                "COMPN_GlobalEnd": 1100.0,
+            }
+        )
+
+        self.assertEqual(self.host.compRenderRange(comp), (1001.0, 1100.0))
+        self.assertEqual(self.host.expectedFrameCount(comp), 100)
+
+    def test_render_range_is_preferred_when_it_is_set(self):
+        comp = self.mock_fusion.GetCurrentComp()
+        comp.GetAttrs = MagicMock(
+            return_value={
+                "COMPN_RenderStart": 1010.0,
+                "COMPN_RenderEnd": 1020.0,
+                "COMPN_GlobalStart": 1001.0,
+                "COMPN_GlobalEnd": 1100.0,
+            }
+        )
+
+        self.assertEqual(self.host.compRenderRange(comp), (1010.0, 1020.0))
+        self.assertEqual(self.host.expectedFrameCount(comp), 11)
+
+    def test_no_range_at_all_yields_no_frame_count(self):
+        """With nothing to go on, the count is 0 and the sequence check is
+        skipped rather than failing every render."""
+        comp = self.mock_fusion.GetCurrentComp()
+        comp.GetAttrs = MagicMock(
+            return_value={
+                "COMPN_RenderStart": -1000000000,
+                "COMPN_RenderEnd": -1000000000,
+                "COMPN_GlobalStart": -1000000000,
+                "COMPN_GlobalEnd": -1000000000,
+            }
+        )
+
+        self.assertEqual(self.host.compRenderRange(comp), (None, None))
+        self.assertEqual(self.host.expectedFrameCount(comp), 0)
+
     def _setup_options(self):
         import ramses
         ramses.RAM_SETTINGS.userSettings = {"compStartFrame": 1001}

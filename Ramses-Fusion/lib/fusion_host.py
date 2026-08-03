@@ -2533,11 +2533,14 @@ class FusionHost(RamHost):
             # comp did not report is still the node we were handed).
             node.SetAttrs({passthrough: False})
 
-            attrs = comp.GetAttrs()
+            # Not comp.GetAttrs() directly: an unset render range comes back
+            # as the RANGE_UNSET sentinel, and handing that to Render() asks
+            # Fusion for a billion frames starting a billion before zero.
+            range_start, range_end = self.compRenderRange(comp)
             render_kwargs = {
                 "Wait": True,
-                "Start": attrs.get("COMPN_RenderStart"),
-                "End": attrs.get("COMPN_RenderEnd"),
+                "Start": range_start,
+                "End": range_end,
                 # A master render is never a draft: state the quality rather
                 # than inheriting the viewer's.
                 "HiQ": True,
@@ -2574,19 +2577,48 @@ class FusionHost(RamHost):
                 if saver.Name != node.Name and saver.Name in original:
                     saver.SetAttrs({passthrough: original[saver.Name]})
 
-    def expectedFrameCount(self, comp=None) -> int:
-        """How many frames the comp's render range covers, or 0 if unknown."""
+    # Fusion reports an UNSET render range as this sentinel, not as None and
+    # not as the global range. Read at face value it becomes a render of a
+    # billion frames, a frame count no sequence can ever satisfy, and a
+    # validation dialog full of nonsense numbers.
+    RANGE_UNSET = -1000000000
+
+    def compRenderRange(self, comp=None):
+        """The comp's render range, falling back to its global range.
+
+        Returns:
+            tuple: (start, end), or (None, None) when neither range is set.
+        """
         comp = comp or self.comp
         if not comp:
-            return 0
+            return None, None
         try:
             attrs = comp.GetAttrs()
-            start = attrs.get("COMPN_RenderStart")
-            end = attrs.get("COMPN_RenderEnd")
-            if start is None or end is None:
-                return 0
-            return int(end) - int(start) + 1
         except Exception:  # pylint: disable=broad-except
+            return None, None
+
+        def _resolve(render_key, global_key):
+            value = attrs.get(render_key)
+            if value is None or value == self.RANGE_UNSET:
+                value = attrs.get(global_key)
+            if value is None or value == self.RANGE_UNSET:
+                return None
+            return value
+
+        start = _resolve("COMPN_RenderStart", "COMPN_GlobalStart")
+        end = _resolve("COMPN_RenderEnd", "COMPN_GlobalEnd")
+        if start is None or end is None:
+            return None, None
+        return start, end
+
+    def expectedFrameCount(self, comp=None) -> int:
+        """How many frames the comp's render range covers, or 0 if unknown."""
+        start, end = self.compRenderRange(comp)
+        if start is None or end is None:
+            return 0
+        try:
+            return int(end) - int(start) + 1
+        except (TypeError, ValueError):
             return 0
 
     def _count_rendered_frames(self, path: str) -> int:

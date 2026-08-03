@@ -843,11 +843,16 @@ class RamsesFusionApp:
         if item.itemType() == ram.ItemType.SHOT:
             expected_frames = settings.get("frames", 0)
 
-            # Check Render Range
-            attrs = comp.GetAttrs()
-            comp_start = attrs.get("COMPN_RenderStart", 0)
-            comp_end = attrs.get("COMPN_RenderEnd", 0)
-            actual_frames = int(comp_end - comp_start + 1)
+            # Check Render Range. Read through the host rather than off
+            # GetAttrs(): Fusion reports an unset render range as a sentinel,
+            # which arithmetic turns into a mismatch of about a billion frames
+            # and a dialog the artist cannot act on.
+            comp_start, comp_end = self.ramses.host.compRenderRange(comp)
+            actual_frames = (
+                int(comp_end - comp_start + 1)
+                if comp_start is not None and comp_end is not None
+                else 0
+            )
 
             if expected_frames > 0 and actual_frames != expected_frames:
                 errors.append(
