@@ -3325,11 +3325,23 @@ class RamsesFusionApp:
             return
 
         name = re.sub(r"[^a-zA-Z0-9_]", "", res["Name"].replace(" ", "_").replace("-", "_"))
+        # A name of nothing but punctuation sanitises down to "", which lands
+        # back on the bare PROJ_G_<step>.comp that the resource field below
+        # exists to avoid — so the next template written would silently
+        # overwrite it.
+        if not name:
+            self._set_status(
+                "That template name has no letters or digits in it.", "warn"
+            )
+            return
 
         tpl_folder = step.templatesFolderPath()
         if not tpl_folder:
             self.log(
                 "Step does not have a valid templates folder.", ram.LogLevel.Warning
+            )
+            self._set_status(
+                "This step has no templates folder — nothing was saved.", "error"
             )
             return
 
@@ -3356,18 +3368,29 @@ class RamsesFusionApp:
         if src:
             if not comp.Save(src):
                 self.log("Could not save current comp before templating.", ram.LogLevel.Critical)
+                self._set_status(
+                    "Could not save the comp, so no template was written.", "error"
+                )
                 return
             try:
                 os.makedirs(os.path.dirname(path), exist_ok=True)
                 fusion_host.RamFileManager.copy(src, path, separateThread=False)
             except Exception as e:
                 self.log(f"Failed to copy template to {path}: {e}", ram.LogLevel.Critical)
+                self._set_status(
+                    "Template could not be written — see the Fusion console.",
+                    "error",
+                )
                 return
         else:
             # Unsaved comp: saving directly to the template path is fine — there
             # is no prior identity to preserve.
             if not comp.Save(path):
                 self.log(f"Failed to save template to {path}", ram.LogLevel.Critical)
+                self._set_status(
+                    "Template could not be written — see the Fusion console.",
+                    "error",
+                )
                 return
 
         self.log(f"Template '{name}' saved to {path}", ram.LogLevel.Info)
@@ -3398,6 +3421,12 @@ class RamsesFusionApp:
             self.refresh_header()
             self._set_status(
                 f"✓ Restored — now at v{self.ramses.host.currentVersion()}.", "ok"
+            )
+        else:
+            # restoreVersion() returns False both when the artist closes the
+            # version list and when the restore itself fails.
+            self._set_status(
+                "Nothing was restored — see the Fusion console.", "error"
             )
 
     def on_close(self, ev: object) -> None:
