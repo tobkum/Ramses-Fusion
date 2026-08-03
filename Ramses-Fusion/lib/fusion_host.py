@@ -2469,7 +2469,14 @@ class FusionHost(RamHost):
                 ),
                 LogLevel.Debug,
             )
-            return bool(comp.Render(render_kwargs))
+            # comp.Render(Start=, End=) writes those frames back onto the comp
+            # as its render range, so a scripted render leaves behind the range
+            # it used. Today the values come from the comp's own range, making
+            # the guard a no-op — it is here so this cannot quietly become a
+            # scene edit the day either path renders a range of its own. AYON
+            # wraps every render the same way.
+            with maintained_comp_range(comp):
+                return bool(comp.Render(render_kwargs))
         finally:
             # The anchor is deliberately not restored here; the caller disarms
             # it. Restoring it too would fight that and leave the outcome
