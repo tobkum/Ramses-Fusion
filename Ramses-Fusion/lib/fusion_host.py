@@ -2140,11 +2140,9 @@ class FusionHost(RamHost):
         # Lock comp during state modification and render
         comp.Lock()
         try:
-            preview_node.SetAttrs({"TOOLB_PassThrough": False})
-
             try:
-                # 4. Trigger Fusion Render
-                if comp.Render(True):
+                # 4. Trigger Fusion Render (isolated to this Saver)
+                if self._render_anchor(preview_node):
                     # 5. Verify the output
                     if self._verify_render_output(dst):
                         # Disarm immediately after render
@@ -2238,6 +2236,98 @@ class FusionHost(RamHost):
             dict: Potentially modified publish options.
         """
         return publishOptions or {}
+
+    # Fusion render request flag: suppress the render progress/settings dialogs.
+    # Documented in the Fusion scripting reference and used the same way by
+    # AYON's Fusion integration.
+    REQF_QUIET = 524288
+
+    def _render_anchor(self, node) -> bool:
+        """Renders exactly one Saver, with the render settings stated explicitly.
+
+        Both render paths go through here so they cannot drift apart again.
+
+        Two things this fixes over calling comp.Render(True) directly:
+
+        1. comp.Render() renders EVERY enabled Saver, not the one you arm. An
+           artist's own Saver left enabled would therefore render during a
+           publish, and a failure anywhere in its branch would fail the publish.
+           Every Saver is disabled for the duration except the one asked for,
+           and all of them are put back afterwards. Both AYON's and Prism's
+           Fusion integrations do exactly this.
+
+        2. Render() takes (wait, start, end, proxy, hiq, motionblur). Passing
+           only `wait` leaves quality, motion blur and proxy at whatever the
+           artist last toggled interactively, so a master render could go out at
+           low quality or proxied and nothing would say so. The Fusion render
+           dialog sets them, which is why a manual render does not have this
+           problem and a scripted one does.
+
+        Args:
+            node (Tool): the Saver to render.
+
+        Returns:
+            bool: True if Fusion reported a successful render.
+        """
+        comp = self.comp
+        if not comp or not node:
+            return False
+
+        passthrough = "TOOLB_PassThrough"
+        original = {}
+
+        try:
+            savers = list(comp.GetToolList(False, "Saver").values())
+        except Exception:  # pylint: disable=broad-except
+            savers = [node]
+
+        try:
+            for saver in savers:
+                try:
+                    original[saver.Name] = saver.GetAttrs()[passthrough]
+                except Exception:  # pylint: disable=broad-except
+                    continue
+                # PassThrough is the inverse of enabled: everything but our
+                # anchor gets passed through.
+                saver.SetAttrs({passthrough: saver.Name != node.Name})
+
+            # Arm the anchor even if it was not in the list above (a Saver the
+            # comp did not report is still the node we were handed).
+            node.SetAttrs({passthrough: False})
+
+            attrs = comp.GetAttrs()
+            render_kwargs = {
+                "Wait": True,
+                "Start": attrs.get("COMPN_RenderStart"),
+                "End": attrs.get("COMPN_RenderEnd"),
+                # A master render is never a draft: state the quality rather
+                # than inheriting the viewer's.
+                "HiQ": True,
+                "MotionBlur": True,
+                # No dialogs; this runs unattended from a button.
+                "RenderFlags": self.REQF_QUIET,
+            }
+            # Start/End are omitted rather than sent as None when the comp does
+            # not report them, so Fusion falls back to its own range.
+            render_kwargs = {k: v for k, v in render_kwargs.items() if v is not None}
+
+            self.log(
+                "Rendering '%s' frames %s-%s"
+                % (
+                    node.Name,
+                    render_kwargs.get("Start", "?"),
+                    render_kwargs.get("End", "?"),
+                ),
+                LogLevel.Debug,
+            )
+            return bool(comp.Render(render_kwargs))
+        finally:
+            # The anchor is deliberately not restored here; the caller disarms
+            # it. Restoring it too would fight that and leave the outcome
+            # depending on which finally ran last.
+            for saver in savers:
+                if saver.Name != node.Name and saver.Name in original:
+                    saver.SetAttrs({passthrough: original[saver.Name]})
 
     def _verify_render_output(self, path: str) -> bool:
         """Verifies that a render output exists and is valid.
@@ -2574,12 +2664,10 @@ class FusionHost(RamHost):
                         )
                         return []
 
-                # Enable the node
-                final_node.SetAttrs({"TOOLB_PassThrough": False})
-
                 try:
-                    # Execute render - comp.Render returns True only on success
-                    if comp.Render(True):
+                    # Execute render, isolated to this Saver. Returns True only
+                    # on success.
+                    if self._render_anchor(final_node):
                         # Secondary Verification: Check file existence and size
                         if self._verify_render_output(render_path):
                             self.log(

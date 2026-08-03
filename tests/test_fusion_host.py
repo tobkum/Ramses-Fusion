@@ -324,6 +324,73 @@ class TestFusionHost(unittest.TestCase):
         self.assertIn("preset", order)
         self.assertLess(order.index("preset"), order.index("lock"))
 
+    def test_render_isolates_the_anchor_from_other_savers(self):
+        """comp.Render() renders every enabled Saver, not the one you arm.
+
+        An artist's own Saver left enabled would render during a publish, and a
+        failure in its branch would fail the publish.
+        """
+        comp = self.mock_fusion.GetCurrentComp()
+
+        anchor = comp.AddTool("Saver", 0, 0)
+        anchor.SetAttrs({"TOOLS_Name": "_FINAL", "TOOLB_PassThrough": True})
+        artist = comp.AddTool("Saver", 0, 0)
+        artist.SetAttrs({"TOOLS_Name": "ArtistSaver", "TOOLB_PassThrough": False})
+
+        during = {}
+        comp.Render = MagicMock(side_effect=lambda kw: during.update(
+            {s.Name: s.GetAttrs()["TOOLB_PassThrough"]
+             for s in comp.GetToolList(False, "Saver").values()}
+        ) or True)
+
+        self.assertTrue(self.host._render_anchor(anchor))
+
+        self.assertFalse(during["_FINAL"], "the anchor must be enabled")
+        self.assertTrue(during["ArtistSaver"],
+                        "every other Saver must be passed through")
+        self.assertFalse(artist.GetAttrs()["TOOLB_PassThrough"],
+                         "the artist's Saver must be restored afterwards")
+
+    def test_render_states_its_settings_instead_of_inheriting_them(self):
+        """Render(wait) leaves quality, motion blur and range to the viewer.
+
+        A master render must not come out at whatever quality the artist last
+        toggled, so the settings are passed explicitly.
+        """
+        comp = self.mock_fusion.GetCurrentComp()
+        comp.SetAttrs({"COMPN_RenderStart": 1001, "COMPN_RenderEnd": 1100})
+
+        anchor = comp.AddTool("Saver", 0, 0)
+        anchor.SetAttrs({"TOOLS_Name": "_FINAL"})
+
+        captured = {}
+        comp.Render = MagicMock(side_effect=lambda kw: captured.update(kw) or True)
+
+        self.host._render_anchor(anchor)
+
+        self.assertTrue(captured["Wait"])
+        self.assertTrue(captured["HiQ"])
+        self.assertTrue(captured["MotionBlur"])
+        self.assertEqual(captured["Start"], 1001)
+        self.assertEqual(captured["End"], 1100)
+        self.assertEqual(captured["RenderFlags"], self.host.REQF_QUIET)
+
+    def test_render_restores_other_savers_even_if_the_render_raises(self):
+        """A failed render must not leave the artist's Savers disabled."""
+        comp = self.mock_fusion.GetCurrentComp()
+
+        anchor = comp.AddTool("Saver", 0, 0)
+        anchor.SetAttrs({"TOOLS_Name": "_FINAL"})
+        artist = comp.AddTool("Saver", 0, 0)
+        artist.SetAttrs({"TOOLS_Name": "ArtistSaver", "TOOLB_PassThrough": False})
+
+        comp.Render = MagicMock(side_effect=RuntimeError("render exploded"))
+
+        with self.assertRaises(RuntimeError):
+            self.host._render_anchor(anchor)
+
+        self.assertFalse(artist.GetAttrs()["TOOLB_PassThrough"])
+
     def test_publish_sets_its_own_path_and_preset(self):
         """_publish must prepare the Saver itself, not trust the UI.
 
