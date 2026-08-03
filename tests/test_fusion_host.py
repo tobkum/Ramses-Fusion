@@ -258,6 +258,11 @@ class TestFusionHost(unittest.TestCase):
         final_node = comp.AddTool("Saver", 0, 0)
         final_node.SetAttrs({"TOOLS_Name": "_FINAL"})
         final_node.Clip[1] = "D:/Renders/TEST_S_Shot01_COMP.mov"
+        # _publish resolves its own final path now, which is a daemon
+        # round-trip. Keep the unit test off the daemon and let it fall
+        # back to the path already on the Saver.
+        self.host.resolveFinalPath = MagicMock(return_value="")
+        self.host.apply_render_preset = MagicMock()
         
         # 1. Setup mock publish info
         expected_dst = "D:/Projects/Published/TEST_S_Shot01_COMP.comp"
@@ -287,6 +292,100 @@ class TestFusionHost(unittest.TestCase):
         self.assertIn("D:/Renders/TEST_S_Shot01_COMP.mov", published)
         self.assertIn(expected_dst, published)
 
+    def test_publish_sets_its_own_path_and_preset(self):
+        """_publish must prepare the Saver itself, not trust the UI.
+
+        The preview path sets its own output path and preset before rendering;
+        the final path used to render whatever was left on _FINAL. Publish is
+        the one action that never calls _sync_render_anchors(), so a stale or
+        hand-edited Saver produced a master render with the wrong settings.
+        """
+        comp = self.mock_fusion.GetCurrentComp()
+        comp.SetAttrs({"COMPS_FileName": "D:/Projects/WIP/TEST_S_Shot01_COMP_v001.comp"})
+
+        final_node = comp.AddTool("Saver", 0, 0)
+        final_node.SetAttrs({"TOOLS_Name": "_FINAL"})
+        final_node.Clip[1] = "D:/Renders/STALE.mov"
+
+        resolved = "D:/Exports/Shot01/Shot01.0000.exr"
+        self.host.resolveFinalPath = MagicMock(return_value=resolved)
+        self.host.apply_render_preset = MagicMock()
+        self.host._verify_render_output = MagicMock(return_value=True)
+
+        mock_info = MagicMock()
+        mock_info.copy.return_value = mock_info
+        mock_info.filePath.return_value = "D:/Projects/Published/x.comp"
+
+        with patch("os.makedirs"), patch("ramses.file_manager.RamFileManager.copy"):
+            published = self.host._publish(mock_info, {})
+
+        self.assertEqual(final_node.Clip[1], resolved,
+                         "the stale path must be replaced by the resolved one")
+        self.host.apply_render_preset.assert_called_once_with(final_node, "final")
+        self.assertIn(resolved, published)
+
+    def test_publish_keeps_saver_path_when_resolution_fails(self):
+        """An unresolvable path must not wipe a good one.
+
+        resolveFinalPath() returns "" on any failure. Writing that to the Saver
+        would turn a recoverable state into a failed publish.
+        """
+        comp = self.mock_fusion.GetCurrentComp()
+        comp.SetAttrs({"COMPS_FileName": "D:/Projects/WIP/TEST_S_Shot01_COMP_v001.comp"})
+
+        final_node = comp.AddTool("Saver", 0, 0)
+        final_node.SetAttrs({"TOOLS_Name": "_FINAL"})
+        existing = "D:/Renders/TEST_S_Shot01_COMP.mov"
+        final_node.Clip[1] = existing
+
+        self.host.resolveFinalPath = MagicMock(return_value="")
+        self.host.apply_render_preset = MagicMock()
+        self.host._verify_render_output = MagicMock(return_value=True)
+
+        mock_info = MagicMock()
+        mock_info.copy.return_value = mock_info
+        mock_info.filePath.return_value = "D:/Projects/Published/x.comp"
+
+        with patch("os.makedirs"), patch("ramses.file_manager.RamFileManager.copy"):
+            published = self.host._publish(mock_info, {})
+
+        self.assertEqual(final_node.Clip[1], existing)
+        self.assertIn(existing, published)
+
+    def test_publish_resolves_path_outside_the_comp_lock(self):
+        """Path resolution is a daemon round-trip and must not hold the lock.
+
+        Doing it inside comp.Lock() would leave Fusion sitting on a locked comp
+        whenever the daemon is slow or unreachable.
+        """
+        comp = self.mock_fusion.GetCurrentComp()
+        comp.SetAttrs({"COMPS_FileName": "D:/Projects/WIP/TEST_S_Shot01_COMP_v001.comp"})
+
+        final_node = comp.AddTool("Saver", 0, 0)
+        final_node.SetAttrs({"TOOLS_Name": "_FINAL"})
+        final_node.Clip[1] = "D:/Renders/TEST.mov"
+
+        order = []
+        comp.Lock = MagicMock(side_effect=lambda: order.append("lock"))
+        comp.Unlock = MagicMock(side_effect=lambda: order.append("unlock"))
+        self.host.resolveFinalPath = MagicMock(
+            side_effect=lambda: (order.append("resolve"), "")[1]
+        )
+        self.host.apply_render_preset = MagicMock(
+            side_effect=lambda *a, **k: order.append("preset")
+        )
+        self.host._verify_render_output = MagicMock(return_value=True)
+
+        mock_info = MagicMock()
+        mock_info.copy.return_value = mock_info
+        mock_info.filePath.return_value = "D:/Projects/Published/x.comp"
+
+        with patch("os.makedirs"), patch("ramses.file_manager.RamFileManager.copy"):
+            self.host._publish(mock_info, {})
+
+        self.assertLess(order.index("resolve"), order.index("lock"))
+        self.assertLess(order.index("preset"), order.index("lock"))
+
     def test_publish_aborts_on_missing_anchor(self):
         """Verify that publish is aborted if no _FINAL anchor is present."""
         comp = self.mock_fusion.GetCurrentComp()
@@ -309,6 +408,11 @@ class TestFusionHost(unittest.TestCase):
         final_node.SetAttrs({"TOOLS_Name": "_FINAL"})
 
         # Mock Render failure
+        # _publish resolves its own final path now, which is a daemon
+        # round-trip. Keep the unit test off the daemon and let it fall
+        # back to the path already on the Saver.
+        self.host.resolveFinalPath = MagicMock(return_value="")
+        self.host.apply_render_preset = MagicMock()
         comp.Render = MagicMock(return_value=False)
 
         mock_info = MagicMock()
@@ -326,6 +430,11 @@ class TestFusionHost(unittest.TestCase):
         final_node.SetAttrs({"TOOLS_Name": "_FINAL"})
         
         # Mock Render success but Verification failure
+        # _publish resolves its own final path now, which is a daemon
+        # round-trip. Keep the unit test off the daemon and let it fall
+        # back to the path already on the Saver.
+        self.host.resolveFinalPath = MagicMock(return_value="")
+        self.host.apply_render_preset = MagicMock()
         comp.Render = MagicMock(return_value=True)
         self.host._verify_render_output = MagicMock(return_value=False)
 

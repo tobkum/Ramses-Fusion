@@ -2505,6 +2505,49 @@ class FusionHost(RamHost):
 
             self.log("Starting final master render...", LogLevel.Info)
 
+            # Prepare the Saver before locking, rather than trusting whatever
+            # the UI last wrote to it.
+            #
+            # _renderPreview sets its own output path and applies its own preset
+            # immediately before rendering, so a preview is correct whatever
+            # state the node was in. The final render did neither: it rendered
+            # with whatever path, format and numbering happened to be on _FINAL.
+            # Those are only written by _sync_render_anchors(), and Publish is
+            # the one action that does not call it (Save and Save Incremental
+            # both do), so a hand-edited Saver, or a step whose YAML changed
+            # since the last UI refresh, produced a master render with the wrong
+            # settings and nobody found out until delivery.
+            #
+            # Deliberately OUTSIDE comp.Lock(): resolving the path and reading
+            # the step's settings both talk to the Ramses daemon, and a slow or
+            # unreachable daemon would otherwise leave Fusion sitting on a
+            # locked comp. _sync_render_anchors() writes these unlocked too.
+            #
+            # A resolved path only ever replaces the existing one. Resolution
+            # returns "" on failure, and stomping a good path with an empty one
+            # would turn a recoverable state into a failed publish.
+            try:
+                resolved = self.resolveFinalPath()
+            except Exception as e:  # pylint: disable=broad-except
+                resolved = ""
+                self.log(
+                    f"Could not resolve the final render path ({e}); keeping "
+                    "the path already on _FINAL.",
+                    LogLevel.Warning,
+                )
+
+            if resolved:
+                if self.normalizePath(final_node.Clip[1]) != self.normalizePath(resolved):
+                    final_node.Clip[1] = resolved
+            else:
+                self.log(
+                    "Final render path could not be resolved; using the path "
+                    "already set on _FINAL.",
+                    LogLevel.Warning,
+                )
+
+            self.apply_render_preset(final_node, "final")
+
             render_success = False
 
             # Lock comp during state modification and render
