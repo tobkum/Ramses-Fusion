@@ -2615,11 +2615,11 @@ class FusionHost(RamHost):
     REQF_QUIET = 524288
 
     def _render_anchor(self, node) -> bool:
-        """Renders exactly one Saver, with the render settings stated explicitly.
+        """Renders exactly one Saver, over an explicitly stated frame range.
 
         Both render paths go through here so they cannot drift apart again.
 
-        Two things this fixes over calling comp.Render(True) directly:
+        What this fixes over calling comp.Render(True) directly:
 
         1. comp.Render() renders EVERY enabled Saver, not the one you arm. An
            artist's own Saver left enabled would therefore render during a
@@ -2627,12 +2627,13 @@ class FusionHost(RamHost):
            Every Saver is disabled for the duration except the one asked for,
            and all of them are put back afterwards.
 
-        2. Render() takes (wait, start, end, proxy, hiq, motionblur). Passing
-           only `wait` leaves quality, motion blur and proxy at whatever the
-           artist last toggled interactively, so a master render could go out at
-           low quality or proxied and nothing would say so. The Fusion render
-           dialog sets them, which is why a manual render does not have this
-           problem and a scripted one does.
+        2. The frame range is resolved rather than left to Fusion, because an
+           unset render range reads back as the RANGE_UNSET sentinel rather
+           than as nothing. See compRenderRange.
+
+        Quality, motion blur and proxy are deliberately NOT passed; see the
+        comment on the render arguments below for why that is a decision and
+        not an omission.
 
         Args:
             node (Tool): the Saver to render.
