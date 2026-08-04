@@ -1475,9 +1475,16 @@ class TestFusionHost(unittest.TestCase):
         mock_project = MagicMock()
         mock_project.exportPath.return_value = "D:/Exports"  # This should NOT be used
         
-        # Patch the RAMSES instance in fusion_host module (not ramses module)
+        # Patch the RAMSES instance in fusion_host module (not ramses module).
+        # RAMSES is a singleton shared by every test in the process, so this
+        # has to be undone: a bare assignment leaves the stub installed for
+        # whatever runs next.
         import fusion_host
-        fusion_host.RAMSES.project = MagicMock(return_value=mock_project)
+        project_patcher = patch.object(
+            fusion_host.RAMSES, "project", MagicMock(return_value=mock_project)
+        )
+        project_patcher.start()
+        self.addCleanup(project_patcher.stop)
         
         # Mock publishInfo - required by resolveFinalPath
         mock_pub_info = MagicMock()
@@ -2134,8 +2141,16 @@ class TestFusionCompImport(unittest.TestCase):
         self.mock_fusion.NewComp = MagicMock()
         
         import fusion_host
-        fusion_host.RamItem = MagicMock()
-        fusion_host.RamItem.fromPath.return_value = MagicMock()
+        # patch.object, not a bare assignment: a bare one is never undone, so
+        # fusion_host.RamItem stayed a MagicMock for the rest of the process
+        # and test_current_item_metadata_resolution — which resolves an item
+        # through that very class — failed whenever it ran after this test.
+        # It only ran after this test under unittest (alphabetical class
+        # order); pytest runs classes in file order and never saw it.
+        patcher = patch.object(fusion_host, "RamItem")
+        mock_ram_item = patcher.start()
+        self.addCleanup(patcher.stop)
+        mock_ram_item.fromPath.return_value = MagicMock()
         self.host._open = MagicMock(return_value=True)
         self.host.log = MagicMock()
         self.host.app = MagicMock()
