@@ -112,3 +112,34 @@ def no_drive_root_dirs(request, _drive_roots):
             "(Pipeline folders %s at a root are the classic case.)"
             % (request.node.nodeid, created, list(_PIPELINE_FOLDERS))
         )
+
+
+@pytest.fixture(autouse=True)
+def no_leaked_comp_pin():
+    """Fails any test that leaves FusionHost pinned to a composition.
+
+    `FusionHost._pinned_comp` is class-level state that makes `host.comp`
+    return one fixed composition for the duration of a publish or preview.
+    If a test leaves it set, every later test in the run silently talks to
+    that stale comp instead of its own fixture — the same failure the
+    `Ramses.online()` singleton caused before it was reset per test, where
+    one offline test quietly disabled every @requires_connection handler in
+    the suite and the tests still passed.
+
+    Reset before, asserted after, so a leak is attributed to the test that
+    caused it rather than to whichever one runs next.
+    """
+    try:
+        from fusion_host import FusionHost
+    except Exception:  # pragma: no cover - fusion_host not importable here
+        yield
+        return
+
+    FusionHost._pinned_comp = None
+    yield
+    leaked = FusionHost._pinned_comp
+    FusionHost._pinned_comp = None
+    assert leaked is None, (
+        "test finished with FusionHost._pinned_comp still set (%r) - a "
+        "pinned comp must always be released in a finally" % (leaked,)
+    )

@@ -759,6 +759,62 @@ class TestFusionHost(unittest.TestCase):
 
         self.assertEqual(attr[1], "keep me")
 
+    def test_publish_never_leaves_the_host_pinned(self):
+        """A leaked pin would be the worst bug in this file.
+
+        `_pinned_comp` is class-level state, so if a publish ever exited
+        without releasing it, every later `self.comp` in the session would
+        return that same composition — including after the artist closed it.
+        Fusion keeps its interpreter alive between panel opens, so it would
+        persist until Fusion itself restarted.
+
+        Checked on the failure path specifically, because that is the one
+        that would not be noticed in normal use.
+        """
+        import fusion_host
+
+        self.assertIsNone(fusion_host.FusionHost._pinned_comp)
+
+        # A publish that aborts as early as possible: no _FINAL anchor.
+        comp = self.mock_fusion.GetCurrentComp()
+        comp.FindTool = MagicMock(return_value=None)
+        self.host.currentFilePath = MagicMock(return_value="X:/proj/shot.comp")
+        self.host.currentItem = MagicMock(return_value=None)
+
+        info = MagicMock()
+        self.assertEqual(self.host._publish(info, {}), [])
+        self.assertIsNone(
+            fusion_host.FusionHost._pinned_comp,
+            "an aborted publish must not leave the host pinned",
+        )
+
+        # And when the body raises outright.
+        self.host._publishPinned = MagicMock(
+            side_effect=RuntimeError("render exploded")
+        )
+        with self.assertRaises(RuntimeError):
+            self.host._publish(info, {})
+        self.assertIsNone(
+            fusion_host.FusionHost._pinned_comp,
+            "a publish that raised must not leave the host pinned",
+        )
+
+    def test_preview_never_leaves_the_host_pinned(self):
+        import fusion_host
+
+        self.assertIsNone(fusion_host.FusionHost._pinned_comp)
+
+        self.host._previewPinned = MagicMock(
+            side_effect=RuntimeError("preview exploded")
+        )
+        with self.assertRaises(RuntimeError):
+            self.host._preview("X:/out", "shot", None, None)
+
+        self.assertIsNone(
+            fusion_host.FusionHost._pinned_comp,
+            "a preview that raised must not leave the host pinned",
+        )
+
     def _setup_options(self):
         import ramses
         ramses.RAM_SETTINGS.userSettings = {"compStartFrame": 1001}
