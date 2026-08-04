@@ -17,10 +17,10 @@ Fusion Studio integration for [Ramses](https://ramses.rxlab.guide/) production m
 - **Render Anchor Generation**: Creates preconfigured Saver nodes with standardized paths:
   - `_PREVIEW`: Review renders into the shot's `_preview` folder (default: ProRes 422 `.mov`, e.g. `PROJ_S_SH010_COMP.mov`)
   - `_FINAL`: Client deliverables into the project export folder (default) or the step's `_published` folder, with optional client suffix (e.g. `A010_C003_vfx.####.exr`)
-  - Optional **source-plate frame numbering** for sequence deliverables: files carry the plate's original frame numbers while the comp stays at the studio start frame (see [Step Configuration](wiki/Step-Configuration.md))
+  - Optional **source-plate frame numbering** for sequence deliverables: files carry the plate's original frame numbers while the comp stays at the studio start frame (see [Step Configuration](https://github.com/tobkum/Ramses-Fusion/wiki/Step-Configuration))
 
 ### Asset Management
-- **Import Published Elements**: Load upstream renders (e.g., plates from PLATE step) with automatic Loader node creation
+- **Import Published Elements**: An asset browser lists the published deliverables of the upstream step (plates from PLATE, tracked cameras, mattes), one row per deliverable — image sequences collapse to a single entry — and creates the Loader nodes for the ones you tick
 - **Version Management**:
   - Restore previous composition versions from `_versions` folder
   - Swap Loader sources to different published versions
@@ -29,27 +29,33 @@ Fusion Studio integration for [Ramses](https://ramses.rxlab.guide/) production m
 ### Version Control
 - **Incremental Save**: Saves current composition to `_versions` folder with auto-incremented naming
 - **Publish Workflow**:
-  1. Validates composition against project specs (resolution, framerate)
-  2. Saves versioned copy to `_published/vNNN_STATE` folder
-  3. Updates Ramses database with completion status and metadata
+  1. Validates composition against project specs (resolution, framerate, render anchors, output format)
+  2. Offers **Fix It** for the findings that can be repaired automatically, then revalidates
+  3. Renders the final output and verifies it landed — every expected frame present and non-empty
+  4. Saves versioned copy to `_published/vNNN_STATE` folder
+  5. Updates Ramses database with completion status and metadata
 
 ### Status Management
 - **Shot Status Updates**: Set task status (TODO, WIP, Review, Approved) directly from Fusion
 - **Comment Integration**: Add production notes synchronized with Ramses database
 - **Quick Preview Playback**: Side-button next to Create Preview opens the current shot's preview file in the OS default media player; enabled only when a preview already exists on disk
 
+### Panel Layout
+- **Vertical / horizontal toggle** (`⇄`): the vertical panel groups the actions into labelled sections (Scene, Assets, Work, Review, Settings); the horizontal one collapses them into a slim single-row toolbar for docking above the flow. Both drive the same actions
+
 ## Technical Details
 
 ### API Integration
 - **Daemon Communication**: Thread-safe socket communication with Ramses Daemon (TCP)
-- **Metadata Management**: Reads/writes `.ramses` JSON sidecar files for version tracking
+- **Metadata Management**: Reads/writes the `_ramses_data.json` sidecar that Ramses keeps alongside each folder's files, for version and comment tracking
 - **Path Resolution**: Uses Ramses API conventions for folder structure (`05-SHOTS`, `_published`, `_versions`)
 
 ### Fusion-Specific Implementation
-- **Monkey Patching**: Applies targeted fixes to Ramses API for Fusion environment compatibility:
+- **Runtime patching**: The vendored ramses-py SDK under `lib/ramses/` is never edited so it stays replaceable from upstream. Fusion-specific behaviour is installed at runtime instead:
   - Synchronous file copying (prevents Fusion UI hangs)
-  - Robust version file sorting (handles folder-based versions)
-  - Thread-safe daemon communication
+  - Robust version file resolution (handles folder-based versions)
+  - Publish state propagation
+  - Suppression of directory creation during read-only path lookups (`DisableMakedirs`), so browsing the project doesn't litter it with empty folders
 - **UIManager Integration**: Custom dialogs using Fusion's native UI framework
 
 ### Performance Optimizations
@@ -68,13 +74,21 @@ Fusion Studio integration for [Ramses](https://ramses.rxlab.guide/) production m
 
 ```bash
 git clone https://github.com/tobkum/Ramses-Fusion.git
-cd ramses-fusion
 ```
 
-Copy contents to Fusion Scripts directory:
+The repository root holds the tests and the docs; only the inner
+`Ramses-Fusion/` folder is the plugin. Copy **that folder** into the Fusion
+Scripts directory:
 - **Windows**: `%APPDATA%\Blackmagic Design\Fusion\Scripts\Comp\`
 - **macOS**: `~/Library/Application Support/Blackmagic Design/Fusion/Scripts/Comp/`
 - **Linux**: `~/.fusion/BlackmagicDesign/Fusion/Scripts/Comp/`
+
+You should end up with `…/Scripts/Comp/Ramses-Fusion/Ramses-Fusion.py`
+alongside its `lib/` folder.
+
+> Fusion keeps one Python interpreter alive for the whole session. After
+> replacing the plugin, restart Fusion — reopening the panel is not enough to
+> reload the modules under `lib/`.
 
 ## Usage
 
@@ -90,7 +104,7 @@ Copy contents to Fusion Scripts directory:
 2. **Setup Scene**: Click "Setup Scene" to apply project specs
 3. **Import Assets**: Load published plates/renders from upstream steps
 4. **Composite**: Work on shot using standard Fusion workflow
-5. **Save Versions**: Incremental save creates timestamped versions
+5. **Save Versions**: Incremental save writes a numbered copy (`v001`, `v002`, …) into `_versions`
 6. **Publish**: Final publish renders output and updates database status
 
 ### Render Anchor Usage
@@ -137,7 +151,7 @@ the Ramses config directory, e.g. `%APPDATA%/Ramses/Config/` on Windows):
 
 ## Architecture
 
-See [Technical Details](wiki/Technical-Details.md) for:
+See [Technical Details](https://github.com/tobkum/Ramses-Fusion/wiki/Technical-Details) for:
 - Daemon communication protocol
 - File path resolution logic
 - Version detection algorithm
@@ -145,14 +159,29 @@ See [Technical Details](wiki/Technical-Details.md) for:
 
 ## Contributing
 
-See [Developer Guide](wiki/Developer-Guide.md) for:
+See [Developer Guide](https://github.com/tobkum/Ramses-Fusion/wiki/Developer-Guide) for:
 - Code structure
 - Testing procedures
 - Ramses API integration points
 
+The test suite runs without Fusion (it mocks the host API). From the
+repository root:
+
+```bash
+run_tests.bat
+```
+
+It sets `PYTHONPATH` to `Ramses-Fusion` and `Ramses-Fusion/lib`, then runs
+`python -m unittest discover -v tests`.
+
 ## License
 
-[Insert License Type]
+GNU General Public License v3.0 — see [LICENSE](LICENSE).
+
+The vendored SDK under `Ramses-Fusion/lib/ramses/` is
+[Ramses-Py](https://codeberg.org/Ramses/Ramses-Py) by Rainbox Laboratory,
+also GPL v3. It is kept unmodified so it stays replaceable from upstream —
+see [UPSTREAM_SDK_FINDINGS.md](UPSTREAM_SDK_FINDINGS.md).
 
 ---
 
