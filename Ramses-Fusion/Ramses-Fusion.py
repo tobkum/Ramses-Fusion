@@ -837,6 +837,11 @@ class RamsesFusionApp:
 
         errors = []
         has_hard_errors = False
+        # Which findings this run could fix by itself. Reported alongside the
+        # message rather than in it, so the dialog can offer the repair
+        # without parsing its own text back out. Kept off the return tuple
+        # because ten call sites unpack that as a triple.
+        repairs = set()
         comp = self.ramses.host.comp
 
         # 1. Check Frame Range
@@ -858,6 +863,7 @@ class RamsesFusionApp:
                 errors.append(
                     f"<font color='#ffcc00'><b>Frame Range Mismatch</b></font><br><font color='#999'>Database: <b>{expected_frames}</b> | Composition: <b>{actual_frames}</b></font>"
                 )
+                repairs.add("format")
 
         # 2. Check Resolution (Respects Overrides)
         db_w = int(settings.get("width", 1920))
@@ -873,6 +879,7 @@ class RamsesFusionApp:
             errors.append(
                 f"<font color='#ffcc00'><b>Resolution Mismatch</b></font><br><font color='#999'>Database: <b>{db_w}x{db_h}</b> | Composition: <b>{comp_w}x{comp_h}</b></font>"
             )
+            repairs.add("format")
 
         # 3. Check Framerate (Respects Overrides)
         db_fps = float(settings.get("framerate", 24.0))
@@ -884,6 +891,7 @@ class RamsesFusionApp:
             errors.append(
                 f"<font color='#ffcc00'><b>Framerate Mismatch</b></font><br><font color='#999'>Database: <b>{db_fps} fps</b> | Composition: <b>{comp_fps} fps</b></font>"
             )
+            repairs.add("format")
 
         # 4. Check Pixel Aspect Ratio
         db_par = float(settings.get("pixelAspectRatio", 1.0))
@@ -895,11 +903,14 @@ class RamsesFusionApp:
             errors.append(
                 f"<font color='#ffcc00'><b>Pixel Aspect Ratio Mismatch</b></font><br><font color='#999'>Database: <b>{db_par:.3f}</b> | Composition: <b>{comp_par:.3f}</b></font>"
             )
+            repairs.add("format")
 
         # 5. Check Saver Connections
         def check_anchor(tool_name):
             node = comp.FindTool(tool_name)
             if not node:
+                # Recreatable — this is exactly what Setup Scene does.
+                repairs.add("anchors")
                 return f"<font color='#ff4444'><b>Missing Anchor Node</b></font><br><font color='#999'>The required node '{tool_name}' was not found in the flow.</font>"
 
             inp = node.FindMainInput(1)
@@ -956,6 +967,11 @@ class RamsesFusionApp:
                 if res_final:
                     errors.append(res_final)
 
+        # Published for _handle_validation to read immediately after this
+        # call. Always assigned, so a later run can never offer a repair that
+        # an earlier run discovered.
+        self._validation_repairs = repairs
+
         if errors:
             return False, "<br><br>".join(errors), has_hard_errors
         return True, "", False
@@ -986,7 +1002,39 @@ class RamsesFusionApp:
             }
         ]
 
+        # Findings this run knows how to fix. Reading it here, immediately
+        # after the call above, is what keeps it honest.
+        repairs = getattr(self, "_validation_repairs", set())
+
         if has_hard_error:
+            if repairs:
+                fields.append(
+                    {
+                        "id": "Instr",
+                        "label": "Action Required:",
+                        "type": "label",
+                        "default": (
+                            "<font color='#ff4444'><b>Critical errors found."
+                            "</b></font><br>Some of these can be fixed from "
+                            "here: <b>" + self._describe_repairs(repairs)
+                            + "</b>."
+                        ),
+                    }
+                )
+                res = self.ramses.host._request_input(
+                    "Validation Error",
+                    fields,
+                    ok_text="Fix It",
+                    cancel_text="Cancel",
+                )
+                if res is None:
+                    return False
+                # Re-validated rather than assumed: a repair that did not take
+                # must not wave the publish through.
+                return self._repair_and_revalidate(
+                    repairs, check_preview, check_final
+                )
+
             fields.append(
                 {
                     "id": "Instr",
@@ -1008,13 +1056,86 @@ class RamsesFusionApp:
                     "default": "<b>Continue anyway?</b><br><font color='#777'>Choosing 'Ignore' may lead to technical rejection.</font>",
                 }
             )
+            if repairs:
+                # A checkbox rather than a third button: the UIManager dialog
+                # has room for exactly two, and Abort has to keep its own.
+                fields.append(
+                    {
+                        "id": "Repair",
+                        "label": f"Fix {self._describe_repairs(repairs)} first:",
+                        "type": "checkbox",
+                        "default": True,
+                    }
+                )
             res = self.ramses.host._request_input(
                 "Validation Warning",
                 fields,
                 ok_text="Ignore && Proceed",
                 cancel_text="Abort && Fix",
             )
-            return res is not None
+            if res is None:
+                return False
+            if repairs and res.get("Repair"):
+                # A soft finding never blocks: if the repair does not hold,
+                # the artist still chose to proceed and we say so rather than
+                # silently cancelling under them.
+                self._repair_and_revalidate(repairs, check_preview, check_final)
+            return True
+
+    _REPAIR_LABELS = {
+        "format": "the frame range and format",
+        "anchors": "the missing render anchors",
+    }
+
+    def _describe_repairs(self, repairs) -> str:
+        """Names the repairs in the artist's terms, not the code's."""
+        labels = [
+            self._REPAIR_LABELS[key]
+            for key in sorted(repairs)
+            if key in self._REPAIR_LABELS
+        ]
+        if not labels:
+            return "these"
+        if len(labels) == 1:
+            return labels[0]
+        return " and ".join((", ".join(labels[:-1]), labels[-1]))
+
+    def _repair_and_revalidate(
+        self, repairs, check_preview: bool, check_final: bool
+    ) -> bool:
+        """Applies `repairs`, then checks again. Returns True if now clean."""
+        applied = []
+
+        if "anchors" in repairs:
+            try:
+                self._create_render_anchors()
+                applied.append("anchors")
+            except Exception as e:  # pylint: disable=broad-except
+                self.log(f"Could not create the render anchors: {e}", ram.LogLevel.Critical)
+
+        if "format" in repairs:
+            try:
+                # setupCurrentFile applies the frame range silently and asks
+                # before changing resolution or rate on a comp that already
+                # has work in it. The artist gets that second prompt, which
+                # is the one worth showing: it is the destructive half.
+                if self.ramses.host.setupCurrentFile():
+                    applied.append("format")
+            except Exception as e:  # pylint: disable=broad-except
+                self.log(f"Could not apply the project settings: {e}", ram.LogLevel.Critical)
+
+        if not applied:
+            self._set_status("Nothing could be fixed automatically.", "error")
+            return False
+
+        is_valid, _, _ = self._validate_publish(check_preview, check_final)
+        if is_valid:
+            self._set_status("✓ Fixed, and the scene now matches the database.", "ok")
+        else:
+            self._set_status(
+                "Some issues were fixed; others still need attention.", "warn"
+            )
+        return is_valid
 
     def _sync_render_anchors(self) -> None:
         """Updates the output paths of `_PREVIEW` and `_FINAL` nodes.

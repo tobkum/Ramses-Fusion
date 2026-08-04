@@ -815,6 +815,117 @@ class TestFusionHost(unittest.TestCase):
             "a preview that raised must not leave the host pinned",
         )
 
+    def test_render_parks_the_playhead_on_the_first_frame_then_restores_it(self):
+        """The playhead must be on the render start when Render() is called.
+
+        This is the one difference between a scripted render and a manual one
+        that is known rather than guessed, and the reason this exists at all.
+        The order matters more than the value: parking it AFTER the render
+        would test nothing.
+        """
+        comp = self.mock_fusion.GetCurrentComp()
+        anchor = comp.AddTool("Saver", 0, 0)
+        anchor.SetAttrs({"TOOLS_Name": "_FINAL"})
+
+        comp.GetAttrs = MagicMock(
+            return_value={
+                "COMPN_RenderStart": 1001.0,
+                "COMPN_RenderEnd": 1100.0,
+                "COMPN_GlobalStart": 1001.0,
+                "COMPN_GlobalEnd": 1100.0,
+            }
+        )
+        comp.CurrentTime = 1050.0
+
+        seen = {}
+        comp.Render = MagicMock(
+            side_effect=lambda *a, **k: seen.setdefault(
+                "time_at_render", comp.CurrentTime
+            )
+            or True
+        )
+
+        self.assertTrue(self.host._render_anchor(anchor))
+
+        self.assertEqual(
+            seen["time_at_render"], 1001.0,
+            "the playhead must be parked on the first rendered frame",
+        )
+        self.assertEqual(
+            comp.CurrentTime, 1050.0,
+            "the artist's playhead must be put back afterwards",
+        )
+
+    def test_render_survives_a_comp_without_a_settable_playhead(self):
+        """A build that will not accept CurrentTime must still render."""
+        comp = self.mock_fusion.GetCurrentComp()
+        anchor = comp.AddTool("Saver", 0, 0)
+        anchor.SetAttrs({"TOOLS_Name": "_FINAL"})
+
+        comp.GetAttrs = MagicMock(
+            return_value={
+                "COMPN_RenderStart": 1001.0,
+                "COMPN_RenderEnd": 1100.0,
+            }
+        )
+
+        class _NoPlayhead:
+            def __get__(self, obj, owner):
+                raise RuntimeError("CurrentTime unavailable")
+
+        type(comp).CurrentTime = property(
+            lambda self: (_ for _ in ()).throw(RuntimeError("unavailable"))
+        )
+        try:
+            comp.Render = MagicMock(return_value=True)
+            self.assertTrue(self.host._render_anchor(anchor))
+        finally:
+            del type(comp).CurrentTime
+
+    def test_frame_count_ignores_files_that_are_not_frames(self):
+        """The wildcard stands where digits were, so only digits may match.
+
+        The glob this replaced used `*`, which matches anything: a stray
+        SH010.preview.exr beside the sequence was counted as a rendered
+        frame, so an incomplete render could be waved through by a file that
+        was not part of it at all.
+        """
+        seq_dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, seq_dir, True)
+
+        for frame in range(1001, 1011):
+            with open(os.path.join(seq_dir, "SH010.%04d.exr" % frame), "w") as fh:
+                fh.write("x")
+
+        # Same stem, same extension, not a frame.
+        with open(os.path.join(seq_dir, "SH010.preview.exr"), "w") as fh:
+            fh.write("x")
+        # A different shot's sequence living in the same folder.
+        for frame in range(1001, 1006):
+            with open(os.path.join(seq_dir, "SH020.%04d.exr" % frame), "w") as fh:
+                fh.write("x")
+
+        path = os.path.join(seq_dir, "SH010.0000.exr")
+        self.assertEqual(self.host._count_rendered_frames(path), 10)
+
+    def test_frame_count_skips_empty_frames(self):
+        """A zero-byte frame is a frame that did not render."""
+        seq_dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, seq_dir, True)
+
+        for frame in range(1001, 1006):
+            with open(os.path.join(seq_dir, "SH010.%04d.exr" % frame), "w") as fh:
+                fh.write("x")
+        open(os.path.join(seq_dir, "SH010.1006.exr"), "w").close()  # 0 bytes
+
+        path = os.path.join(seq_dir, "SH010.0000.exr")
+        self.assertEqual(self.host._count_rendered_frames(path), 5)
+
+    def test_frame_count_on_a_missing_directory_is_zero(self):
+        self.assertEqual(
+            self.host._count_rendered_frames("Q:/gone/SH010.0000.exr"), 0
+        )
+
     def _setup_options(self):
         import ramses
         ramses.RAM_SETTINGS.userSettings = {"compStartFrame": 1001}
@@ -958,11 +1069,15 @@ class TestFusionHost(unittest.TestCase):
         self.assertFalse(artist.GetAttrs()["TOOLB_PassThrough"],
                          "the artist's Saver must be restored afterwards")
 
-    def test_render_states_its_settings_instead_of_inheriting_them(self):
-        """Render(wait) leaves quality, motion blur and range to the viewer.
+    def test_render_states_the_range_but_inherits_the_quality(self):
+        """The range is ours to state; the quality is the comp's to decide.
 
-        A master render must not come out at whatever quality the artist last
-        toggled, so the settings are passed explicitly.
+        HiQ and MotionBlur were briefly forced here, on the reasoning that a
+        master should never inherit a draft setting. That rested on an
+        unverified assumption about what omitting them inherits, and it made
+        a scripted render behave unlike a manual render of the same comp —
+        the opposite of what _render_anchor is for. Quality lives in the
+        composition's own render settings, saved with the file.
         """
         comp = self.mock_fusion.GetCurrentComp()
         comp.SetAttrs({"COMPN_RenderStart": 1001, "COMPN_RenderEnd": 1100})
@@ -976,11 +1091,46 @@ class TestFusionHost(unittest.TestCase):
         self.host._render_anchor(anchor)
 
         self.assertTrue(captured["Wait"])
-        self.assertTrue(captured["HiQ"])
-        self.assertTrue(captured["MotionBlur"])
         self.assertEqual(captured["Start"], 1001)
         self.assertEqual(captured["End"], 1100)
         self.assertEqual(captured["RenderFlags"], self.host.REQF_QUIET)
+        self.assertNotIn(
+            "HiQ", captured,
+            "quality must be left to the composition's render settings",
+        )
+        self.assertNotIn(
+            "MotionBlur", captured,
+            "motion blur must be left to the composition's render settings",
+        )
+
+    def test_render_leaves_already_idle_savers_untouched(self):
+        """A Saver already in the state we want must not be rewritten.
+
+        Every SetAttrs marks the composition modified, so a comp whose other
+        Savers are already passed through should not come back dirty from a
+        render that changed nothing about them.
+        """
+        comp = self.mock_fusion.GetCurrentComp()
+        comp.SetAttrs({"COMPN_RenderStart": 1001, "COMPN_RenderEnd": 1100})
+
+        anchor = comp.AddTool("Saver", 0, 0)
+        anchor.SetAttrs({"TOOLS_Name": "_FINAL"})
+
+        idle = comp.AddTool("Saver", 1, 0)
+        idle.SetAttrs({"TOOLS_Name": "ArtistSaver", "TOOLB_PassThrough": True})
+
+        writes = []
+        real_set_attrs = idle.SetAttrs
+        idle.SetAttrs = lambda a: (writes.append(dict(a)), real_set_attrs(a))[1]
+
+        comp.Render = MagicMock(return_value=True)
+        self.host._render_anchor(anchor)
+
+        passthrough_writes = [w for w in writes if "TOOLB_PassThrough" in w]
+        self.assertEqual(
+            passthrough_writes, [],
+            "an already-passed-through Saver must not be written to",
+        )
 
     def test_render_restores_other_savers_even_if_the_render_raises(self):
         """A failed render must not leave the artist's Savers disabled."""

@@ -482,6 +482,86 @@ class TestRamsesFusionApp(unittest.TestCase):
                     self.app.on_comment(None)
                     host.save.assert_not_called()
 
+    def test_hard_error_offers_a_repair_and_reports_the_result(self):
+        """A missing anchor is recreatable, so the dialog should offer it."""
+        self.app._validate_publish = MagicMock(
+            side_effect=[(False, "missing", True), (True, "", False)]
+        )
+        self.app._validation_repairs = {"anchors"}
+        self.app._create_render_anchors = MagicMock()
+        self.app._set_status = MagicMock()
+
+        captured = {}
+
+        def _dialog(title, fields, **kwargs):
+            captured.update(kwargs)
+            captured["fields"] = fields
+            return {}
+
+        self.app.ramses.host._request_input = MagicMock(side_effect=_dialog)
+
+        self.assertTrue(self.app._handle_validation())
+
+        self.assertEqual(captured.get("ok_text"), "Fix It")
+        self.app._create_render_anchors.assert_called_once()
+
+    def test_a_repair_that_does_not_hold_still_blocks_a_hard_error(self):
+        """Re-validated, not assumed. A failed fix must not wave it through."""
+        self.app._validate_publish = MagicMock(
+            return_value=(False, "missing", True)
+        )
+        self.app._validation_repairs = {"anchors"}
+        self.app._create_render_anchors = MagicMock()
+        self.app._set_status = MagicMock()
+        self.app.ramses.host._request_input = MagicMock(return_value={})
+
+        self.assertFalse(
+            self.app._handle_validation(),
+            "a publish must not proceed while the hard error remains",
+        )
+
+    def test_soft_warning_repair_is_opt_out_and_never_blocks(self):
+        """A soft finding is the artist's call, repaired or not."""
+        self.app._validate_publish = MagicMock(
+            return_value=(False, "mismatch", False)
+        )
+        self.app._validation_repairs = {"format"}
+        self.app.ramses.host.setupCurrentFile = MagicMock(return_value=True)
+        self.app._set_status = MagicMock()
+
+        # Declining the repair still proceeds.
+        self.app.ramses.host._request_input = MagicMock(
+            return_value={"Repair": False}
+        )
+        self.assertTrue(self.app._handle_validation())
+        self.app.ramses.host.setupCurrentFile.assert_not_called()
+
+        # Accepting it repairs, and still proceeds.
+        self.app.ramses.host._request_input = MagicMock(
+            return_value={"Repair": True}
+        )
+        self.assertTrue(self.app._handle_validation())
+        self.app.ramses.host.setupCurrentFile.assert_called_once()
+
+    def test_repairs_are_not_offered_for_findings_we_cannot_fix(self):
+        """A disconnected anchor has no automatic fix; do not pretend."""
+        self.app._validate_publish = MagicMock(
+            return_value=(False, "disconnected", True)
+        )
+        self.app._validation_repairs = set()
+        self.app._set_status = MagicMock()
+
+        captured = {}
+
+        def _dialog(title, fields, **kwargs):
+            captured.update(kwargs)
+            return None
+
+        self.app.ramses.host._request_input = MagicMock(side_effect=_dialog)
+
+        self.assertFalse(self.app._handle_validation())
+        self.assertEqual(captured.get("ok_text"), "Understood")
+
     def test_role_based_ui_state(self):
         """Verify that Step Configuration is enabled/disabled based on role and users count."""
         mock_items = {
