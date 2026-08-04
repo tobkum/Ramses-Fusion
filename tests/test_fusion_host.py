@@ -1025,11 +1025,15 @@ class TestFusionHost(unittest.TestCase):
         self.assertFalse(artist.GetAttrs()["TOOLB_PassThrough"],
                          "the artist's Saver must be restored afterwards")
 
-    def test_render_states_its_settings_instead_of_inheriting_them(self):
-        """Render(wait) leaves quality, motion blur and range to the viewer.
+    def test_render_states_the_range_but_inherits_the_quality(self):
+        """The range is ours to state; the quality is the comp's to decide.
 
-        A master render must not come out at whatever quality the artist last
-        toggled, so the settings are passed explicitly.
+        HiQ and MotionBlur were briefly forced here, on the reasoning that a
+        master should never inherit a draft setting. That rested on an
+        unverified assumption about what omitting them inherits, and it made
+        a scripted render behave unlike a manual render of the same comp —
+        the opposite of what _render_anchor is for. Quality lives in the
+        composition's own render settings, saved with the file.
         """
         comp = self.mock_fusion.GetCurrentComp()
         comp.SetAttrs({"COMPN_RenderStart": 1001, "COMPN_RenderEnd": 1100})
@@ -1043,11 +1047,46 @@ class TestFusionHost(unittest.TestCase):
         self.host._render_anchor(anchor)
 
         self.assertTrue(captured["Wait"])
-        self.assertTrue(captured["HiQ"])
-        self.assertTrue(captured["MotionBlur"])
         self.assertEqual(captured["Start"], 1001)
         self.assertEqual(captured["End"], 1100)
         self.assertEqual(captured["RenderFlags"], self.host.REQF_QUIET)
+        self.assertNotIn(
+            "HiQ", captured,
+            "quality must be left to the composition's render settings",
+        )
+        self.assertNotIn(
+            "MotionBlur", captured,
+            "motion blur must be left to the composition's render settings",
+        )
+
+    def test_render_leaves_already_idle_savers_untouched(self):
+        """A Saver already in the state we want must not be rewritten.
+
+        Every SetAttrs marks the composition modified, so a comp whose other
+        Savers are already passed through should not come back dirty from a
+        render that changed nothing about them.
+        """
+        comp = self.mock_fusion.GetCurrentComp()
+        comp.SetAttrs({"COMPN_RenderStart": 1001, "COMPN_RenderEnd": 1100})
+
+        anchor = comp.AddTool("Saver", 0, 0)
+        anchor.SetAttrs({"TOOLS_Name": "_FINAL"})
+
+        idle = comp.AddTool("Saver", 1, 0)
+        idle.SetAttrs({"TOOLS_Name": "ArtistSaver", "TOOLB_PassThrough": True})
+
+        writes = []
+        real_set_attrs = idle.SetAttrs
+        idle.SetAttrs = lambda a: (writes.append(dict(a)), real_set_attrs(a))[1]
+
+        comp.Render = MagicMock(return_value=True)
+        self.host._render_anchor(anchor)
+
+        passthrough_writes = [w for w in writes if "TOOLB_PassThrough" in w]
+        self.assertEqual(
+            passthrough_writes, [],
+            "an already-passed-through Saver must not be written to",
+        )
 
     def test_render_restores_other_savers_even_if_the_render_raises(self):
         """A failed render must not leave the artist's Savers disabled."""

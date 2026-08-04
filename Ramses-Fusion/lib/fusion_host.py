@@ -2655,12 +2655,18 @@ class FusionHost(RamHost):
         try:
             for saver in savers:
                 try:
-                    original[saver.Name] = saver.GetAttrs()[passthrough]
+                    current = saver.GetAttrs()[passthrough]
                 except Exception:  # pylint: disable=broad-except
                     continue
+                original[saver.Name] = current
                 # PassThrough is the inverse of enabled: everything but our
-                # anchor gets passed through.
-                saver.SetAttrs({passthrough: saver.Name != node.Name})
+                # anchor gets passed through. Written only when it differs —
+                # every SetAttrs marks the composition modified, and a comp
+                # full of already-idle Savers should not come back dirty from
+                # a render that changed nothing about it.
+                wanted = saver.Name != node.Name
+                if wanted != current:
+                    saver.SetAttrs({passthrough: wanted})
 
             # Arm the anchor even if it was not in the list above (a Saver the
             # comp did not report is still the node we were handed).
@@ -2674,10 +2680,17 @@ class FusionHost(RamHost):
                 "Wait": True,
                 "Start": range_start,
                 "End": range_end,
-                # A master render is never a draft: state the quality rather
-                # than inheriting the viewer's.
-                "HiQ": True,
-                "MotionBlur": True,
+                # Quality and motion blur are deliberately NOT stated here.
+                #
+                # They were, briefly: the reasoning was that a master render
+                # should never inherit a draft setting. That rested on an
+                # assumption — that omitting them inherits the viewer's
+                # interactive toggles — which the Fusion documentation does
+                # not support either way, and it made a scripted render
+                # behave unlike the manual render of the same comp, which is
+                # the opposite of what this method exists for. Quality
+                # belongs to the composition's own render settings, where the
+                # artist sets it and where it is saved with the file.
                 # No dialogs; this runs unattended from a button.
                 "RenderFlags": self.REQF_QUIET,
             }
@@ -2706,8 +2719,14 @@ class FusionHost(RamHost):
             # it. Restoring it too would fight that and leave the outcome
             # depending on which finally ran last.
             for saver in savers:
-                if saver.Name != node.Name and saver.Name in original:
-                    saver.SetAttrs({passthrough: original[saver.Name]})
+                if saver.Name == node.Name or saver.Name not in original:
+                    continue
+                try:
+                    if saver.GetAttrs()[passthrough] == original[saver.Name]:
+                        continue
+                except Exception:  # pylint: disable=broad-except
+                    pass
+                saver.SetAttrs({passthrough: original[saver.Name]})
 
     # Fusion reports an UNSET render range as this sentinel, not as None and
     # not as the global range. Read at face value it becomes a render of a
