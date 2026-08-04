@@ -815,6 +815,73 @@ class TestFusionHost(unittest.TestCase):
             "a preview that raised must not leave the host pinned",
         )
 
+    def test_render_parks_the_playhead_on_the_first_frame_then_restores_it(self):
+        """The playhead must be on the render start when Render() is called.
+
+        This is the one difference between a scripted render and a manual one
+        that is known rather than guessed, and the reason this exists at all.
+        The order matters more than the value: parking it AFTER the render
+        would test nothing.
+        """
+        comp = self.mock_fusion.GetCurrentComp()
+        anchor = comp.AddTool("Saver", 0, 0)
+        anchor.SetAttrs({"TOOLS_Name": "_FINAL"})
+
+        comp.GetAttrs = MagicMock(
+            return_value={
+                "COMPN_RenderStart": 1001.0,
+                "COMPN_RenderEnd": 1100.0,
+                "COMPN_GlobalStart": 1001.0,
+                "COMPN_GlobalEnd": 1100.0,
+            }
+        )
+        comp.CurrentTime = 1050.0
+
+        seen = {}
+        comp.Render = MagicMock(
+            side_effect=lambda *a, **k: seen.setdefault(
+                "time_at_render", comp.CurrentTime
+            )
+            or True
+        )
+
+        self.assertTrue(self.host._render_anchor(anchor))
+
+        self.assertEqual(
+            seen["time_at_render"], 1001.0,
+            "the playhead must be parked on the first rendered frame",
+        )
+        self.assertEqual(
+            comp.CurrentTime, 1050.0,
+            "the artist's playhead must be put back afterwards",
+        )
+
+    def test_render_survives_a_comp_without_a_settable_playhead(self):
+        """A build that will not accept CurrentTime must still render."""
+        comp = self.mock_fusion.GetCurrentComp()
+        anchor = comp.AddTool("Saver", 0, 0)
+        anchor.SetAttrs({"TOOLS_Name": "_FINAL"})
+
+        comp.GetAttrs = MagicMock(
+            return_value={
+                "COMPN_RenderStart": 1001.0,
+                "COMPN_RenderEnd": 1100.0,
+            }
+        )
+
+        class _NoPlayhead:
+            def __get__(self, obj, owner):
+                raise RuntimeError("CurrentTime unavailable")
+
+        type(comp).CurrentTime = property(
+            lambda self: (_ for _ in ()).throw(RuntimeError("unavailable"))
+        )
+        try:
+            comp.Render = MagicMock(return_value=True)
+            self.assertTrue(self.host._render_anchor(anchor))
+        finally:
+            del type(comp).CurrentTime
+
     def _setup_options(self):
         import ramses
         ramses.RAM_SETTINGS.userSettings = {"compStartFrame": 1001}

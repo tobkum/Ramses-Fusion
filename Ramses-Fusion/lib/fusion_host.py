@@ -280,6 +280,53 @@ def evaluate_on_attribute(attribute, frame, expressions):
 
 
 @contextlib.contextmanager
+def playhead_at(comp, frame):
+    """Parks the composition's playhead on `frame`, then puts it back.
+
+    SPECULATIVE — this exists to test one hypothesis, and should be removed
+    rather than left as folklore if it does not pay off.
+
+    Intermittent "cannot get Parameter for <input> at time N" failures have
+    been seen on plugin-triggered final renders, never on a manual render of
+    the same composition and never on a preview. The one difference between
+    those paths that is known rather than guessed is the playhead: Fusion's
+    render dialog moves it through the range, and a scripted comp.Render()
+    leaves it wherever the artist parked it. Fusion resolves some connected
+    parameters only once the tool has been evaluated at a frame, so a render
+    beginning with the playhead somewhere else can ask for a value that was
+    never computed. Moving it to the first frame first makes the scripted
+    render resemble the manual one in that one respect.
+
+    Every step is individually guarded and a missing CurrentTime is simply
+    skipped, so the worst case is the behaviour that existed before.
+    """
+    if frame is None:
+        yield
+        return
+
+    try:
+        previous = comp.CurrentTime
+    except Exception:  # pylint: disable=broad-except
+        previous = None
+
+    try:
+        try:
+            comp.CurrentTime = frame
+        except Exception:  # pylint: disable=broad-except
+            pass
+        yield
+    finally:
+        # Put the artist's playhead back. A manual render leaves it at the
+        # end of the range; there is no reason a background one should move
+        # it at all.
+        if previous is not None:
+            try:
+                comp.CurrentTime = previous
+            except Exception:  # pylint: disable=broad-except
+                pass
+
+
+@contextlib.contextmanager
 def maintained_comp_range(comp):
     """Restores the comp's frame ranges after the block.
 
@@ -2652,7 +2699,7 @@ class FusionHost(RamHost):
             # it used. Today the values come from the comp's own range, making
             # the guard a no-op — it is here so this cannot quietly become a
             # scene edit the day either path renders a range of its own.
-            with maintained_comp_range(comp):
+            with maintained_comp_range(comp), playhead_at(comp, range_start):
                 return bool(comp.Render(render_kwargs))
         finally:
             # The anchor is deliberately not restored here; the caller disarms
