@@ -882,6 +882,50 @@ class TestFusionHost(unittest.TestCase):
         finally:
             del type(comp).CurrentTime
 
+    def test_frame_count_ignores_files_that_are_not_frames(self):
+        """The wildcard stands where digits were, so only digits may match.
+
+        The glob this replaced used `*`, which matches anything: a stray
+        SH010.preview.exr beside the sequence was counted as a rendered
+        frame, so an incomplete render could be waved through by a file that
+        was not part of it at all.
+        """
+        seq_dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, seq_dir, True)
+
+        for frame in range(1001, 1011):
+            with open(os.path.join(seq_dir, "SH010.%04d.exr" % frame), "w") as fh:
+                fh.write("x")
+
+        # Same stem, same extension, not a frame.
+        with open(os.path.join(seq_dir, "SH010.preview.exr"), "w") as fh:
+            fh.write("x")
+        # A different shot's sequence living in the same folder.
+        for frame in range(1001, 1006):
+            with open(os.path.join(seq_dir, "SH020.%04d.exr" % frame), "w") as fh:
+                fh.write("x")
+
+        path = os.path.join(seq_dir, "SH010.0000.exr")
+        self.assertEqual(self.host._count_rendered_frames(path), 10)
+
+    def test_frame_count_skips_empty_frames(self):
+        """A zero-byte frame is a frame that did not render."""
+        seq_dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, seq_dir, True)
+
+        for frame in range(1001, 1006):
+            with open(os.path.join(seq_dir, "SH010.%04d.exr" % frame), "w") as fh:
+                fh.write("x")
+        open(os.path.join(seq_dir, "SH010.1006.exr"), "w").close()  # 0 bytes
+
+        path = os.path.join(seq_dir, "SH010.0000.exr")
+        self.assertEqual(self.host._count_rendered_frames(path), 5)
+
+    def test_frame_count_on_a_missing_directory_is_zero(self):
+        self.assertEqual(
+            self.host._count_rendered_frames("Q:/gone/SH010.0000.exr"), 0
+        )
+
     def _setup_options(self):
         import ramses
         ramses.RAM_SETTINGS.userSettings = {"compStartFrame": 1001}
