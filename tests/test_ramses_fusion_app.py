@@ -1334,5 +1334,150 @@ class TestPanelLayout(unittest.TestCase):
             self.assertTrue(spec.get("h_tip"), f"{bid}: missing h_tip")
 
 
+class TestStartWorkPromotion(unittest.TestCase):
+    """Saving the first comp into a step starts work there.
+
+    Without this a shot saved into for the first time stayed on TODO while a
+    comp sat in its folder.
+    """
+
+    WIP_UUID = "u-wip"
+
+    def setUp(self):
+        self.mock_fusion = MockFusion()
+        ram_fusion_mod.fusion = self.mock_fusion
+        ram_fusion_mod.fu = self.mock_fusion
+        ram_fusion_mod.bmd = sys.modules["bmd"]
+        import fusion_host
+        fusion_host.bmd = sys.modules["bmd"]
+
+        self.app = RamsesFusionApp()
+        self.app.ramses._offline = False
+        self.app.dlg = MagicMock()
+
+        self.wip = MagicMock()
+        self.wip.uuid.return_value = self.WIP_UUID
+        self.wip.shortName.return_value = "WIP"
+        self.app.ramses.state = MagicMock(return_value=self.wip)
+
+    def _status(self, state_short_name, completion, assignee=""):
+        state = MagicMock()
+        state.shortName.return_value = state_short_name
+        state.completionRatio.return_value = completion
+
+        status = MagicMock()
+        status.state.return_value = state
+        status.get.side_effect = lambda key, default="": (
+            assignee if key == "assignedUser" else default
+        )
+        return status
+
+    def _with_status(self, status):
+        return patch.object(
+            self.app.ramses.host, "currentStatus", return_value=status
+        )
+
+    # --- when to promote -----------------------------------------------------
+
+    def test_todo_is_promoted(self):
+        with self._with_status(self._status("TODO", 0)):
+            self.assertIs(self.app._wip_state_if_unstarted(), self.wip)
+
+    def test_status_without_a_state_is_promoted(self):
+        """The row the daemon auto-creates has no state yet."""
+        with self._with_status(self._status("", 50)):
+            self.assertIs(self.app._wip_state_if_unstarted(), self.wip)
+
+    def test_work_in_progress_is_left_alone(self):
+        with self._with_status(self._status("WIP", 50)):
+            self.assertIsNone(self.app._wip_state_if_unstarted())
+
+    def test_finished_is_never_knocked_back(self):
+        with self._with_status(self._status("OK", 100)):
+            self.assertIsNone(self.app._wip_state_if_unstarted())
+
+    def test_nothing_to_do_here_is_left_alone(self):
+        """NO means the step is deliberately excluded, ratio 0 or not."""
+        with self._with_status(self._status("NO", 0)):
+            self.assertIsNone(self.app._wip_state_if_unstarted())
+
+    def test_no_status_row_promotes_nothing(self):
+        with self._with_status(None):
+            self.assertIsNone(self.app._wip_state_if_unstarted())
+
+    def test_project_without_a_wip_state_promotes_nothing(self):
+        """A virtual state has no uuid; writing it would clear the status."""
+        virtual = MagicMock()
+        virtual.uuid.return_value = ""
+        self.app.ramses.state = MagicMock(return_value=virtual)
+        with self._with_status(self._status("TODO", 0)):
+            self.assertIsNone(self.app._wip_state_if_unstarted())
+
+    # --- what the promotion writes -------------------------------------------
+
+    def test_claim_sets_state_and_takes_an_unassigned_item(self):
+        status = self._status("TODO", 0, assignee="")
+        me = MagicMock()
+        me.uuid.return_value = "u-me"
+        self.app.ramses.user = MagicMock(return_value=me)
+
+        with self._with_status(status):
+            self.app._claim_as_wip(self.wip)
+
+        status.setState.assert_called_once_with(self.wip)
+        status.set.assert_called_once_with("assignedUser", "u-me")
+
+    def test_claim_never_overrides_an_existing_assignee(self):
+        status = self._status("TODO", 0, assignee="u-someone-else")
+        me = MagicMock()
+        me.uuid.return_value = "u-me"
+        self.app.ramses.user = MagicMock(return_value=me)
+
+        with self._with_status(status):
+            self.app._claim_as_wip(self.wip)
+
+        status.setState.assert_called_once_with(self.wip)
+        status.set.assert_not_called()
+
+    # --- wired into Save As --------------------------------------------------
+
+    def test_save_as_promotes_a_todo_shot(self):
+        status = self._status("TODO", 0)
+        self.app.ramses.user = MagicMock(return_value=None)
+        self.app.refresh_header = MagicMock()
+        self.app._emit_action_status = MagicMock()
+
+        with patch.object(self.app.ramses.host, "saveAs", return_value=True), \
+             patch.object(self.app.ramses.host, "currentVersion", return_value=1), \
+             self._with_status(status):
+            self.app.on_save_as(None)
+
+        status.setState.assert_called_once_with(self.wip)
+        self.assertIn("(WIP)", self.app._emit_action_status.call_args[0][0])
+
+    def test_save_as_into_a_started_shot_leaves_the_status_alone(self):
+        status = self._status("WIP", 50)
+        self.app.refresh_header = MagicMock()
+        self.app._emit_action_status = MagicMock()
+
+        with patch.object(self.app.ramses.host, "saveAs", return_value=True), \
+             patch.object(self.app.ramses.host, "currentVersion", return_value=3), \
+             self._with_status(status):
+            self.app.on_save_as(None)
+
+        status.setState.assert_not_called()
+        self.assertNotIn("(WIP)", self.app._emit_action_status.call_args[0][0])
+
+    def test_a_cancelled_save_as_promotes_nothing(self):
+        status = self._status("TODO", 0)
+        self.app._set_status = MagicMock()
+
+        with patch.object(self.app.ramses.host, "saveAs", return_value=False), \
+             self._with_status(status):
+            self.app.on_save_as(None)
+
+        status.setState.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()
