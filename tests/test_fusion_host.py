@@ -2808,5 +2808,158 @@ class TestDeliverySidecarSuppression(unittest.TestCase):
 
 
 
+class TestSaveAsUIManagerFallback(unittest.TestCase):
+    """Save As must work on a Fusion without PySide.
+
+    RamHost._saveAsUI() is an abstract stub that raises, so before the
+    UIManager picker existed the Save As button could not run at all there -
+    it threw NotImplementedError before touching disk, and Fusion swallowed
+    the traceback into the console.
+    """
+
+    def setUp(self):
+        import fusion_host
+        self.fusion_host = fusion_host
+        self.mock_fusion = MockFusion()
+        fusion_host.bmd = MagicMock()
+        self.host = FusionHost(self.mock_fusion)
+        self.host.app = MagicMock()
+
+    # --- the fallback is reached at all --------------------------------------
+
+    def test_no_pyside_uses_the_uimanager_picker(self):
+        expected = {"item": "I", "step": "S", "extension": "comp", "resource": ""}
+        with patch.object(self.fusion_host, "qw", None), \
+             patch.object(self.host, "_saveAsUIManager", return_value=expected):
+            self.assertEqual(self.host._saveAsUI(), expected)
+
+    def test_broken_pyside_dialog_import_uses_the_uimanager_picker(self):
+        """An ImportError used to be swallowed and resurface as the stub."""
+        expected = {"item": "I", "step": "S", "extension": "comp", "resource": ""}
+        real_import = __import__
+
+        def fail_on_dialog(name, *args, **kwargs):
+            if name.startswith("ramses_ui_pyside"):
+                raise ImportError("no PySide here")
+            return real_import(name, *args, **kwargs)
+
+        with patch.object(self.fusion_host, "qw", MagicMock()), \
+             patch("builtins.__import__", side_effect=fail_on_dialog), \
+             patch.object(self.host, "_saveAsUIManager", return_value=expected), \
+             patch.object(self.host, "log") as log:
+            self.assertEqual(self.host._saveAsUI(), expected)
+            self.assertEqual(self.host._saveAsUI(), expected)
+
+        # Reported once, not once per click: the cause cannot change mid-session.
+        warnings = [c for c in log.call_args_list if "PySide" in str(c)]
+        self.assertEqual(len(warnings), 1, warnings)
+
+    # --- the picker itself ---------------------------------------------------
+
+    def _step(self, short_name, name, uuid):
+        step = MagicMock()
+        step.shortName.return_value = short_name
+        step.name.return_value = name
+        step.uuid.return_value = uuid
+        step.folderPath.return_value = f"D:/proj/steps/{short_name}"
+        return step
+
+    def _shot(self, short_name, uuid):
+        shot = MagicMock()
+        shot.shortName.return_value = short_name
+        shot.name.return_value = short_name
+        shot.uuid.return_value = uuid
+        shot.get.return_value = ""
+        shot.itemType.return_value = "S"
+        return shot
+
+    def _project(self):
+        project = MagicMock()
+        project.name.return_value = "Test Project"
+        project.shortName.return_value = "TEST"
+        project.sequences.return_value = []
+        self.shots = [self._shot("SH010", "u-sh010"), self._shot("SH020", "u-sh020")]
+        project.shots.return_value = self.shots
+        project.assets.return_value = []
+        self.comp_step = self._step("COMP", "Compositing", "u-comp")
+        project.steps.return_value = [self.comp_step]
+        return project
+
+    def _run_picker(self, click, item_index=0, resource=""):
+        """Drives the picker: `click` is 'ok' or 'cancel'."""
+        widgets = {}
+
+        class Widget:
+            def __init__(self):
+                self.Text = ""
+                self.CurrentIndex = -1
+                self.Enabled = True
+                self.entries = []
+
+            def Clear(self):
+                self.entries = []
+                self.CurrentIndex = -1
+
+            def AddItem(self, label):
+                self.entries.append(label)
+
+        def get_items():
+            return widgets
+
+        for wid in ("TypeCombo", "StepCombo", "ItemCombo", "ResourceEdit",
+                    "FileNameLabel", "HintLabel"):
+            widgets[wid] = Widget()
+
+        dlg = MagicMock()
+        dlg.GetItems.side_effect = get_items
+
+        disp = MagicMock()
+        disp.AddWindow.return_value = dlg
+
+        def run_loop():
+            # Stand in for the artist: choose an item, type a resource, click.
+            widgets["ItemCombo"].CurrentIndex = item_index
+            widgets["ResourceEdit"].Text = resource
+            if click == "ok":
+                dlg.On.OkBtn.Clicked(None)
+            else:
+                dlg.On.CancelBtn.Clicked(None)
+
+        disp.RunLoop.side_effect = run_loop
+        self.fusion_host.bmd.UIDispatcher.return_value = disp
+
+        with patch.object(self.fusion_host.RAMSES, "project", return_value=self._project()), \
+             patch.object(self.host, "isFusionStep", return_value=True), \
+             patch.object(self.host, "currentItem", return_value=None), \
+             patch.object(self.host, "currentStep", return_value=None):
+            result = self.host._saveAsUIManager()
+        return result, widgets
+
+    def test_picker_returns_the_selection(self):
+        result, widgets = self._run_picker("ok", item_index=1, resource="bg")
+
+        self.assertIsNotNone(result)
+        self.assertIs(result["item"], self.shots[1])
+        self.assertIs(result["step"], self.comp_step)
+        self.assertEqual(result["extension"], "comp")
+        self.assertEqual(result["resource"], "bg")
+        # Both dependent lists were populated from the type, not left empty.
+        self.assertEqual(widgets["StepCombo"].entries, ["Compositing"])
+        self.assertEqual(widgets["ItemCombo"].entries, ["SH010", "SH020"])
+
+    def test_cancel_returns_none(self):
+        result, _ = self._run_picker("cancel")
+        self.assertIsNone(result)
+
+    def test_picker_previews_the_file_name(self):
+        _, widgets = self._run_picker("ok", item_index=0, resource="")
+        self.assertEqual(widgets["FileNameLabel"].Text, "TEST_S_SH010_COMP.comp")
+
+    def test_no_project_does_not_open_a_picker(self):
+        with patch.object(self.fusion_host.RAMSES, "project", return_value=None):
+            self.assertIsNone(self.host._saveAsUIManager())
+        self.fusion_host.bmd.UIDispatcher.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()

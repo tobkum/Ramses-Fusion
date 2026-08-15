@@ -2461,13 +2461,68 @@ class RamsesFusionApp:
         """Launches the external Ramses Client application."""
         self.ramses.showClient()
 
+    def _wip_state_if_unstarted(self):
+        """The project's WIP state, when the current item-step has not started.
+
+        Returns None when there is nothing to promote: no status row in the
+        database, the step is marked NO (nothing to do here), or work already
+        progressed past zero - saving into an item must never knock a
+        finished one back to WIP. A status with no state at all counts as
+        unstarted; that is the freshly-created row the daemon hands out.
+        """
+        status = self.ramses.host.currentStatus()
+        if not status:
+            return None
+
+        state = status.state()
+        short_name = state.shortName() if state else ""
+        if short_name == "NO":
+            return None
+        if short_name and state.completionRatio() > 0:
+            return None
+
+        wip = self.ramses.state("WIP")
+        # state() invents a virtual state when the project has none by that
+        # name; writing its empty uuid would clear the status instead.
+        if not wip or not wip.uuid():
+            return None
+        return wip
+
+    def _claim_as_wip(self, wip_state) -> None:
+        """Marks the current item-step WIP in the database and claims it."""
+        status = self.ramses.host.currentStatus()
+        if not status:
+            return
+
+        status.setState(wip_state)
+
+        # Claim the item for whoever started it, but only if it is still up
+        # for grabs. Never override a lead's deliberate assignment.
+        # "assignedUser" is the same JSON key Ramses-Client writes when
+        # assigning a user (RamTask::KEY_AssignedUser); RamStatus shares that
+        # object, so a generic set() is all it takes.
+        current_assignee = (status.get("assignedUser", "") or "").lower()
+        if current_assignee in ("", "none", "unassigned"):
+            me = self.ramses.user()
+            if me and me.uuid():
+                status.set("assignedUser", me.uuid())
+
     @requires_connection
     def on_save_as(self, ev: object) -> None:
         """Handler for 'Save As / Create' button."""
         if self.ramses.host.saveAs():
+            # The first comp saved into a step is the moment work starts
+            # there, so a shot saved into for the first time must not stay on
+            # TODO - the same promotion the Switch Shot wizard does when it
+            # creates a comp.
+            wip_state = self._wip_state_if_unstarted()
+            if wip_state:
+                self._claim_as_wip(wip_state)
+
             self.refresh_header(force_full=True)
             self._emit_action_status(
-                f"✓ Saved as v{self.ramses.host.currentVersion()} · {time.strftime('%H:%M')}",
+                f"✓ Saved as v{self.ramses.host.currentVersion()}"
+                f"{' (WIP)' if wip_state else ''} · {time.strftime('%H:%M')}",
                 self.ramses.host.currentStatus(),
             )
         else:
@@ -2743,31 +2798,21 @@ class RamsesFusionApp:
 
                     if host.comp.Save(selected_path):
                         host._store_ramses_metadata(shot, selected_step)
-                        wip_state = self.ramses.state("WIP")
                         # host.save(state=...) only tags the local backup filename;
                         # it doesn't touch the project's status table (see
                         # RamHost.__save's newStateShortName). Set the actual
                         # database status explicitly, same as updateStatus() does,
                         # so a freshly-created Empty shot doesn't stay stuck on
                         # whatever default state the daemon auto-created for it.
+                        wip_state = self._wip_state_if_unstarted()
                         host.save(comment="Initial creation", setupFile=True, state=wip_state)
-                        status = host.currentStatus()
-                        if status:
-                            status.setState(wip_state)
-                            # Claim the shot for whoever started it, but only if
-                            # it is still up for grabs. Never override a lead's
-                            # deliberate assignment. "assignedUser" is the same
-                            # JSON key Ramses-Client writes when assigning a user
-                            # (RamTask::KEY_AssignedUser); RamStatus shares that
-                            # object, so a generic set() is all it takes.
-                            current_assignee = (status.get("assignedUser", "") or "").lower()
-                            if current_assignee in ("", "none", "unassigned"):
-                                me = self.ramses.user()
-                                if me and me.uuid():
-                                    status.set("assignedUser", me.uuid())
+                        if wip_state:
+                            self._claim_as_wip(wip_state)
                         self.refresh_header(force_full=True)
                         self._set_status(
-                            f"✓ Created {shot.shortName()} (WIP).", "ok"
+                            f"✓ Created {shot.shortName()}"
+                            f"{' (WIP)' if wip_state else ''}.",
+                            "ok",
                         )
                 else:
                     if host.open(selected_path):
