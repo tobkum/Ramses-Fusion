@@ -17,6 +17,7 @@ from ramses import (
     RamMetaDataManager,
     RamState,
     RamDaemonInterface,
+    StepType,
 )
 
 try:
@@ -656,6 +657,10 @@ class FusionHost(RamHost):
         LogLevel.Critical: "ERROR",
         LogLevel.Debug: "DEBUG",
     }
+
+    # Set once the missing PySide Save As dialog has been reported; the cause
+    # cannot change within a session.
+    __pysideSaveAsWarned = False
 
     def __init__(self, fusion_obj: object) -> None:
         super().__init__()
@@ -3845,11 +3850,358 @@ class FusionHost(RamHost):
                         "resource": dialog.resource(),
                     }
                 return None
-            except ImportError:
-                pass
+            except ImportError as import_error:
+                # Swallowing this silently turned a broken dialog import into
+                # the SDK stub's NotImplementedError, and the button looked
+                # inert. Say what happened - once: the cause cannot change
+                # within a session, so repeating it on every click is noise.
+                if not self.__pysideSaveAsWarned:
+                    self.__pysideSaveAsWarned = True
+                    self.log(
+                        "PySide Save As dialog unavailable "
+                        f"({import_error}); using the UIManager picker.",
+                        LogLevel.Warning,
+                    )
 
-        # Fallback to standard API behavior if PySide not available
-        return super()._saveAsUI()
+        # RamHost._saveAsUI() is an abstract stub that raises, so without this
+        # Save As is the one action that cannot run on a Fusion without PySide.
+        return self._saveAsUIManager()
+
+    def _saveAsUIManager(self) -> dict:
+        """Save As picker built with Fusion's own UIManager.
+
+        Returns the same dict as _saveAsUI - {"item", "step", "extension",
+        "resource"} - or None if the artist cancels.
+
+        Item type, step and item are three dependent combo boxes: changing the
+        type repopulates the other two, so the step list only ever offers steps
+        that can hold the chosen type.
+        """
+        if bmd is None:
+            self.log(
+                "Fusion 'bmd' handle not injected into fusion_host - launch "
+                "through Ramses-Fusion.py.",
+                LogLevel.Critical,
+            )
+            return None
+
+        project = RAMSES.project()
+        if not project:
+            self.log(
+                "No current project: log in to Ramses before saving as.",
+                LogLevel.Critical,
+            )
+            return None
+
+        ui = self.fusion.UIManager
+        disp = bmd.UIDispatcher(ui)
+
+        # Fetched once, up front. Nothing here touches the filesystem: on a
+        # Drive-synced project, resolving a path per item turns opening the
+        # picker into minutes (the Switch Shot wizard learned this the hard
+        # way). Paths are resolved for the chosen item only, on OK.
+        seq_names = {}
+        try:
+            seq_names = {
+                str(s.uuid()): s.shortName() for s in project.sequences()
+            }
+        except Exception as e:
+            self.log(f"Could not list sequences: {e}", LogLevel.Debug)
+
+        items_by_type = {
+            ItemType.SHOT: project.shots(),
+            ItemType.ASSET: project.assets(),
+            ItemType.GENERAL: [],
+        }
+        steps_by_type = {
+            ItemType.SHOT: project.steps(StepType.SHOT_PRODUCTION),
+            ItemType.ASSET: project.steps(StepType.ASSET_PRODUCTION),
+            ItemType.GENERAL: project.steps(StepType.ALL),
+        }
+
+        types = (ItemType.SHOT, ItemType.ASSET, ItemType.GENERAL)
+        type_labels = {
+            ItemType.SHOT: "Shot",
+            ItemType.ASSET: "Asset",
+            ItemType.GENERAL: "General (step folder)",
+        }
+
+        def item_label(item, item_type):
+            if item_type == ItemType.SHOT:
+                seq = seq_names.get(
+                    str(RamItem.getUuid(item.get("sequence"))), ""
+                )
+                if seq:
+                    return f"{seq} / {item.shortName()}"
+            name = item.name()
+            if name and name != item.shortName():
+                return f"{item.shortName()} - {name}"
+            return item.shortName()
+
+        # Start on the current comp's own item/step where there is one: saving
+        # a variant of what is open is the common case.
+        # A comp with no pipeline identity is exactly when this picker opens,
+        # so neither lookup is allowed to abort it.
+        try:
+            current_item = self.currentItem()
+            current_step = self.currentStep()
+        except Exception as e:
+            self.log(f"No context to preselect: {e}", LogLevel.Debug)
+            current_item = current_step = None
+
+        start_type = ItemType.SHOT
+        if current_item and current_item.itemType() in types:
+            start_type = current_item.itemType()
+
+        # Live selection, read by the OK handler.
+        sel = {
+            "type": start_type,
+            "steps": [],
+            "items": [],
+        }
+
+        win_id = f"RamsesSaveAs_{int(os.getpid())}"
+        dlg = disp.AddWindow(
+            {
+                "WindowTitle": "Ramses: Save As / Create",
+                "ID": win_id,
+                "Geometry": [400, 400, 520, 260],
+            },
+            ui.VGroup([
+                ui.VGap(10),
+                ui.VGroup({"Spacing": 5}, [
+                    ui.HGroup([
+                        ui.Label({"Text": "Project:", "Weight": 0.25}),
+                        ui.Label({
+                            "Text": project.name(),
+                            "Weight": 0.75,
+                            "StyleSheet": "font-weight: bold; font-size: 14px;",
+                        }),
+                    ]),
+                    ui.HGroup([
+                        ui.Label({"Text": "Type:", "Weight": 0.25}),
+                        ui.ComboBox({"ID": "TypeCombo", "Weight": 0.75}),
+                    ]),
+                    ui.HGroup([
+                        ui.Label({"Text": "Step:", "Weight": 0.25}),
+                        ui.ComboBox({"ID": "StepCombo", "Weight": 0.75}),
+                    ]),
+                    ui.HGroup([
+                        ui.Label({"Text": "Item:", "Weight": 0.25}),
+                        ui.ComboBox({"ID": "ItemCombo", "Weight": 0.75}),
+                    ]),
+                    ui.HGroup([
+                        ui.Label({"Text": "Resource:", "Weight": 0.25}),
+                        ui.LineEdit({
+                            "ID": "ResourceEdit",
+                            "Text": "",
+                            "Weight": 0.75,
+                            "PlaceholderText": "optional, e.g. bg or fx",
+                        }),
+                    ]),
+                    ui.HGroup([
+                        ui.Label({"Text": "File name:", "Weight": 0.25}),
+                        ui.Label({
+                            "ID": "FileNameLabel",
+                            "Text": "",
+                            "Weight": 0.75,
+                            "StyleSheet": "QLabel { color: #9fb3c8; }",
+                        }),
+                    ]),
+                    ui.Label({
+                        "ID": "HintLabel",
+                        "Text": "",
+                        "Weight": 0,
+                        "StyleSheet": "QLabel { color: #e0b23d; font-size: 11px; }",
+                    }),
+                ]),
+                ui.VGap(10),
+                ui.HGroup({"Weight": 0}, [
+                    ui.HGap(0, 1),
+                    ui.Button({
+                        "ID": "OkBtn", "Text": "Save", "Weight": 0,
+                        "MinimumSize": [120, 30], "Default": True,
+                    }),
+                    ui.Button({
+                        "ID": "CancelBtn", "Text": "Cancel", "Weight": 0,
+                        "MinimumSize": [120, 30],
+                    }),
+                ]),
+                ui.VGap(5),
+            ]),
+        )
+
+        itm = dlg.GetItems()
+
+        def selected_step():
+            idx = int(itm["StepCombo"].CurrentIndex)
+            if 0 <= idx < len(sel["steps"]):
+                return sel["steps"][idx]
+            return None
+
+        def selected_item():
+            if sel["type"] == ItemType.GENERAL:
+                return None
+            idx = int(itm["ItemCombo"].CurrentIndex)
+            if 0 <= idx < len(sel["items"]):
+                return sel["items"][idx]
+            return None
+
+        def update_file_name(ev=None):
+            step = selected_step()
+            item = selected_item()
+            resource = itm["ResourceEdit"].Text
+
+            if not step:
+                itm["FileNameLabel"].Text = ""
+                itm["HintLabel"].Text = "This project has no step of that type."
+                return
+            if sel["type"] != ItemType.GENERAL and not item:
+                itm["FileNameLabel"].Text = ""
+                itm["HintLabel"].Text = (
+                    "No %s in this project yet."
+                    % type_labels[sel["type"]].lower()
+                )
+                return
+
+            nm = RamFileInfo()
+            nm.project = project.shortName()
+            nm.ramType = sel["type"]
+            nm.shortName = item.shortName() if item else ""
+            nm.step = step.shortName()
+            nm.extension = "comp"
+            nm.resource = resource
+            itm["FileNameLabel"].Text = nm.fileName()
+
+            # A GENERAL file drops the item short name from its name, so two
+            # of them in one step collide unless the resource tells them apart.
+            if sel["type"] == ItemType.GENERAL and not resource:
+                itm["HintLabel"].Text = (
+                    "General files are named after the step alone - set a "
+                    "resource to keep them apart."
+                )
+            else:
+                itm["HintLabel"].Text = ""
+
+        def update_items(ev=None):
+            itm["ItemCombo"].Clear()
+            sel["items"] = items_by_type.get(sel["type"], [])
+            for item in sel["items"]:
+                itm["ItemCombo"].AddItem(item_label(item, sel["type"]))
+            if sel["items"]:
+                itm["ItemCombo"].CurrentIndex = 0
+                if current_item:
+                    for i, item in enumerate(sel["items"]):
+                        if str(item.uuid()) == str(current_item.uuid()):
+                            itm["ItemCombo"].CurrentIndex = i
+                            break
+            itm["ItemCombo"].Enabled = sel["type"] != ItemType.GENERAL
+            update_file_name()
+
+        def update_steps(ev=None):
+            itm["StepCombo"].Clear()
+            steps = steps_by_type.get(sel["type"], [])
+            # Prefer the steps Fusion is actually registered for, but never
+            # empty the list doing it - the OK handler indexes into whatever
+            # list populated the combo, so both must stay the same list.
+            fusion_steps = [s for s in steps if self.isFusionStep(s)]
+            sel["steps"] = fusion_steps or steps
+            for step in sel["steps"]:
+                itm["StepCombo"].AddItem(step.name())
+            if sel["steps"]:
+                itm["StepCombo"].CurrentIndex = 0
+                target = current_step
+                if not target:
+                    target = self.findStepByShortName(
+                        project, "Comp", "Compositing"
+                    )
+                if target:
+                    for i, step in enumerate(sel["steps"]):
+                        if str(step.uuid()) == str(target.uuid()):
+                            itm["StepCombo"].CurrentIndex = i
+                            break
+            update_items()
+
+        def on_type_changed(ev=None):
+            idx = int(itm["TypeCombo"].CurrentIndex)
+            sel["type"] = types[idx] if 0 <= idx < len(types) else ItemType.SHOT
+            update_steps()
+
+        confirmed = [False]
+
+        def on_ok(ev):
+            step = selected_step()
+            if not step:
+                itm["HintLabel"].Text = "Pick a step before saving."
+                return
+            if sel["type"] != ItemType.GENERAL and not selected_item():
+                itm["HintLabel"].Text = "Pick an item before saving."
+                return
+            confirmed[0] = True
+            disp.ExitLoop()
+
+        def on_cancel(ev):
+            disp.ExitLoop()
+
+        dlg.On.TypeCombo.CurrentIndexChanged = on_type_changed
+        dlg.On.StepCombo.CurrentIndexChanged = lambda ev: update_file_name()
+        dlg.On.ItemCombo.CurrentIndexChanged = lambda ev: update_file_name()
+        try:
+            dlg.On.ResourceEdit.TextChanged = lambda ev: update_file_name()
+        except Exception as e:
+            # The name preview is a convenience; losing it must not cost the
+            # artist the picker.
+            self.log(f"Resource preview not wired: {e}", LogLevel.Debug)
+        dlg.On.OkBtn.Clicked = on_ok
+        dlg.On.CancelBtn.Clicked = on_cancel
+        dlg.On[win_id].Close = on_cancel
+
+        for item_type in types:
+            itm["TypeCombo"].AddItem(type_labels[item_type])
+        itm["TypeCombo"].CurrentIndex = types.index(sel["type"])
+        # Setting CurrentIndex before the combo is shown does not always emit
+        # CurrentIndexChanged, so populate the dependent lists explicitly.
+        update_steps()
+
+        main_win = getattr(getattr(self, "app", None), "dlg", None)
+        if main_win:
+            main_win.Enabled = False
+
+        try:
+            dlg.Show()
+            disp.RunLoop()
+            if not confirmed[0]:
+                return None
+            step = selected_step()
+            item = selected_item()
+            if sel["type"] == ItemType.GENERAL:
+                # Mirrors the PySide dialog: a virtual item standing in for the
+                # step itself. It also carries the folder, which the SDK reads
+                # off the item (RamHost.saveAs) rather than off the step.
+                item = RamItem(data={
+                    "name": step.name(),
+                    "folderPath": step.folderPath(),
+                })
+            return {
+                "item": item,
+                "step": step,
+                "extension": "comp",
+                "resource": itm["ResourceEdit"].Text,
+            }
+        finally:
+            dlg.Hide()
+            try:
+                dlg.On.TypeCombo.CurrentIndexChanged = None
+                dlg.On.StepCombo.CurrentIndexChanged = None
+                dlg.On.ItemCombo.CurrentIndexChanged = None
+                dlg.On.ResourceEdit.TextChanged = None
+                dlg.On.OkBtn.Clicked = None
+                dlg.On.CancelBtn.Clicked = None
+                dlg.On[win_id].Close = None
+            except Exception:
+                pass
+            if main_win:
+                main_win.Enabled = True
 
     def _statusUI(self, currentStatus: RamStatus = None) -> dict:
         """Shows the dialog to update status, note, and publish settings."""
