@@ -1269,14 +1269,20 @@ class RamHost(object):
             "aspectRatio":project.aspectRatio()
         }
 
-        if item and item.itemType == ItemType.SHOT:
-            settings['duration'] = item.duration()
-            sequence = item.group()
-            if sequence:
-                settings['width'] = sequence.width()
-                settings['height'] = sequence.height()
-                settings['pixelAspectRatio'] = sequence.pixelAspectRatio()
-                settings['aspectRatio'] = sequence.aspectRatio()
+        if item is None or item.itemType() != ItemType.SHOT:
+            return settings
+
+        settings['duration'] = item.duration()
+
+        sequence = item.sequence()
+        if sequence is None:
+            return settings
+
+        settings['width'] = sequence.width()
+        settings['height'] = sequence.height()
+        settings['framerate'] = sequence.framerate()
+        settings['pixelAspectRatio'] = sequence.pixelAspectRatio()
+        settings['aspectRatio'] = sequence.aspectRatio()
 
         return settings
 

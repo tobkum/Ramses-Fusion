@@ -17,7 +17,7 @@
 #
 #======================= END GPL LICENSE BLOCK ========================
 
-from ramses.ram_sequence import RamSequence
+from .ram_sequence import RamSequence
 from .ram_item import RamItem
 from .daemon_interface import RamDaemonInterface
 from .constants import ItemType

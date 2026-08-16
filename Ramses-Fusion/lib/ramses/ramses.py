@@ -230,7 +230,7 @@ class Ramses( object ):
         Returns:
             list of RamState
         """
-        from ramses.ram_state import RamState
+        from .ram_state import RamState
         states = DAEMON.getObjects( "RamState" )
         # Order before returning
         states.sort( key=RamState.stateSorter )
