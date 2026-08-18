@@ -591,6 +591,16 @@ class RamsesFusionApp:
         except Exception:
             pass
 
+        # 3. Restored copy warning.
+        # Without this the header is identical whether the artist is in the
+        # working file or in the copy restoreVersion() opened beside it, and
+        # the two behave differently on save: the copy jumps the version.
+        restored_version = -1
+        try:
+            restored_version = self.ramses.host.currentRestoredVersion()
+        except Exception:
+            pass
+
         # Slim horizontal bar: one compact line so the readout matches the
         # button-row height (the vertical 3-line block towers over it). The
         # sequence prefix is dropped here - the shot number already identifies
@@ -602,6 +612,10 @@ class RamsesFusionApp:
                 f"<font color='#FFF'><b>{item_name}</b>{priority_suffix}</font>{dot}"
                 f"<font>{step_name}{state_label}</font>"
             )
+            if restored_version > 0:
+                compact += (
+                    f"{dot}<font color='#cc9900'><b>RESTORED v{restored_version}</b></font>"
+                )
             if self._outdated_count > 0:
                 compact += (
                     f"{dot}<font color='#ff8800'><b>⚠️ {self._outdated_count}</b></font>"
@@ -614,6 +628,12 @@ class RamsesFusionApp:
             f"{seq_prefix}<font color='#FFF' size='5'><b>{item_name}</b>{priority_suffix}</font><br>"
             f"<font size='3'>{step_name}{state_label}</font>"
         )
+
+        if restored_version > 0:
+            html += (
+                f"<br><font color='#cc9900' size='3'><b>RESTORED v{restored_version}</b>"
+                f"</font><font color='#777' size='3'> — not the current file yet</font>"
+            )
 
         if self._outdated_count > 0:
             html += f"<br><font color='#ff8800' size='3'><b>⚠️ {self._outdated_count} Inputs Outdated</b></font>"
@@ -3626,9 +3646,18 @@ class RamsesFusionApp:
     def on_retrieve(self, ev: object) -> None:
         """Handler for 'Version History / Restore'."""
         if self.ramses.host.restoreVersion():
-            self.refresh_header()
+            # The current file changed, so the cached item/step and the
+            # restored marker in the header are both stale: this is one of the
+            # few places that has to bypass the refresh debounce.
+            self.refresh_header(force_full=True)
+            restored = self.ramses.host.currentRestoredVersion()
+            label = f"v{restored}" if restored > 0 else "an earlier version"
+            # Deliberately not "you are now at vN": the working file still
+            # holds the newer work until the artist saves, and saying
+            # otherwise invites them to think the newer versions are gone.
             self._set_status(
-                f"✓ Restored — now at v{self.ramses.host.currentVersion()}.", "ok"
+                f"✓ Opened {label} as a copy — save to make it the current version.",
+                "ok",
             )
         else:
             # restoreVersion() returns False both when the artist closes the

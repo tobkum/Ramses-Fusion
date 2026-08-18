@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import contextlib
+import filecmp
 import os
 import re
 import threading
@@ -741,6 +742,43 @@ class FusionHost(RamHost):
         path = self.comp.GetAttrs().get("COMPS_FileName", "")
         return self.normalizePath(path)
 
+    def currentRestoredVersion(self) -> int:
+        """The version this comp was restored from, or -1 when it is not a restored copy.
+
+        restoreVersion() does not overwrite the working file: it copies the
+        chosen version up beside it as ``<name>_+restored-vN+.comp`` and opens
+        that. While the artist sits in that copy, the version they are looking
+        at is N, and it is readable from nothing but the file name.
+
+        Returns:
+            int: The restored version, or -1.
+        """
+        path = self.currentFilePath()
+        if not path:
+            return -1
+        nm = RamFileInfo()
+        nm.setFilePath(path)
+        if not nm.isRestoredVersion:
+            return -1
+        return nm.restoredVersion
+
+    def currentVersion(self) -> int:
+        """The version of the current file.
+
+        Overridden for restored copies. The base implementation answers by
+        looking up the highest version in _versions/ *for the current file
+        name*, and a restored copy's name matches nothing in there, so it
+        reported -1 - which reached the artist as "now at v-1" after a restore
+        and would have been written to the database by updateStatus().
+
+        Returns:
+            int: The version number.
+        """
+        restored = self.currentRestoredVersion()
+        if restored > 0:
+            return restored
+        return super(FusionHost, self).currentVersion()
+
     def _isDirty(self) -> bool:
         """Checks if the current composition has unsaved changes.
 
@@ -1475,11 +1513,27 @@ class FusionHost(RamHost):
         Returns:
             bool: True if file exists and opened, False otherwise.
         """
-        if os.path.exists(filePath):
-            # Normalize path for Fusion
-            self.fusion.LoadComp(self.normalizePath(filePath))
-            return True
-        return False
+        if not os.path.exists(filePath):
+            return False
+
+        # Whatever restoreVersion() left us in is being left behind now.
+        # Cleaning up only on save would still leak one copy per restore that
+        # the artist looked at and then moved on from - and that includes
+        # restoring twice in a row, where the first copy is abandoned here.
+        # Deliberately after the load, so a failed open keeps the file, and
+        # gated on content, so Fusion's own save-before-open prompt (which
+        # writes into the copy) makes it ineligible.
+        abandoned = self.currentFilePath()
+
+        # Normalize path for Fusion
+        normalized = self.normalizePath(filePath)
+        self.fusion.LoadComp(normalized)
+
+        if abandoned and os.path.normcase(abandoned) != os.path.normcase(normalized):
+            self._discardIfRedundantRestoredCopy(
+                abandoned, "it was left behind unchanged"
+            )
+        return True
 
     def _setFileName(self, fileName: str) -> bool:
         """Sets the internal file name of the composition without saving to disk.
@@ -1586,6 +1640,11 @@ class FusionHost(RamHost):
         Returns:
             bool: True on success, False on failure.
         """
+        # Captured before the save, because saving a restored copy moves the
+        # comp back onto the real working file and the marker is gone from
+        # currentFilePath() by the time we could clean up after it.
+        restoredCopy = self.currentFilePath()
+
         if setupFile:
             self.setupCurrentFile()
 
@@ -1609,12 +1668,156 @@ class FusionHost(RamHost):
             state_short = state.shortName() if state else None
             if not hasattr(self, "_RamHost__save"):
                 self.log("RamHost.__save not found — API version mismatch; falling back to super().save()", LogLevel.Critical)
-                return super(FusionHost, self).save(incremental=incremental, comment=comment, setupFile=False)
-            return self._RamHost__save(saveFilePath, incremental, comment, state_short)
+                saved = super(FusionHost, self).save(incremental=incremental, comment=comment, setupFile=False)
+            else:
+                saved = self._RamHost__save(saveFilePath, incremental, comment, state_short)
+        else:
+            saved = super(FusionHost, self).save(
+                incremental=incremental, comment=comment, setupFile=False
+            )
 
-        return super(FusionHost, self).save(
-            incremental=incremental, comment=comment, setupFile=False
+        if saved:
+            self._discardRestoredCopy(restoredCopy)
+
+        return saved
+
+    def _discardRestoredCopy(self, restoredCopy: str) -> None:
+        """Removes the ``+restored-vN+`` copy once its content is back in the working file.
+
+        restoreVersion() leaves that copy in the working folder and nothing
+        else ever deletes it. It is not in _versions, so no version listing
+        hides it, and it is not the working file, so nobody opens it again: it
+        just accumulates, one per restore, next to the file the artist works in.
+
+        Two guards, both of which must hold:
+        - the save landed on exactly the copy's own save path, which rules out
+          a Save As that moved the work to another item;
+        - the copy is still byte-identical to the version it came from, so
+          what is deleted demonstrably still exists in _versions.
+
+        Failing to delete is never allowed to fail the save - the artist's work
+        is already on disk by this point, and a leftover file is not worth
+        reporting one as failed.
+
+        Args:
+            restoredCopy (str): The comp's file path from before the save.
+        """
+        if not restoredCopy:
+            return
+        try:
+            savePath = RamFileManager.getSaveFilePath(restoredCopy)
+            if not savePath:
+                return
+            if os.path.normcase(self.normalizePath(savePath)) != os.path.normcase(
+                self.currentFilePath()
+            ):
+                return
+        except Exception as e:  # pylint: disable=broad-except
+            self.log("Could not check the restored copy: " + str(e), LogLevel.Debug)
+            return
+
+        self._discardIfRedundantRestoredCopy(
+            restoredCopy, "its content is now version " + str(self.currentVersion())
         )
+
+    def _discardIfRedundantRestoredCopy(self, restoredCopy: str, because: str) -> None:
+        """Deletes a ``+restored-vN+`` copy, but only while it is still a duplicate.
+
+        The single criterion is content: the file must be byte-identical to the
+        version file it was restored from. That is stronger than checking the
+        version still exists, and it is what makes this safe on the abandon
+        path - Fusion's own "save before opening?" prompt writes the artist's
+        work straight into the copy, and once that happens the copy is the only
+        place that work exists.
+
+        Args:
+            restoredCopy (str): The path to consider deleting.
+            because (str): Reason fragment for the log line.
+        """
+        try:
+            source = self._restoredCopySource(restoredCopy)
+            if not source:
+                return
+            os.remove(restoredCopy)
+            self._forgetFileMetaData(restoredCopy)
+            self.log(
+                "Removed the restored copy " + os.path.basename(restoredCopy)
+                + "; " + because + ".",
+                LogLevel.Debug,
+            )
+        except Exception as e:  # pylint: disable=broad-except
+            # Broad on purpose: by the time this runs the save (or the open)
+            # has already succeeded, so anything raised here would report
+            # completed work as failed. A leftover file is the lesser evil.
+            self.log(
+                "Could not remove the restored copy "
+                + os.path.basename(restoredCopy) + ": " + str(e),
+                LogLevel.Warning,
+            )
+
+    def _restoredCopySource(self, path: str) -> str:
+        """The version file a restored copy still duplicates, or "" if it does not.
+
+        Args:
+            path (str): The candidate restored copy.
+
+        Returns:
+            str: The matching file in _versions, or "" when this must be kept -
+                 not a restored copy, its version is gone, or its content has
+                 diverged from that version.
+        """
+        if not path or not os.path.isfile(path):
+            return ""
+
+        nm = RamFileInfo()
+        nm.setFilePath(path)
+        if not nm.isRestoredVersion or nm.restoredVersion <= 0:
+            return ""
+
+        savePath = RamFileManager.getSaveFilePath(path)
+        if not savePath:
+            return ""
+
+        for versionFile in RamFileManager.getVersionFilePaths(savePath):
+            info = RamFileInfo()
+            info.setFilePath(versionFile)
+            if info.version != nm.restoredVersion:
+                continue
+            # shallow=False: compare the bytes, not the stat signature. The
+            # copy and its source have different mtimes by construction.
+            if filecmp.cmp(path, versionFile, shallow=False):
+                return versionFile
+            self.log(
+                os.path.basename(path) + " has been edited since it was "
+                "restored, so it is no longer a copy of version "
+                + str(nm.restoredVersion) + ". Keeping it.",
+                LogLevel.Warning,
+            )
+            return ""
+
+        self.log(
+            "Keeping " + os.path.basename(path) + ": version "
+            + str(nm.restoredVersion) + " is no longer in the versions folder, "
+            "so this copy is the only one left.",
+            LogLevel.Warning,
+        )
+        return ""
+
+    def _forgetFileMetaData(self, filePath: str) -> None:
+        """Drops a deleted file's entry from its folder's metadata sidecar.
+
+        Without this the sidecar keeps growing an entry per restore, each one
+        naming a file that no longer exists.
+        """
+        try:
+            folder = os.path.dirname(filePath)
+            data = RamMetaDataManager.getMetaData(folder)
+            if data.pop(os.path.basename(filePath), None) is None:
+                return
+            RamMetaDataManager.setMetaData(folder, data)
+        except Exception as e:  # pylint: disable=broad-except
+            # Cosmetic bookkeeping; never worth surfacing over a successful save.
+            self.log("Could not clean the metadata entry: " + str(e), LogLevel.Debug)
 
     # -------------------------------------------------------------------------
     # UI Implementation helpers using UIManager
